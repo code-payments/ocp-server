@@ -1,0 +1,166 @@
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"time"
+
+	"github.com/jmoiron/sqlx"
+
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
+	"github.com/code-payments/ocp-server/pkg/code/data/account"
+)
+
+type store struct {
+	db *sqlx.DB
+}
+
+func New(db *sql.DB) account.Store {
+	return &store{
+		db: sqlx.NewDb(db, "pgx"),
+	}
+}
+
+// Put implements account.Store.Put
+func (s *store) Put(ctx context.Context, record *account.Record) error {
+	model, err := toModel(record)
+	if err != nil {
+		return err
+	}
+
+	err = model.dbInsert(ctx, s.db)
+	if err != nil {
+		return err
+	}
+
+	updated := fromModel(model)
+	updated.CopyTo(record)
+
+	return nil
+}
+
+// Update implements account.Store.Update
+func (s *store) Update(ctx context.Context, record *account.Record) error {
+	model, err := toModel(record)
+	if err != nil {
+		return err
+	}
+
+	err = model.dbUpdate(ctx, s.db)
+	if err != nil {
+		return err
+	}
+
+	updated := fromModel(model)
+	updated.CopyTo(record)
+
+	return nil
+}
+
+// GetByTokenAddress implements account.Store.GetByTokenAddress
+func (s *store) GetByTokenAddress(ctx context.Context, address string) (*account.Record, error) {
+	model, err := dbGetByTokenAddress(ctx, s.db, address)
+	if err != nil {
+		return nil, err
+	}
+	return fromModel(model), nil
+}
+
+// GetByTokenAddressBatch implements timelock.Store.GetByTokenAddressBatch
+func (s *store) GetByTokenAddressBatch(ctx context.Context, addresses ...string) (map[string]*account.Record, error) {
+	models, err := dbGetByTokenAddressBatch(ctx, s.db, addresses...)
+	if err != nil {
+		return nil, err
+	}
+
+	recorsdByAddress := make(map[string]*account.Record, len(models))
+	for _, model := range models {
+		recorsdByAddress[model.TokenAccount] = fromModel(model)
+	}
+	return recorsdByAddress, nil
+}
+
+// GetByAuthorityAddress implements account.Store.GetByAuthorityAddress
+func (s *store) GetByAuthorityAddress(ctx context.Context, address string) (map[string]*account.Record, error) {
+	models, err := dbGetByAuthorityAddress(ctx, s.db, address)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*account.Record)
+	for _, model := range models {
+		res[model.MintAccount] = fromModel(model)
+	}
+	return res, nil
+}
+
+// GetLatestByOwnerAddress implements account.Store.GetLatestByOwnerAddress
+func (s *store) GetLatestByOwnerAddress(ctx context.Context, address string) (map[string]map[commonpb.AccountType][]*account.Record, error) {
+	models, err := dbGetLatestByOwnerAddress(ctx, s.db, address)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]map[commonpb.AccountType][]*account.Record)
+	for _, model := range models {
+		if _, ok := res[model.MintAccount]; !ok {
+			res[model.MintAccount] = make(map[commonpb.AccountType][]*account.Record)
+		}
+		record := fromModel(model)
+		res[record.MintAccount][record.AccountType] = append(res[record.MintAccount][record.AccountType], record)
+	}
+	return res, nil
+}
+
+// GetLatestByOwnerAddressAndType implements account.Store.GetLatestByOwnerAddressAndType
+func (s *store) GetLatestByOwnerAddressAndType(ctx context.Context, address string, accountType commonpb.AccountType) (map[string]*account.Record, error) {
+	models, err := dbGetLatestByOwnerAddressAndType(ctx, s.db, address, accountType)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*account.Record)
+	for _, model := range models {
+		res[model.MintAccount] = fromModel(model)
+	}
+	return res, nil
+}
+
+// GetPrioritizedRequiringDepositSync implements account.Store.GetPrioritizedRequiringDepositSync
+func (s *store) GetPrioritizedRequiringDepositSync(ctx context.Context, limit uint64) ([]*account.Record, error) {
+	models, err := dbGetPrioritizedRequiringDepositSync(ctx, s.db, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]*account.Record, len(models))
+	for i, model := range models {
+		res[i] = fromModel(model)
+	}
+	return res, nil
+}
+
+// CountRequiringDepositSync implements account.Store.CountRequiringDepositSync
+func (s *store) CountRequiringDepositSync(ctx context.Context) (uint64, error) {
+	return dbCountRequiringDepositSync(ctx, s.db)
+}
+
+// GetPrioritizedRequiringAutoReturnCheck implements account.Store.GetPrioritizedRequiringAutoReturnCheck
+func (s *store) GetPrioritizedRequiringAutoReturnCheck(ctx context.Context, minAge time.Duration, limit uint64) ([]*account.Record, error) {
+	models, err := dbGetPrioritizedRequiringAutoReturnChecks(ctx, s.db, minAge, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]*account.Record, len(models))
+	for i, model := range models {
+		res[i] = fromModel(model)
+	}
+	return res, nil
+}
+
+// CountRequiringAutoReturnCheck implements account.Store.CountRequiringAutoReturnCheck
+func (s *store) CountRequiringAutoReturnCheck(ctx context.Context) (uint64, error) {
+	return dbCountRequiringAutoReturnCheck(ctx, s.db)
+}

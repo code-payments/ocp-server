@@ -1,0 +1,126 @@
+package postgres
+
+import (
+	"database/sql"
+	"os"
+	"testing"
+
+	"github.com/ory/dockertest/v3"
+	"github.com/sirupsen/logrus"
+
+	"github.com/code-payments/ocp-server/pkg/code/data/timelock"
+	"github.com/code-payments/ocp-server/pkg/code/data/timelock/tests"
+
+	postgrestest "github.com/code-payments/ocp-server/pkg/database/postgres/test"
+
+	_ "github.com/jackc/pgx/v4/stdlib"
+)
+
+const (
+	// Used for testing ONLY, the table and migrations are external to this repository
+	tableCreate = `
+		CREATE TABLE ocp__core_timelock(
+			id SERIAL NOT NULL PRIMARY KEY,
+
+			address TEXT NOT NULL,
+			bump INTEGER NOT NULL,
+
+			vault_address TEXT NOT NULL,
+			vault_bump INTEGER NOT NULL,
+			vault_owner TEXT NOT NULL,
+			vault_state INTEGER NOT NULL,
+
+			deposit_pda_address TEXT NOT NULL,
+			deposit_pda_bump INTEGER NOT NULL,
+
+			swap_pda_address TEXT NOT NULL,
+			swap_pda_bump INTEGER NOT NULL,
+
+			unlock_at INTEGER,
+
+			block INTEGER NOT NULL,
+
+			last_updated_at TIMESTAMP WITH TIME ZONE,
+
+			CONSTRAINT ocp__core_timelock__uniq__address UNIQUE (address),
+			CONSTRAINT ocp__core_timelock__uniq__vault_address UNIQUE (vault_address),
+			CONSTRAINT ocp__core_timelock__uniq__deposit_pda_address UNIQUE (deposit_pda_address),
+			CONSTRAINT ocp__core_timelock__uniq__swap_pda_address UNIQUE (swap_pda_address)
+		);
+	`
+
+	// Used for testing ONLY, the table and migrations are external to this repository
+	tableDestroy = `
+		DROP TABLE ocp__core_timelock;
+	`
+)
+
+var (
+	testStore timelock.Store
+	teardown  func()
+)
+
+func TestMain(m *testing.M) {
+	log := logrus.StandardLogger()
+
+	testPool, err := dockertest.NewPool("")
+	if err != nil {
+		log.WithError(err).Error("Error creating docker pool")
+		os.Exit(1)
+	}
+
+	var cleanUpFunc func()
+	db, cleanUpFunc, err := postgrestest.StartPostgresDB(testPool)
+	if err != nil {
+		log.WithError(err).Error("Error starting postgres image")
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := createTestTables(db); err != nil {
+		logrus.StandardLogger().WithError(err).Error("Error creating test tables")
+		cleanUpFunc()
+		os.Exit(1)
+	}
+
+	testStore = New(db)
+	teardown = func() {
+		if pc := recover(); pc != nil {
+			cleanUpFunc()
+			panic(pc)
+		}
+
+		if err := resetTestTables(db); err != nil {
+			logrus.StandardLogger().WithError(err).Error("Error resetting test tables")
+			cleanUpFunc()
+			os.Exit(1)
+		}
+	}
+
+	code := m.Run()
+	cleanUpFunc()
+	os.Exit(code)
+}
+
+func TestTimelockPostgresStore(t *testing.T) {
+	tests.RunTests(t, testStore, teardown)
+}
+
+func createTestTables(db *sql.DB) error {
+	_, err := db.Exec(tableCreate)
+	if err != nil {
+		logrus.StandardLogger().WithError(err).Error("could not create test tables")
+		return err
+	}
+	return nil
+}
+
+func resetTestTables(db *sql.DB) error {
+	_, err := db.Exec(tableDestroy)
+	if err != nil {
+		logrus.StandardLogger().WithError(err).Error("could not drop test tables")
+		return err
+	}
+
+	return createTestTables(db)
+}
