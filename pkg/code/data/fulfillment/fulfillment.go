@@ -17,17 +17,7 @@ const (
 	InitializeLockedTimelockAccount
 	NoPrivacyTransferWithAuthority
 	NoPrivacyWithdraw
-	TemporaryPrivacyTransferWithAuthority // Deprecated privacy flow
-	PermanentPrivacyTransferWithAuthority // Deprecated privacy flow
-	TransferWithCommitment                // Deprecated privacy flow
-	CloseEmptyTimelockAccount             // Technically a compression with the new VM flows
-	CloseDormantTimelockAccount           // Deprecated by the VM
-	SaveRecentRoot                        // Deprecated privacy flow
-	InitializeCommitmentProof             // Deprecated with new VM flows
-	UploadCommitmentProof                 // Deprecated with new VM flows
-	VerifyCommitmentProof                 // Deprecated with new VM flows
-	OpenCommitmentVault                   // Deprecated with new VM flows
-	CloseCommitment                       // Deprecated privacy flow
+	CloseEmptyTimelockAccount
 )
 
 type State uint8
@@ -35,9 +25,9 @@ type State uint8
 const (
 	StateUnknown   State = iota // not scheduled
 	StatePending                // submitted to the solana network
-	StateRevoked                // tx not submitted and revoked
 	StateConfirmed              // tx confirmed
 	StateFailed                 // tx failed
+	StateRevoked                // tx not submitted and revoked
 )
 
 type Record struct {
@@ -285,28 +275,8 @@ func (s Type) String() string {
 		return "no_privacy_transfer_with_authority"
 	case NoPrivacyWithdraw:
 		return "no_privacy_withdraw"
-	case TemporaryPrivacyTransferWithAuthority:
-		return "temporary_privacy_transfer_with_authority"
-	case PermanentPrivacyTransferWithAuthority:
-		return "permanent_privacy_transfer_with_authority"
-	case TransferWithCommitment:
-		return "transfer_with_commitment"
 	case CloseEmptyTimelockAccount:
 		return "close_empty_timelock_account"
-	case CloseDormantTimelockAccount:
-		return "close_dormant_timelock_account"
-	case SaveRecentRoot:
-		return "save_recent_root"
-	case InitializeCommitmentProof:
-		return "initialize_commitment_proof"
-	case UploadCommitmentProof:
-		return "upload_commitment_proof"
-	case VerifyCommitmentProof:
-		return "verify_commitment_proof"
-	case OpenCommitmentVault:
-		return "open_commitment_vault"
-	case CloseCommitment:
-		return "close_commitment"
 	}
 
 	return "unknown"

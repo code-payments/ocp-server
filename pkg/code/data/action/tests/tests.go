@@ -231,8 +231,8 @@ func testGetAllByIntent(t *testing.T, s action.Store) {
 
 		records := []*action.Record{
 			{Intent: "i1", IntentType: intent.OpenAccounts, ActionId: 0, ActionType: action.OpenAccount, Source: "source1", State: action.StatePending},
-			{Intent: "i1", IntentType: intent.OpenAccounts, ActionId: 1, ActionType: action.CloseDormantAccount, Source: "source1", State: action.StatePending},
-			{Intent: "i2", IntentType: intent.OpenAccounts, ActionId: 0, ActionType: action.CloseDormantAccount, Source: "source2", State: action.StateConfirmed},
+			{Intent: "i1", IntentType: intent.OpenAccounts, ActionId: 1, ActionType: action.CloseEmptyAccount, Source: "source1", State: action.StatePending},
+			{Intent: "i2", IntentType: intent.OpenAccounts, ActionId: 0, ActionType: action.CloseEmptyAccount, Source: "source2", State: action.StateConfirmed},
 		}
 
 		require.NoError(t, s.PutAll(ctx, records...))
@@ -261,8 +261,8 @@ func testGetAllByAddress(t *testing.T, s action.Store) {
 
 		records := []*action.Record{
 			{Intent: "i1", IntentType: intent.OpenAccounts, ActionId: 0, ActionType: action.OpenAccount, Source: "source", State: action.StateConfirmed},
-			{Intent: "i1", IntentType: intent.SendPrivatePayment, ActionId: 1, ActionType: action.PrivateTransfer, Source: "source", Destination: pointer.String("destination"), State: action.StatePending},
-			{Intent: "i2", IntentType: intent.OpenAccounts, ActionId: 0, ActionType: action.CloseDormantAccount, Source: "destination", State: action.StateConfirmed},
+			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 1, ActionType: action.NoPrivacyTransfer, Source: "source", Destination: pointer.String("destination"), State: action.StatePending},
+			{Intent: "i2", IntentType: intent.OpenAccounts, ActionId: 0, ActionType: action.CloseEmptyAccount, Source: "destination", State: action.StateConfirmed},
 		}
 
 		require.NoError(t, s.PutAll(ctx, records...))
@@ -293,7 +293,7 @@ func testGetNetBalance(t *testing.T, s action.Store) {
 		for i, actionType := range []action.Type{
 			action.NoPrivacyTransfer,
 			action.NoPrivacyWithdraw,
-			action.PrivateTransfer,
+			action.NoPrivacyTransfer,
 		} {
 			source := fmt.Sprintf("source%d", i)
 			destination := fmt.Sprintf("destination%d", i)
@@ -309,7 +309,7 @@ func testGetNetBalance(t *testing.T, s action.Store) {
 				quantity := uint64(math.Pow10(j))
 				paymentAction := &action.Record{
 					Intent:     fmt.Sprintf("i%d%d", i, j),
-					IntentType: intent.SendPrivatePayment,
+					IntentType: intent.SendPublicPayment,
 
 					ActionId:   uint32(2 * j),
 					ActionType: actionType,
@@ -323,7 +323,7 @@ func testGetNetBalance(t *testing.T, s action.Store) {
 
 				closeAccountAction := &action.Record{
 					Intent:     fmt.Sprintf("i%d%d", i, j),
-					IntentType: intent.SendPrivatePayment,
+					IntentType: intent.SendPublicPayment,
 
 					ActionId:   uint32(2*j + 1),
 					ActionType: action.CloseEmptyAccount,
@@ -370,11 +370,11 @@ func testGetGiftCardClaimedAction(t *testing.T, s action.Store) {
 
 		records := []*action.Record{
 			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 0, ActionType: action.OpenAccount, Source: "a1", State: action.StateConfirmed},
-			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 1, ActionType: action.PrivateTransfer, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
+			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 1, ActionType: action.NoPrivacyTransfer, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
 			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 2, ActionType: action.NoPrivacyTransfer, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
 			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 3, ActionType: action.CloseEmptyAccount, Source: "a1", State: action.StateConfirmed},
 			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 4, ActionType: action.NoPrivacyWithdraw, Source: "a1", Destination: pointer.String("destination"), State: action.StatePending},
-			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 5, ActionType: action.CloseDormantAccount, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
+			{Intent: "i1", IntentType: intent.ReceivePaymentsPublicly, ActionId: 5, ActionType: action.CloseEmptyAccount, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
 
 			{Intent: "i2", IntentType: intent.ReceivePaymentsPublicly, ActionId: 1, ActionType: action.NoPrivacyWithdraw, Source: "a2", Destination: pointer.String("destination"), State: action.StateRevoked},
 			{Intent: "i2", IntentType: intent.ReceivePaymentsPublicly, ActionId: 2, ActionType: action.NoPrivacyWithdraw, Source: "other", Destination: pointer.String("a2"), State: action.StatePending},
@@ -408,10 +408,10 @@ func testGetGiftCardAutoReturnAction(t *testing.T, s action.Store) {
 
 		records := []*action.Record{
 			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 0, ActionType: action.OpenAccount, Source: "a1", State: action.StateConfirmed},
-			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 1, ActionType: action.PrivateTransfer, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
+			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 1, ActionType: action.NoPrivacyTransfer, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
 			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 2, ActionType: action.NoPrivacyTransfer, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
 			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 3, ActionType: action.CloseEmptyAccount, Source: "a1", State: action.StateConfirmed},
-			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 4, ActionType: action.CloseDormantAccount, Source: "a1", Destination: pointer.String("destination"), State: action.StatePending},
+			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 4, ActionType: action.CloseEmptyAccount, Source: "a1", Destination: pointer.String("destination"), State: action.StatePending},
 			{Intent: "i1", IntentType: intent.SendPublicPayment, ActionId: 5, ActionType: action.NoPrivacyWithdraw, Source: "a1", Destination: pointer.String("destination"), State: action.StateConfirmed},
 
 			{Intent: "i2", IntentType: intent.SendPublicPayment, ActionId: 1, ActionType: action.NoPrivacyWithdraw, Source: "a2", Destination: pointer.String("destination"), State: action.StateRevoked},

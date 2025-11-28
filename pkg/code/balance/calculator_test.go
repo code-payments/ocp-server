@@ -399,7 +399,7 @@ func setupBalanceTestData(t *testing.T, env balanceTestEnv, data *balanceTestDat
 		if len(txn.intentID) > 0 {
 			intentRecord := &intent.Record{
 				IntentId:              txn.intentID,
-				IntentType:            intent.SendPrivatePayment,
+				IntentType:            intent.SendPublicPayment,
 				MintAccount:           data.vmConfig.Mint.PublicKey().ToBase58(),
 				InitiatorOwnerAccount: "owner",
 				SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{
@@ -419,10 +419,10 @@ func setupBalanceTestData(t *testing.T, env balanceTestEnv, data *balanceTestDat
 
 			actionRecord := &action.Record{
 				Intent:     txn.intentID,
-				IntentType: intent.SendPrivatePayment,
+				IntentType: intent.SendPublicPayment,
 
 				ActionId:   0,
-				ActionType: action.PrivateTransfer,
+				ActionType: action.NoPrivacyTransfer,
 
 				Source:      txn.source.PublicKey().ToBase58(),
 				Destination: &intentRecord.SendPublicPaymentMetadata.DestinationTokenAccount,

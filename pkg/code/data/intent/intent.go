@@ -20,19 +20,11 @@ const (
 type Type uint8
 
 const (
-	UnknownType         Type = iota
-	LegacyPayment            // Deprecated pre-2022 privacy flow
-	LegacyCreateAccount      // Deprecated pre-2022 privacy flow
+	UnknownType Type = iota
 	OpenAccounts
-	SendPrivatePayment       // Deprecated privacy flow
-	ReceivePaymentsPrivately // Deprecated privacy flow
-	SaveRecentRoot           // Deprecated privacy flow
-	MigrateToPrivacy2022     // Deprecated privacy flow
 	ExternalDeposit
 	SendPublicPayment
 	ReceivePaymentsPublicly
-	EstablishRelationship // Deprecated privacy flow
-	Login                 // Deprecated login flow
 	PublicDistribution
 )
 
@@ -540,24 +532,12 @@ func (t Type) String() string {
 		return "unknown"
 	case OpenAccounts:
 		return "open_accounts"
-	case SendPrivatePayment:
-		return "send_private_payment"
-	case ReceivePaymentsPrivately:
-		return "receive_payments_privately"
-	case SaveRecentRoot:
-		return "save_recent_root"
-	case MigrateToPrivacy2022:
-		return "migrate_to_privacy_2022"
 	case ExternalDeposit:
 		return "external_deposit"
 	case SendPublicPayment:
 		return "send_public_payment"
 	case ReceivePaymentsPublicly:
 		return "receive_payments_publicly"
-	case EstablishRelationship:
-		return "establish_relationship"
-	case Login:
-		return "login"
 	case PublicDistribution:
 		return "public_distribution"
 	}

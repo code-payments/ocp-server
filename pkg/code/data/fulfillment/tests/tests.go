@@ -53,10 +53,10 @@ func testRoundTrip(t *testing.T, s fulfillment.Store) {
 		expected := fulfillment.Record{
 			Signature:                pointer.String("test_signature"),
 			Intent:                   "test_intent1",
-			IntentType:               intent.SendPrivatePayment,
+			IntentType:               intent.SendPublicPayment,
 			ActionId:                 4,
-			ActionType:               action.PrivateTransfer,
-			FulfillmentType:          fulfillment.TemporaryPrivacyTransferWithAuthority,
+			ActionType:               action.NoPrivacyTransfer,
+			FulfillmentType:          fulfillment.NoPrivacyTransferWithAuthority,
 			Data:                     []byte("test_data"),
 			Nonce:                    pointer.String("test_nonce"),
 			Blockhash:                pointer.String("test_blockhash"),
@@ -155,10 +155,10 @@ func testBatchPut(t *testing.T, s fulfillment.Store) {
 			fulfillmentRecord := &fulfillment.Record{
 				Signature:                pointer.String(fmt.Sprintf("test_signature%d", i)),
 				Intent:                   fmt.Sprintf("test_intent%d", i),
-				IntentType:               intent.SendPrivatePayment,
+				IntentType:               intent.SendPublicPayment,
 				ActionId:                 uint32(i),
-				ActionType:               action.PrivateTransfer,
-				FulfillmentType:          fulfillment.TemporaryPrivacyTransferWithAuthority,
+				ActionType:               action.NoPrivacyTransfer,
+				FulfillmentType:          fulfillment.NoPrivacyTransferWithAuthority,
 				Data:                     []byte(fmt.Sprintf("test_data%d", i)),
 				Nonce:                    pointer.String(fmt.Sprintf("test_nonce%d", i)),
 				Blockhash:                pointer.String(fmt.Sprintf("test_blockhash%d", i)),
@@ -384,10 +384,10 @@ func testGetAllByState(t *testing.T, s fulfillment.Store) {
 
 		// Fill in required fields that have no relevancy to this test
 		for i, record := range expected {
-			record.IntentType = intent.SendPrivatePayment
+			record.IntentType = intent.SendPublicPayment
 			record.Intent = fmt.Sprintf("i%d", i%3+1)
-			record.ActionType = action.PrivateTransfer
-			record.FulfillmentType = fulfillment.TemporaryPrivacyTransferWithAuthority
+			record.ActionType = action.NoPrivacyTransfer
+			record.FulfillmentType = fulfillment.NoPrivacyTransferWithAuthority
 			record.Data = []byte(fmt.Sprintf("d%d", i+1))
 			record.Nonce = pointer.String(fmt.Sprintf("n%d", i+1))
 			record.Blockhash = pointer.String(fmt.Sprintf("bh%d", i+1))
@@ -510,9 +510,9 @@ func testGetAllByIntent(t *testing.T, s fulfillment.Store) {
 
 		// Fill in required fields that have no relevancy to this test
 		for i, record := range expected {
-			record.IntentType = intent.SendPrivatePayment
-			record.ActionType = action.PrivateTransfer
-			record.FulfillmentType = fulfillment.TemporaryPrivacyTransferWithAuthority
+			record.IntentType = intent.SendPublicPayment
+			record.ActionType = action.NoPrivacyTransfer
+			record.FulfillmentType = fulfillment.NoPrivacyTransferWithAuthority
 			record.Data = []byte(fmt.Sprintf("d%d", i+1))
 			record.Nonce = pointer.String(fmt.Sprintf("n%d", i+1))
 			record.Blockhash = pointer.String(fmt.Sprintf("bh%d", i+1))
@@ -630,9 +630,9 @@ func testGetAllByAction(t *testing.T, s fulfillment.Store) {
 
 		// Fill in required fields that have no relevancy to this test
 		for i, record := range expected {
-			record.IntentType = intent.SendPrivatePayment
-			record.ActionType = action.PrivateTransfer
-			record.FulfillmentType = fulfillment.TemporaryPrivacyTransferWithAuthority
+			record.IntentType = intent.SendPublicPayment
+			record.ActionType = action.NoPrivacyTransfer
+			record.FulfillmentType = fulfillment.NoPrivacyTransferWithAuthority
 			record.Data = []byte(fmt.Sprintf("d%d", i+1))
 			record.Nonce = pointer.String(fmt.Sprintf("n%d", i+1))
 			record.Blockhash = pointer.String(fmt.Sprintf("bh%d", i+1))
@@ -664,17 +664,17 @@ func testGetAllByTypeAndAction(t *testing.T, s fulfillment.Store) {
 		ctx := context.Background()
 
 		expected := []*fulfillment.Record{
-			{Signature: pointer.String("t1"), Intent: "i1", ActionId: 0, FulfillmentType: fulfillment.TemporaryPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t2"), Intent: "i1", ActionId: 0, FulfillmentType: fulfillment.PermanentPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t3"), Intent: "i1", ActionId: 1, FulfillmentType: fulfillment.TemporaryPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t4"), Intent: "i1", ActionId: 2, FulfillmentType: fulfillment.TemporaryPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t5"), Intent: "i1", ActionId: 2, FulfillmentType: fulfillment.TemporaryPrivacyTransferWithAuthority},
+			{Signature: pointer.String("t1"), Intent: "i1", ActionId: 0, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
+			{Signature: pointer.String("t2"), Intent: "i1", ActionId: 0, FulfillmentType: fulfillment.NoPrivacyWithdraw},
+			{Signature: pointer.String("t3"), Intent: "i1", ActionId: 1, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
+			{Signature: pointer.String("t4"), Intent: "i1", ActionId: 2, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
+			{Signature: pointer.String("t5"), Intent: "i1", ActionId: 2, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
 		}
 
 		// Fill in required fields that have no relevancy to this test
 		for i, record := range expected {
-			record.IntentType = intent.SendPrivatePayment
-			record.ActionType = action.PrivateTransfer
+			record.IntentType = intent.SendPublicPayment
+			record.ActionType = action.NoPrivacyTransfer
 			record.Data = []byte(fmt.Sprintf("d%d", i+1))
 			record.Nonce = pointer.String(fmt.Sprintf("n%d", i+1))
 			record.Blockhash = pointer.String(fmt.Sprintf("bh%d", i+1))
@@ -685,18 +685,18 @@ func testGetAllByTypeAndAction(t *testing.T, s fulfillment.Store) {
 		err := s.PutAll(ctx, expected...)
 		require.NoError(t, err)
 
-		actual, err := s.GetAllByTypeAndAction(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, "i1", 0)
+		actual, err := s.GetAllByTypeAndAction(ctx, fulfillment.NoPrivacyTransferWithAuthority, "i1", 0)
 		require.NoError(t, err)
 		require.Len(t, actual, 1)
 		assert.Equal(t, "t1", *actual[0].Signature)
 
-		actual, err = s.GetAllByTypeAndAction(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, "i1", 2)
+		actual, err = s.GetAllByTypeAndAction(ctx, fulfillment.NoPrivacyTransferWithAuthority, "i1", 2)
 		require.NoError(t, err)
 		require.Len(t, actual, 2)
 		assert.Equal(t, "t4", *actual[0].Signature)
 		assert.Equal(t, "t5", *actual[1].Signature)
 
-		_, err = s.GetAllByTypeAndAction(ctx, fulfillment.PermanentPrivacyTransferWithAuthority, "i1", 2)
+		_, err = s.GetAllByTypeAndAction(ctx, fulfillment.NoPrivacyWithdraw, "i1", 2)
 		assert.Equal(t, fulfillment.ErrFulfillmentNotFound, err)
 	})
 }
@@ -716,9 +716,9 @@ func testGetCount(t *testing.T, s fulfillment.Store) {
 
 		// Fill in required fields that have no relevancy to this test
 		for i, record := range expected {
-			record.IntentType = intent.SendPrivatePayment
-			record.ActionType = action.PrivateTransfer
-			record.FulfillmentType = fulfillment.TemporaryPrivacyTransferWithAuthority
+			record.IntentType = intent.SendPublicPayment
+			record.ActionType = action.NoPrivacyTransfer
+			record.FulfillmentType = fulfillment.NoPrivacyTransferWithAuthority
 			record.Data = []byte(fmt.Sprintf("d%d", i+1))
 			record.Signature = pointer.String(fmt.Sprintf("t%d", i+1))
 			record.Nonce = pointer.String(fmt.Sprintf("n%d", i+1))
@@ -762,31 +762,31 @@ func testGetCount(t *testing.T, s fulfillment.Store) {
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
+		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
 		require.NoError(t, err)
 		assert.EqualValues(t, 1, count)
 
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown, "destination")
+		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "destination")
 		require.NoError(t, err)
 		assert.EqualValues(t, 3, count)
 
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StatePending, "s2")
+		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StatePending, "s2")
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.PermanentPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
+		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyWithdraw, fulfillment.StateUnknown, "s2")
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown, "unknown")
+		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "unknown")
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
-		count, err = s.CountByTypeStateAndAddressAsSource(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
+		count, err = s.CountByTypeStateAndAddressAsSource(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
 		require.NoError(t, err)
 		assert.EqualValues(t, 1, count)
 
-		count, err = s.CountByTypeStateAndAddressAsSource(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown, "destination")
+		count, err = s.CountByTypeStateAndAddressAsSource(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "destination")
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
@@ -822,30 +822,30 @@ func testGetCount(t *testing.T, s fulfillment.Store) {
 		require.NoError(t, err)
 		assert.EqualValues(t, 3, count)
 
-		count, err = s.CountByTypeActionAndState(ctx, "i0", 0, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown)
+		count, err = s.CountByTypeActionAndState(ctx, "i0", 0, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown)
 		require.NoError(t, err)
 		assert.EqualValues(t, 2, count)
 
-		count, err = s.CountByTypeActionAndState(ctx, "i0", 1, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateUnknown)
+		count, err = s.CountByTypeActionAndState(ctx, "i0", 1, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown)
 		require.NoError(t, err)
 		assert.EqualValues(t, 1, count)
 
-		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StateRevoked)
+		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateRevoked)
 		require.NoError(t, err)
 		assert.EqualValues(t, 2, count)
 
-		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.PermanentPrivacyTransferWithAuthority, fulfillment.StateRevoked)
+		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.NoPrivacyWithdraw, fulfillment.StateRevoked)
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
-		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.TemporaryPrivacyTransferWithAuthority, fulfillment.StatePending)
+		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StatePending)
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
 		countByType, err := s.CountByStateGroupedByType(ctx, fulfillment.StateUnknown)
 		require.NoError(t, err)
 		assert.Len(t, countByType, 1)
-		assert.EqualValues(t, 3, countByType[fulfillment.TemporaryPrivacyTransferWithAuthority])
+		assert.EqualValues(t, 3, countByType[fulfillment.NoPrivacyTransferWithAuthority])
 	})
 }
 
@@ -862,20 +862,20 @@ func testSchedulingQueries(t *testing.T, s fulfillment.Store) {
 				for k := 0; k < 3; k++ {
 					source := account1
 					destination := account2
-					fulfillmentType := fulfillment.TemporaryPrivacyTransferWithAuthority
+					fulfillmentType := fulfillment.NoPrivacyTransferWithAuthority
 					state := fulfillment.StateUnknown
 					if i%2 != 0 {
 						source = account2
 						destination = account1
-						fulfillmentType = fulfillment.PermanentPrivacyTransferWithAuthority
+						fulfillmentType = fulfillment.NoPrivacyWithdraw
 						state = fulfillment.StatePending
 					}
 
 					record := &fulfillment.Record{
 						Intent:     fmt.Sprintf("i%d", i),
-						IntentType: intent.SendPrivatePayment,
+						IntentType: intent.SendPublicPayment,
 
-						ActionType: action.PrivateTransfer,
+						ActionType: action.NoPrivacyTransfer,
 
 						FulfillmentType: fulfillmentType,
 						Data:            []byte("data"),
@@ -928,11 +928,11 @@ func testSchedulingQueries(t *testing.T, s fulfillment.Store) {
 		require.NoError(t, err)
 		assert.Equal(t, "t000", *actual.Signature)
 
-		actual, err = s.GetFirstSchedulableByType(ctx, fulfillment.TemporaryPrivacyTransferWithAuthority)
+		actual, err = s.GetFirstSchedulableByType(ctx, fulfillment.NoPrivacyTransferWithAuthority)
 		require.NoError(t, err)
 		assert.Equal(t, "t000", *actual.Signature)
 
-		actual, err = s.GetFirstSchedulableByType(ctx, fulfillment.PermanentPrivacyTransferWithAuthority)
+		actual, err = s.GetFirstSchedulableByType(ctx, fulfillment.NoPrivacyWithdraw)
 		require.NoError(t, err)
 		assert.Equal(t, "t100", *actual.Signature)
 
@@ -958,10 +958,10 @@ func testSubsidizerQueries(t *testing.T, s fulfillment.Store) {
 			// Included in counts
 			{State: fulfillment.StatePending, ActionType: action.OpenAccount, FulfillmentType: fulfillment.InitializeLockedTimelockAccount},
 			{State: fulfillment.StatePending, ActionType: action.OpenAccount, FulfillmentType: fulfillment.InitializeLockedTimelockAccount},
-			{State: fulfillment.StatePending, ActionType: action.CloseDormantAccount, FulfillmentType: fulfillment.CloseDormantTimelockAccount},
-			{State: fulfillment.StatePending, ActionType: action.CloseDormantAccount, FulfillmentType: fulfillment.CloseDormantTimelockAccount},
-			{State: fulfillment.StatePending, ActionType: action.CloseDormantAccount, FulfillmentType: fulfillment.CloseDormantTimelockAccount},
-			{State: fulfillment.StatePending, ActionType: action.CloseDormantAccount, FulfillmentType: fulfillment.CloseDormantTimelockAccount},
+			{State: fulfillment.StatePending, ActionType: action.CloseEmptyAccount, FulfillmentType: fulfillment.CloseEmptyTimelockAccount},
+			{State: fulfillment.StatePending, ActionType: action.CloseEmptyAccount, FulfillmentType: fulfillment.CloseEmptyTimelockAccount},
+			{State: fulfillment.StatePending, ActionType: action.CloseEmptyAccount, FulfillmentType: fulfillment.CloseEmptyTimelockAccount},
+			{State: fulfillment.StatePending, ActionType: action.CloseEmptyAccount, FulfillmentType: fulfillment.CloseEmptyTimelockAccount},
 
 			// Not included in counts
 			{State: fulfillment.StateUnknown, ActionType: action.CloseEmptyAccount, FulfillmentType: fulfillment.CloseEmptyTimelockAccount},
@@ -988,7 +988,7 @@ func testSubsidizerQueries(t *testing.T, s fulfillment.Store) {
 
 		assert.Len(t, counts, 2)
 		assert.EqualValues(t, 2, counts[fulfillment.InitializeLockedTimelockAccount])
-		assert.EqualValues(t, 4, counts[fulfillment.CloseDormantTimelockAccount])
+		assert.EqualValues(t, 4, counts[fulfillment.CloseEmptyTimelockAccount])
 	})
 }
 

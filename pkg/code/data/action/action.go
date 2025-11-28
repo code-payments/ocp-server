@@ -15,12 +15,9 @@ type Type uint8
 const (
 	UnknownType Type = iota
 	OpenAccount
-	CloseEmptyAccount
-	CloseDormantAccount // Deprecated by the VM
 	NoPrivacyTransfer
 	NoPrivacyWithdraw
-	PrivateTransfer // Deprecated privacy flow
-	SaveRecentRoot  // Deprecated privacy flow
+	CloseEmptyAccount
 )
 
 type State uint8
@@ -28,9 +25,9 @@ type State uint8
 const (
 	StateUnknown State = iota
 	StatePending
-	StateRevoked
 	StateConfirmed
 	StateFailed
+	StateRevoked
 )
 
 type ByActionId []*Record
