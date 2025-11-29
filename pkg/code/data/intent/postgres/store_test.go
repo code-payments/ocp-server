@@ -19,7 +19,7 @@ import (
 const (
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableCreate = `
-		CREATE TABLE ocp__core_paymentintent(
+		CREATE TABLE ocp__core_intent(
 			id SERIAL NOT NULL PRIMARY KEY,
 
 			intent_id TEXT NOT NULL UNIQUE,
@@ -72,7 +72,7 @@ const (
 
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableDestroy = `
-		DROP TABLE ocp__core_paymentintent;
+		DROP TABLE ocp__core_intent;
 		DROP TABLE ocp__core_intentaccountmetadata;
 	`
 )

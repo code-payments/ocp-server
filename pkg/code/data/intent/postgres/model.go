@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	intentTableName   = "ocp__core_paymentintent" // todo: table should be renamed to just "intent"
+	intentTableName   = "ocp__core_intent"
 	accountsTableName = "ocp__core_intentaccountmetadata"
 )
 

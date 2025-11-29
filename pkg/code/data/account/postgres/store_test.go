@@ -24,7 +24,7 @@ var (
 const (
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableCreate = `
-	CREATE TABLE ocp__core_accountinfov2 (
+	CREATE TABLE ocp__core_accountinfo (
 		id SERIAL NOT NULL PRIMARY KEY,
 
 		owner_account TEXT NOT NULL,
@@ -50,7 +50,7 @@ const (
 
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableDestroy = `
-		DROP TABLE ocp__core_accountinfov2;
+		DROP TABLE ocp__core_accountinfo;
 	`
 )
 

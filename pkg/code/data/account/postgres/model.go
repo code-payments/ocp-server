@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	tableName = "ocp__core_accountinfov2"
+	tableName = "ocp__core_accountinfo"
 )
 
 type model struct {
