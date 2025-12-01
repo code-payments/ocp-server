@@ -29,10 +29,10 @@ type intentModel struct {
 	IntentId                string         `db:"intent_id"`
 	IntentType              uint           `db:"intent_type"`
 	Mint                    sql.NullString `db:"mint"`
-	InitiatorOwner          string         `db:"owner"` // todo: rename the DB field to initiator_owner
+	InitiatorOwner          string         `db:"owner"`
 	Source                  string         `db:"source"`
 	DestinationOwnerAccount string         `db:"destination_owner"`
-	DestinationTokenAccount string         `db:"destination"` // todo: rename the DB field to be destination_token
+	DestinationTokenAccount string         `db:"destination"`
 	Quantity                uint64         `db:"quantity"`
 	ExchangeCurrency        string         `db:"exchange_currency"`
 	ExchangeRate            float64        `db:"exchange_rate"`

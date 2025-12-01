@@ -14,9 +14,6 @@ var (
 	ErrStaleTimelockState = errors.New("timelock state is stale")
 )
 
-// Time/close authorities and lock duration are configured at the VM level
-//
-// todo: Assumes a single VM.
 type Record struct {
 	Id uint64
 
