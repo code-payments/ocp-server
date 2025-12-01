@@ -28,10 +28,10 @@ type State uint8
 const (
 	StateUnknown   State = iota
 	StateReleased        // The nonce is almost ready but we don't know its blockhash yet.
+	StateClaimed         // The nonce is claimed by a process for future use (identified by a node ID)
 	StateAvailable       // The nonce is available to be used by a fulfillment for a virtual instruction or transaction.
 	StateReserved        // The nonce is reserved by a fulfillment for a virtual instruction or transaction.
 	StateInvalid         // The nonce account is invalid (e.g. insufficient funds, etc).
-	StateClaimed         // The nonce is claimed by a process for future use (identified by a node ID)
 )
 
 // Split nonce pool across different use cases. This has an added benefit of:.
