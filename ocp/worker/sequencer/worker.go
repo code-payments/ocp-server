@@ -11,6 +11,7 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
@@ -80,20 +81,39 @@ func (p *runtime) worker(runtimeCtx context.Context, state fulfillment.State, in
 }
 
 func (p *runtime) handle(ctx context.Context, record *fulfillment.Record) error {
+	log := p.log.With(
+		zap.String("method", "handle"),
+		zap.String("state", record.State.String()),
+		zap.String("intent", record.Intent),
+		zap.Uint32("action", record.ActionId),
+		zap.String("intent_type", record.IntentType.String()),
+		zap.String("action_type", record.ActionType.String()),
+		zap.String("fulfillment_type", record.FulfillmentType.String()),
+		zap.Uint64("id", record.Id),
+		zap.Stringp("signature", record.Signature),
+		zap.Stringp("virtual_signature", record.VirtualSignature),
+		zap.String("source", record.Source),
+		zap.Stringp("destination", record.Destination),
+	)
+
+	var err error
 	switch record.State {
 	case fulfillment.StateUnknown:
-		return p.handleUnknown(ctx, record)
+		err = p.handleUnknown(ctx, record)
 	case fulfillment.StatePending:
-		return p.handlePending(ctx, record)
+		err = p.handlePending(ctx, record)
 	case fulfillment.StateConfirmed:
-		return p.handleConfirmed(ctx, record)
+		err = p.handleConfirmed(ctx, record)
 	case fulfillment.StateFailed:
-		return p.handleFailed(ctx, record)
+		err = p.handleFailed(ctx, record)
 	case fulfillment.StateRevoked:
-		return p.handleRevoked(ctx, record)
-	default:
-		return nil
+		err = p.handleRevoked(ctx, record)
 	}
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure processing fulfillment")
+		return err
+	}
+	return nil
 }
 
 func (p *runtime) handleUnknown(ctx context.Context, record *fulfillment.Record) error {

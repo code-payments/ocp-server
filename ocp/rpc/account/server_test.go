@@ -10,13 +10,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
 	accountpb "github.com/code-payments/ocp-protobuf-api/generated/go/account/v1"
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
+	"github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
@@ -25,7 +26,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
-	"github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -41,7 +41,7 @@ type testEnv struct {
 }
 
 func setup(t *testing.T) (env testEnv, cleanup func()) {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 
 	conn, serv, err := testutil.NewServer(log)
 	require.NoError(t, err)

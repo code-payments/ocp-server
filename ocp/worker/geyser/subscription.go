@@ -173,6 +173,7 @@ func (p *runtime) subscribeToSlotUpdatesFromGeyser(ctx context.Context, endpoint
 	for {
 		update, err := boundedRecv(ctx, streamer, defaultStreamSubscriptionTimeout)
 		if err != nil {
+			log.With(zap.Error(err)).Warn("failure receiving update")
 			return errors.Wrap(err, "error recieving update")
 		}
 

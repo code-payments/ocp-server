@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -39,7 +39,7 @@ type testEnv struct {
 }
 
 func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 
 	conn1, serv1, err := testutil.NewServer(log)
 	require.NoError(t, err)

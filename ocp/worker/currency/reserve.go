@@ -45,7 +45,7 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 				err := p.UpdateAllLaunchpadCurrencyReserves(tracedCtx)
 				if err != nil {
 					m.NoticeError(err)
-					p.log.With(zap.Error(err)).Warn("failed to process current rate data")
+					p.log.With(zap.Error(err)).Warn("failed to process current reserve data")
 				}
 
 				return err

@@ -9,7 +9,7 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
@@ -226,7 +226,7 @@ type workerTestEnv struct {
 }
 
 func setupWorkerEnv(t *testing.T) *workerTestEnv {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 
 	db := ocp_data.NewTestDataProvider()
 

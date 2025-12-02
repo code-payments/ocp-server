@@ -138,7 +138,12 @@ func (p *runtime) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 	}
 
 	// Gift card is auto-returned, so take it out of the worker queue
-	return MarkAutoReturnCheckComplete(ctx, p.data, accountInfoRecord)
+	err = MarkAutoReturnCheckComplete(ctx, p.data, accountInfoRecord)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure marking auto return check complete")
+		return err
+	}
+	return nil
 }
 
 // Note: This is the first instance of handling a conditional action, and could be

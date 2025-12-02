@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
@@ -40,7 +40,7 @@ type testGiftCard struct {
 }
 
 func setup(t *testing.T) *testEnv {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 
 	data := ocp_data.NewTestDataProvider()
 

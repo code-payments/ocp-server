@@ -7,14 +7,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
-	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/testutil"
 )
 
@@ -143,7 +143,7 @@ type amlTestEnv struct {
 }
 
 func setupAmlTest(t *testing.T) (env amlTestEnv) {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 
 	env.ctx = context.Background()
 	env.data = ocp_data.NewTestDataProvider()

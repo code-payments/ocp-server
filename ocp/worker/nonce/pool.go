@@ -7,6 +7,7 @@ import (
 
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
@@ -125,22 +126,36 @@ func (p *runtime) handle(ctx context.Context, record *nonce.Record) error {
 					-> [externally] StateAvailable (nonce will never be submitted in the virtual instruction or transaction - eg. it became revoked)
 	*/
 
+	log := p.log.With(
+		zap.String("method", "handle"),
+		zap.String("state", record.State.String()),
+		zap.String("environment", record.Environment.String()),
+		zap.String("environment_instance", record.EnvironmentInstance),
+		zap.String("purpose", record.Purpose.String()),
+		zap.String("address", record.Address),
+		zap.String("signature", record.Signature),
+	)
+
+	var err error
 	switch record.State {
 	case nonce.StateUnknown:
-		return p.handleUnknown(ctx, record)
+		err = p.handleUnknown(ctx, record)
 	case nonce.StateReleased:
-		return p.handleReleased(ctx, record)
+		err = p.handleReleased(ctx, record)
 	case nonce.StateAvailable:
-		return p.handleAvailable(ctx, record)
+		err = p.handleAvailable(ctx, record)
 	case nonce.StateReserved:
-		return p.handleReserved(ctx, record)
+		err = p.handleReserved(ctx, record)
 	case nonce.StateInvalid:
-		return p.handleInvalid(ctx, record)
+		err = p.handleInvalid(ctx, record)
 	case nonce.StateClaimed:
-		return p.handleClaimed(ctx, record)
-	default:
-		return nil
+		err = p.handleClaimed(ctx, record)
 	}
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure handling nonce")
+		return err
+	}
+	return nil
 }
 
 func (p *runtime) handleUnknown(ctx context.Context, record *nonce.Record) error {

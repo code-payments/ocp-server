@@ -9,7 +9,7 @@ import (
 
 	"github.com/mr-tron/base58"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
@@ -286,7 +286,7 @@ type localNoncePoolTest struct {
 }
 
 func newLocalNoncePoolTest(t *testing.T) *localNoncePoolTest {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 
 	data := ocp_data.NewTestDataProvider()
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
@@ -70,17 +71,29 @@ func (p *runtime) worker(runtimeCtx context.Context, state swap.State, interval 
 }
 
 func (p *runtime) handle(ctx context.Context, record *swap.Record) error {
+	log := p.log.With(
+		zap.String("method", "handle"),
+		zap.String("state", record.State.String()),
+		zap.String("swap_id", record.SwapId),
+		zap.String("owner", record.Owner),
+	)
+
+	var err error
 	switch record.State {
 	case swap.StateCreated:
-		return p.handleStateCreated(ctx, record)
+		err = p.handleStateCreated(ctx, record)
 	case swap.StateFunding:
-		return p.handleStateFunding(ctx, record)
+		err = p.handleStateFunding(ctx, record)
 	case swap.StateFunded:
-		return p.handleStateFunded(ctx, record)
+		err = p.handleStateFunded(ctx, record)
 	case swap.StateSubmitting:
-		return p.handleStateSubmitting(ctx, record)
+		err = p.handleStateSubmitting(ctx, record)
 	case swap.StateCancelling:
-		return p.handleStateCancelling(ctx, record)
+		err = p.handleStateCancelling(ctx, record)
+	}
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure processing swap")
+		return err
 	}
 	return nil
 }
@@ -135,7 +148,7 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 	// reasonable amount of time. The funds for the swap will be deposited back
 	// into the source VM.
 	if time.Since(intentRecord.CreatedAt) > p.conf.clientTimeoutToSwap.Get(ctx) {
-		txn, err := p.getCancellationTransaction(ctx, record)
+		txn, err := p.makeCancellationTransaction(ctx, record)
 		if err != nil {
 			return err
 		}

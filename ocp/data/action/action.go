@@ -156,6 +156,21 @@ func (s State) IsTerminal() bool {
 	return false
 }
 
+func (t Type) String() string {
+	switch t {
+	case OpenAccount:
+		return "open_account"
+	case NoPrivacyTransfer:
+		return "no_privacy_transfer"
+	case NoPrivacyWithdraw:
+		return "no_privacy_withdraw"
+	case CloseEmptyAccount:
+		return "close_empty_account"
+	}
+
+	return "unknown"
+}
+
 func (s State) String() string {
 	switch s {
 	case StateUnknown:

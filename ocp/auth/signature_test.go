@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"google.golang.org/grpc/codes"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
@@ -25,7 +25,7 @@ type testEnv struct {
 }
 
 func setup(t *testing.T) (env testEnv) {
-	log := zap.Must(zap.NewDevelopment())
+	log := zaptest.NewLogger(t)
 	env.ctx = context.Background()
 	env.data = ocp_data.NewTestDataProvider()
 	env.verifier = NewRPCSignatureVerifier(log, env.data)

@@ -340,7 +340,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 }
 
 // todo: put this in transaction utility package
-func (p *runtime) getCancellationTransaction(ctx context.Context, record *swap.Record) (*solana.Transaction, error) {
+func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.Record) (*solana.Transaction, error) {
 	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
 	if err != nil {
 		return nil, err
