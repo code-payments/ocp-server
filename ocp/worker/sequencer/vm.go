@@ -5,10 +5,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/pkg/errors"
-
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
-
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/cvm/ram"
@@ -70,75 +66,6 @@ func onVirtualAccountDeleted(ctx context.Context, data ocp_data.Provider, addres
 		return nil
 	}
 	return err
-}
-
-func getVirtualTimelockAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, owner *common.Account) (*cvm.VirtualTimelockAccount, *common.Account, uint16, error) {
-	resp, err := vmIndexerClient.GetVirtualTimelockAccounts(ctx, &indexerpb.GetVirtualTimelockAccountsRequest{
-		VmAccount: &indexerpb.Address{Value: vm.PublicKey().ToBytes()},
-		Owner:     &indexerpb.Address{Value: owner.PublicKey().ToBytes()},
-	})
-	if err != nil {
-		return nil, nil, 0, err
-	} else if resp.Result != indexerpb.GetVirtualTimelockAccountsResponse_OK {
-		return nil, nil, 0, errors.Errorf("received rpc result %s", resp.Result.String())
-	}
-
-	if len(resp.Items) > 1 {
-		return nil, nil, 0, errors.New("multiple results returned")
-	} else if resp.Items[0].Storage.GetMemory() == nil {
-		return nil, nil, 0, errors.New("account is compressed")
-	}
-
-	protoMemory := resp.Items[0].Storage.GetMemory()
-	memory, err := common.NewAccountFromPublicKeyBytes(protoMemory.Account.Value)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
-	protoAccount := resp.Items[0].Account
-	state := cvm.VirtualTimelockAccount{
-		Owner: protoAccount.Owner.Value,
-		Nonce: cvm.Hash(protoAccount.Nonce.Value),
-
-		TokenBump:    uint8(protoAccount.TokenBump),
-		UnlockBump:   uint8(protoAccount.UnlockBump),
-		WithdrawBump: uint8(protoAccount.WithdrawBump),
-
-		Balance: protoAccount.Balance,
-		Bump:    uint8(protoAccount.Bump),
-	}
-
-	return &state, memory, uint16(protoMemory.Index), nil
-}
-
-func getVirtualDurableNonceAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, nonce *common.Account) (*cvm.VirtualDurableNonce, *common.Account, uint16, error) {
-	resp, err := vmIndexerClient.GetVirtualDurableNonce(ctx, &indexerpb.GetVirtualDurableNonceRequest{
-		VmAccount: &indexerpb.Address{Value: vm.PublicKey().ToBytes()},
-		Address:   &indexerpb.Address{Value: nonce.PublicKey().ToBytes()},
-	})
-	if err != nil {
-		return nil, nil, 0, err
-	} else if resp.Result != indexerpb.GetVirtualDurableNonceResponse_OK {
-		return nil, nil, 0, errors.Errorf("received rpc result %s", resp.Result.String())
-	}
-
-	protoMemory := resp.Item.Storage.GetMemory()
-	if protoMemory == nil {
-		return nil, nil, 0, errors.New("account is compressed")
-	}
-
-	memory, err := common.NewAccountFromPublicKeyBytes(protoMemory.Account.Value)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
-	protoAccount := resp.Item.Account
-	state := cvm.VirtualDurableNonce{
-		Address: protoAccount.Address.Value,
-		Value:   cvm.Hash(protoAccount.Value.Value),
-	}
-
-	return &state, memory, uint16(protoMemory.Index), nil
 }
 
 func isInternalVmTransfer(ctx context.Context, data ocp_data.Provider, destination *common.Account) (bool, error) {

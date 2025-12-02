@@ -7,6 +7,7 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
@@ -102,7 +103,7 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = common.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.buyer)
+	h.memoryAccount, h.memoryIndex, err = vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.buyer)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +283,7 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = common.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.seller)
+	h.memoryAccount, h.memoryIndex, err = vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.seller)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +456,7 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = common.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.swapper)
+	h.memoryAccount, h.memoryIndex, err = vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.swapper)
 	if err != nil {
 		return nil, err
 	}

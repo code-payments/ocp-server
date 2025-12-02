@@ -19,6 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
+	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/cvm"
@@ -371,7 +372,7 @@ func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.
 		return nil, err
 	}
 
-	memoryAccount, memoryIndex, err := common.GetVirtualTimelockAccountLocationInMemory(ctx, p.vmIndexerClient, sourceVmConfig.Vm, owner)
+	memoryAccount, memoryIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, p.vmIndexerClient, sourceVmConfig.Vm, owner)
 	if err != nil {
 		return nil, err
 	}

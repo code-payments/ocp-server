@@ -13,12 +13,12 @@ import (
 
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 
+	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
-	"github.com/code-payments/ocp-server/grpc/client"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 )
 
@@ -84,6 +84,12 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 		var protoMetadata *currencypb.Mint
 		switch mintAccount.PublicKey().ToBase58() {
 		case common.CoreMintAccount.PublicKey().ToBase58():
+			vmConfig, err := common.GetVmConfigForMint(ctx, s.data, common.CoreMintAccount)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure getting vm config")
+				return nil, status.Error(codes.Internal, "")
+			}
+
 			protoMetadata = &currencypb.Mint{
 				Address:     protoMintAddress,
 				Decimals:    uint32(common.CoreMintDecimals),
@@ -92,8 +98,8 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				Description: config.CoreMintDescription,
 				ImageUrl:    config.CoreMintImageUrl,
 				VmMetadata: &currencypb.VmMetadata{
-					Vm:                 common.CodeVmAccount.ToProto(),
-					Authority:          common.GetSubsidizer().ToProto(),
+					Vm:                 vmConfig.Vm.ToProto(),
+					Authority:          vmConfig.Authority.ToProto(),
 					LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
 				},
 				CreatedAt: timestamppb.New(time.Time{}),

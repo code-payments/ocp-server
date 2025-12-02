@@ -33,11 +33,11 @@ func (p *runtime) metricsGaugeWorker(ctx context.Context) error {
 				nonce.StateInvalid,
 				nonce.StateClaimed,
 			} {
-				count, err := p.data.GetNonceCountByStateAndPurpose(ctx, nonce.EnvironmentCvm, common.CodeVmAccount.PublicKey().ToBase58(), state, nonce.PurposeClientIntent)
+				count, err := p.data.GetNonceCountByStateAndPurpose(ctx, nonce.EnvironmentCvm, common.CoreMintVmAccount.PublicKey().ToBase58(), state, nonce.PurposeClientIntent)
 				if err != nil {
 					continue
 				}
-				recordNonceCountEvent(ctx, nonce.EnvironmentCvm, common.CodeVmAccount.PublicKey().ToBase58(), state, nonce.PurposeClientIntent, count)
+				recordNonceCountEvent(ctx, nonce.EnvironmentCvm, common.CoreMintVmAccount.PublicKey().ToBase58(), state, nonce.PurposeClientIntent, count)
 
 				count, err = p.data.GetNonceCountByStateAndPurpose(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, state, nonce.PurposeOnDemandTransaction)
 				if err != nil {

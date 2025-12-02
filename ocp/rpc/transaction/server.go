@@ -66,7 +66,7 @@ func NewTransactionServer(
 	if !conf.disableSubmitIntent.Get(ctx) {
 		_, err := transaction.SelectNoncePool(
 			nonce.EnvironmentCvm,
-			common.CodeVmAccount.PublicKey().ToBase58(),
+			common.CoreMintVmAccount.PublicKey().ToBase58(),
 			nonce.PurposeClientIntent,
 			noncePools...,
 		)

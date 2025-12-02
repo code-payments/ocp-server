@@ -10,8 +10,8 @@ func NewRandomVmConfig(t *testing.T, isCore bool) *common.VmConfig {
 	if isCore {
 		return &common.VmConfig{
 			Authority: common.GetSubsidizer(),
-			Vm:        common.CodeVmAccount,
-			Omnibus:   common.CodeVmOmnibusAccount,
+			Vm:        common.CoreMintVmAccount,
+			Omnibus:   common.CoreMintVmOmnibusAccount,
 			Mint:      common.CoreMintAccount,
 		}
 	}

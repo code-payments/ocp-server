@@ -11,10 +11,11 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
-	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/cache"
+	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
@@ -22,7 +23,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
-	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/retry"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
@@ -99,12 +100,12 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		return errors.Wrap(err, "error getting timelock accounts")
 	}
 
-	err = common.EnsureVirtualTimelockAccountIsInitialized(ctx, data, vmIndexerClient, mint, userAuthority, true)
+	err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, data, vmIndexerClient, mint, userAuthority, true)
 	if err != nil {
 		return errors.Wrap(err, "error ensuring vta is initialized")
 	}
 
-	memoryAccount, memoryIndex, err := common.GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, userAuthority)
+	memoryAccount, memoryIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, userAuthority)
 	if err != nil {
 		return errors.Wrap(err, "error getting vta location in memory")
 	}

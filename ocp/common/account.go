@@ -259,7 +259,7 @@ func (a *Account) GetTimelockAccounts(vmConfig *VmConfig) (*TimelockAccounts, er
 	unlockAddress, unlockBump, err := cvm.GetVmUnlockStateAccountAddress(&cvm.GetVmUnlockStateAccountAddressArgs{
 		VirtualAccountOwner: a.publicKey.ToBytes(),
 		VirtualAccount:      stateAddress,
-		Vm:                  vmConfig.Vm.publicKey.ToBytes(),
+		Vm:                  vmConfig.Vm.PublicKey().ToBytes(),
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting unlock address")

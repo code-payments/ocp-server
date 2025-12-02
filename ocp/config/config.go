@@ -6,7 +6,6 @@ import (
 	"github.com/code-payments/ocp-server/usdf"
 )
 
-// todo: more things can be pulled into here to configure the open code protocol
 // todo: make these environment configs
 
 const (
@@ -21,8 +20,8 @@ const (
 	SubsidizerPublicKey = "cash11ndAmdKFEnG2wrQQ5Zqvr1kN9htxxLyoPLYFUV"
 
 	// todo: replace with real VM
-	VmAccountPublicKey = "BVMGLfRgr3nVFCH5DuW6VR2kfSDxq4EFEopXfwCDpYzb"
-	VmOmnibusPublicKey = "GNw1t85VH8b1CcwB5933KBC7PboDPJ5EcQdGynbfN1Pb"
+	CoreMintVmAccountPublicKey = "BVMGLfRgr3nVFCH5DuW6VR2kfSDxq4EFEopXfwCDpYzb"
+	CoreMintVmOmnibusPublicKey = "GNw1t85VH8b1CcwB5933KBC7PboDPJ5EcQdGynbfN1Pb"
 
 	// todo: replace with new Jeffy
 	// todo: DB store to track VM per mint

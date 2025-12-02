@@ -68,7 +68,7 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 	//
 	// todo: Dynamically detect VMs
 	for _, vm := range []string{
-		common.CodeVmAccount.PublicKey().ToBase58(),
+		common.CoreMintVmAccount.PublicKey().ToBase58(),
 	} {
 		for _, state := range []nonce.State{
 			nonce.StateReleased,

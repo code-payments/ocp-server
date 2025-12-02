@@ -18,6 +18,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
+	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/cvm"
 	"github.com/code-payments/ocp-server/solana/token"
@@ -364,12 +365,12 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 		return nil, nil, err
 	}
 
-	_, nonceMemory, nonceIndex, err := getVirtualDurableNonceAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
+	nonceMemory, nonceIndex, err := vm.GetVirtualDurableNonceAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	_, sourceMemory, sourceIndex, err := getVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
+	sourceMemory, sourceIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -392,7 +393,7 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 			return nil, nil, err
 		}
 
-		_, destinationMemory, destinationIndex, err := getVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
+		destinationMemory, destinationIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -583,12 +584,12 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 		return nil, nil, err
 	}
 
-	_, nonceMemory, nonceIndex, err := getVirtualDurableNonceAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
+	nonceMemory, nonceIndex, err := vm.GetVirtualDurableNonceAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	_, sourceMemory, sourceIndex, err := getVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
+	sourceMemory, sourceIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -611,7 +612,7 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 			return nil, nil, err
 		}
 
-		_, destinationMemory, destinationIndex, err := getVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
+		destinationMemory, destinationIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -773,7 +774,7 @@ func (h *CloseEmptyTimelockAccountFulfillmentHandler) MakeOnDemandTransaction(ct
 		return nil, nil, err
 	}
 
-	virtualAccountState, memory, index, err := getVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, timelockOwner)
+	virtualAccountState, memory, index, err := vm.GetVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, timelockOwner)
 	if err != nil {
 		return nil, nil, err
 	}

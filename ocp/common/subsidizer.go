@@ -5,13 +5,10 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
-
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
-	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/solana"
 )
 
@@ -29,7 +26,7 @@ const (
 	minSubsidizerBalance = 10_000_000_000 // 10 SOL
 )
 
-// todo: doesn't consider external deposits
+// todo: doesn't consider external deposits or swaps
 // todo: need a better system given fees are dynamic, we'll consider the worst case for each fulfillment type to be safe
 var (
 	lamportsByFulfillment = map[fulfillment.Type]uint64{
@@ -167,11 +164,6 @@ func EnforceMinimumSubsidizerBalance(ctx context.Context, data ocp_data.Provider
 
 	if fees < balance && balance-fees > minSubsidizerBalance {
 		return nil
-	}
-
-	nr, ok := ctx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-	if ok {
-		nr.RecordCustomMetric("Subsidizer/min_balance_enforced", 1)
 	}
 
 	return ErrSubsidizerRequiresFunding

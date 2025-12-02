@@ -24,6 +24,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
+	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/solana"
 )
@@ -559,7 +560,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 	// Section: On-demand account creation
 	//
 
-	err = common.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, s.vmIndexerClient, toMint, owner, true)
+	err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, s.vmIndexerClient, toMint, owner, true)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("timed out waiting for destination timelock account initialization")
 		return handleSwapError(streamer, err)

@@ -2,23 +2,14 @@ package common
 
 import (
 	"context"
-	"time"
-
-	"github.com/pkg/errors"
-
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 )
 
 var (
-	// The well-known Code VM instance
-	CodeVmAccount, _ = NewAccountFromPublicKeyString(config.VmAccountPublicKey)
-
-	// The well-known Code VM instance omnibus account
-	CodeVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.VmOmnibusPublicKey)
+	CoreMintVmAccount, _        = NewAccountFromPublicKeyString(config.CoreMintVmAccountPublicKey)
+	CoreMintVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.CoreMintVmOmnibusPublicKey)
 
 	// todo: DB store to track VM per mint
 	jeffyAuthority, _        = NewAccountFromPublicKeyString(config.JeffyAuthorityPublicKey)
@@ -38,8 +29,8 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mint *Accou
 	case CoreMintAccount.PublicKey().ToBase58():
 		return &VmConfig{
 			Authority: GetSubsidizer(),
-			Vm:        CodeVmAccount,
-			Omnibus:   CodeVmOmnibusAccount,
+			Vm:        CoreMintVmAccount,
+			Omnibus:   CoreMintVmOmnibusAccount,
 			Mint:      CoreMintAccount,
 		}, nil
 		/*
@@ -66,94 +57,4 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mint *Accou
 	default:
 		return nil, ErrUnsupportedMint
 	}
-}
-
-func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, mint, owner *Account, waitForInitialization bool) error {
-	vmConfig, err := GetVmConfigForMint(ctx, data, mint)
-	if err != nil {
-		return err
-	}
-
-	timelockAccounts, err := owner.GetTimelockAccounts(vmConfig)
-	if err != nil {
-		return err
-	}
-
-	timelockRecord, err := data.GetTimelockByVault(ctx, timelockAccounts.Vault.PublicKey().ToBase58())
-	if err != nil {
-		return err
-	}
-
-	if !timelockRecord.ExistsOnBlockchain() {
-		initializeFulfillmentRecord, err := data.GetFirstSchedulableFulfillmentByAddressAsSource(ctx, timelockRecord.VaultAddress)
-		if err != nil {
-			return err
-		}
-
-		if initializeFulfillmentRecord.FulfillmentType != fulfillment.InitializeLockedTimelockAccount {
-			return errors.New("expected an initialize locked timelock account fulfillment")
-		}
-
-		err = markFulfillmentAsActivelyScheduled(ctx, data, initializeFulfillmentRecord)
-		if err != nil {
-			return err
-		}
-	}
-
-	if !waitForInitialization {
-		return nil
-	}
-
-	for range 60 {
-		_, _, err := GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, owner)
-		if err == nil {
-			return nil
-		}
-
-		time.Sleep(time.Second)
-	}
-
-	return errors.New("timed out waiting for initialization")
-}
-
-func GetVirtualTimelockAccountLocationInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, owner *Account) (*Account, uint16, error) {
-	resp, err := vmIndexerClient.GetVirtualTimelockAccounts(ctx, &indexerpb.GetVirtualTimelockAccountsRequest{
-		VmAccount: &indexerpb.Address{Value: vm.PublicKey().ToBytes()},
-		Owner:     &indexerpb.Address{Value: owner.PublicKey().ToBytes()},
-	})
-	if err != nil {
-		return nil, 0, err
-	} else if resp.Result != indexerpb.GetVirtualTimelockAccountsResponse_OK {
-		return nil, 0, errors.Errorf("received rpc result %s", resp.Result.String())
-	}
-
-	if len(resp.Items) > 1 {
-		return nil, 0, errors.New("multiple results returned")
-	} else if resp.Items[0].Storage.GetMemory() == nil {
-		return nil, 0, errors.New("account is compressed or hasn't been initialized")
-	}
-
-	protoMemory := resp.Items[0].Storage.GetMemory()
-	memory, err := NewAccountFromPublicKeyBytes(protoMemory.Account.Value)
-	if err != nil {
-		return nil, 0, err
-	}
-	return memory, uint16(protoMemory.Index), nil
-}
-
-func markFulfillmentAsActivelyScheduled(ctx context.Context, data ocp_data.Provider, fulfillmentRecord *fulfillment.Record) error {
-	if fulfillmentRecord.Id == 0 {
-		return nil
-	}
-
-	if !fulfillmentRecord.DisableActiveScheduling {
-		return nil
-	}
-
-	if fulfillmentRecord.State != fulfillment.StateUnknown {
-		return nil
-	}
-
-	fulfillmentRecord.DisableActiveScheduling = false
-	return data.UpdateFulfillment(ctx, fulfillmentRecord)
 }
