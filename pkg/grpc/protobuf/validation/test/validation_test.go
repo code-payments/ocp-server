@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,7 +34,9 @@ func (s *service) PingStream(stream MyService_PingStreamServer) error {
 }
 
 func TestUnary(t *testing.T) {
-	cc, serv, err := testutil.NewServer()
+	log := zap.Must(zap.NewDevelopment())
+
+	cc, serv, err := testutil.NewServer(log)
 	require.NoError(t, err)
 
 	serv.RegisterService(func(s *grpc.Server) {
@@ -61,7 +64,9 @@ func TestUnary(t *testing.T) {
 }
 
 func TestStream(t *testing.T) {
-	cc, serv, err := testutil.NewServer()
+	log := zap.Must(zap.NewDevelopment())
+
+	cc, serv, err := testutil.NewServer(log)
 	require.NoError(t, err)
 
 	serv.RegisterService(func(s *grpc.Server) {

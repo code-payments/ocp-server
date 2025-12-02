@@ -7,7 +7,7 @@ import (
 	"time"
 
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v2"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
@@ -21,19 +21,19 @@ const (
 )
 
 // ValidateClientExchangeData validates proto exchange data provided by a client
-func ValidateClientExchangeData(ctx context.Context, data code_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
+func ValidateClientExchangeData(ctx context.Context, log *zap.Logger, data code_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
 	mint, err := common.GetBackwardsCompatMint(proto.Mint)
 	if err != nil {
 		return false, "", err
 	}
 
 	if common.IsCoreMint(mint) {
-		return validateCoreMintClientExchangeData(ctx, data, proto)
+		return validateCoreMintClientExchangeData(ctx, log, data, proto)
 	}
-	return validateCurrencyLaunchpadClientExchangeData(ctx, data, proto)
+	return validateCurrencyLaunchpadClientExchangeData(ctx, log, data, proto)
 }
 
-func validateCoreMintClientExchangeData(ctx context.Context, data code_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
+func validateCoreMintClientExchangeData(ctx context.Context, log *zap.Logger, data code_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
 	latestExchangeRateTime := GetLatestExchangeRateTime()
 
 	coreMintQuarksPerUnit := common.GetMintQuarksPerUnit(common.CoreMintAccount)
@@ -57,17 +57,17 @@ func validateCoreMintClientExchangeData(ctx context.Context, data code_data.Prov
 	quarksLowerBound := new(big.Float).Mul(new(big.Float).Quo(nativeAmountLowerBound, clientRate), big.NewFloat(float64(coreMintQuarksPerUnit)))
 	quarksUpperBound := new(big.Float).Mul(new(big.Float).Quo(nativeAmountUpperBound, clientRate), big.NewFloat(float64(coreMintQuarksPerUnit)))
 
-	log := logrus.StandardLogger().WithFields(logrus.Fields{
-		"currency":                  proto.Currency,
-		"client_native_amount":      clientNativeAmount.Text('f', 10),
-		"client_exchange_rate":      clientRate.Text('f', 10),
-		"client_quarks":             proto.Quarks,
-		"min_transfer_value":        minTransferValue.Text('f', 10),
-		"native_amount_lower_bound": nativeAmountLowerBound.Text('f', 10),
-		"native_amount_upper_bound": nativeAmountUpperBound.Text('f', 10),
-		"quarks_lower_bound":        quarksLowerBound.Text('f', 10),
-		"quarks_upper_bound":        quarksUpperBound.Text('f', 10),
-	})
+	log = log.With(
+		zap.String("currency", proto.Currency),
+		zap.String("client_native_amount", clientNativeAmount.Text('f', 10)),
+		zap.String("client_exchange_rate", clientRate.Text('f', 10)),
+		zap.Uint64("client_quarks", proto.Quarks),
+		zap.String("min_transfer_value", minTransferValue.Text('f', 10)),
+		zap.String("native_amount_lower_bound", nativeAmountLowerBound.Text('f', 10)),
+		zap.String("native_amount_upper_bound", nativeAmountUpperBound.Text('f', 10)),
+		zap.String("quarks_lower_bound", quarksLowerBound.Text('f', 10)),
+		zap.String("quarks_upper_bound", quarksUpperBound.Text('f', 10)),
+	)
 
 	if clientNativeAmount.Cmp(nativeAmountErrorThreshold) < 0 {
 		log.Info("native amount is less than minimum transfer value error threshold")
@@ -94,7 +94,7 @@ func validateCoreMintClientExchangeData(ctx context.Context, data code_data.Prov
 			break
 		}
 
-		log.WithField("found_rate", actualRate.Text('f', 10)).Info("exchange rate doesn't match")
+		log.With(zap.String("found_rate", actualRate.Text('f', 10))).Info("exchange rate doesn't match")
 	}
 
 	if !isClientRateValid {
@@ -111,7 +111,7 @@ func validateCoreMintClientExchangeData(ctx context.Context, data code_data.Prov
 	return true, "", nil
 }
 
-func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, data code_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
+func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, log *zap.Logger, data code_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
 	mintAccount, err := common.GetBackwardsCompatMint(proto.Mint)
 	if err != nil {
 		return false, "", err
@@ -141,17 +141,17 @@ func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, data code_
 	}
 	nativeAmountUpperBound := new(big.Float).Add(clientNativeAmount, nativeAmountErrorThreshold)
 
-	log := logrus.StandardLogger().WithFields(logrus.Fields{
-		"currency":                  proto.Currency,
-		"client_native_amount":      clientNativeAmount.Text('f', 10),
-		"client_exchange_rate":      clientRate.Text('f', 10),
-		"client_token_units":        clientTokenUnits.Text('f', 10),
-		"client_quarks":             proto.Quarks,
-		"min_transfer_value":        minTransferValue.Text('f', 10),
-		"native_amount_lower_bound": nativeAmountLowerBound.Text('f', 10),
-		"native_amount_upper_bound": nativeAmountUpperBound.Text('f', 10),
-		"mint":                      mintAccount.PublicKey().ToBase58(),
-	})
+	log = log.With(
+		zap.String("currency", proto.Currency),
+		zap.String("client_native_amount", clientNativeAmount.Text('f', 10)),
+		zap.String("client_exchange_rate", clientRate.Text('f', 10)),
+		zap.String("client_token_units", clientTokenUnits.Text('f', 10)),
+		zap.Uint64("client_quarks", proto.Quarks),
+		zap.String("min_transfer_value", minTransferValue.Text('f', 10)),
+		zap.String("native_amount_lower_bound", nativeAmountLowerBound.Text('f', 10)),
+		zap.String("native_amount_upper_bound", nativeAmountUpperBound.Text('f', 10)),
+		zap.String("mint", mintAccount.PublicKey().ToBase58()),
+	)
 
 	if clientNativeAmount.Cmp(nativeAmountErrorThreshold) < 0 {
 		log.Info("native amount is less than minimum transfer value error threshold")
@@ -206,13 +206,13 @@ func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, data code_
 		)
 		potentialNativeAmount := new(big.Float).Mul(new(big.Float).Quo(otherRate, usdRate), coreMintSellValueInUnits)
 
-		log := log.WithFields(logrus.Fields{
-			"core_mint_sell_value":    coreMintSellValueInUnits.Text('f', 10),
-			"potential_native_amount": potentialNativeAmount.Text('f', 10),
-			"found_core_mint_locked":  reserveRecord.CoreMintLocked,
-			"found_usd_rate":          usdRate.Text('f', 10),
-			"found_other_rate":        otherRate.Text('f', 10),
-		})
+		log := log.With(
+			zap.String("core_mint_sell_value", coreMintSellValueInUnits.Text('f', 10)),
+			zap.String("potential_native_amount", potentialNativeAmount.Text('f', 10)),
+			zap.Uint64("found_core_mint_locked", reserveRecord.CoreMintLocked),
+			zap.String("found_usd_rate", usdRate.Text('f', 10)),
+			zap.String("found_other_rate", otherRate.Text('f', 10)),
+		)
 
 		if potentialNativeAmount.Cmp(nativeAmountLowerBound) < 0 || potentialNativeAmount.Cmp(nativeAmountUpperBound) > 0 {
 			log.Info("native amount is outside error threshold")
@@ -222,7 +222,7 @@ func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, data code_
 		// For the valid native amount, is the exchange rate calculated correctly?
 		expectedRate := new(big.Float).Quo(clientNativeAmount, clientTokenUnits)
 		percentDiff := new(big.Float).Quo(new(big.Float).Abs(new(big.Float).Sub(clientRate, expectedRate)), expectedRate)
-		log = log.WithField("potential_exchange_rate", expectedRate.Text('f', 10))
+		log = log.With(zap.String("potential_exchange_rate", expectedRate.Text('f', 10)))
 		if percentDiff.Cmp(rateErrorThreshold) > 0 {
 			log.Info("exchange rate is outside error threshold")
 			continue

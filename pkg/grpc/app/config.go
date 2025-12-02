@@ -13,8 +13,6 @@ type Config map[string]interface{}
 // BaseConfig contains the base configuration for services, as well as the
 // application itself.
 type BaseConfig struct {
-	LogLevel string `mapstructure:"log_level"`
-
 	AppName string `mapstructure:"app_name"`
 
 	ListenAddress         string `mapstructure:"listen_address"`
@@ -59,8 +57,6 @@ type BaseConfig struct {
 }
 
 var defaultConfig = BaseConfig{
-	LogLevel: "info",
-
 	ListenAddress:         ":8085",
 	InsecureListenAddress: "localhost:8086",
 	DebugListenAddress:    ":8123",
@@ -78,8 +74,6 @@ var defaultConfig = BaseConfig{
 }
 
 func init() {
-	_ = viper.BindEnv("log_level", "LOG_LEVEL")
-
 	_ = viper.BindEnv("app_name", "APP_NAME")
 
 	_ = viper.BindEnv("listen_address", "LISTEN_ADDRESS")

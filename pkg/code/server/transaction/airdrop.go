@@ -10,7 +10,7 @@ import (
 
 	"github.com/mr-tron/base58/base58"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -52,18 +52,18 @@ var (
 )
 
 func (s *transactionServer) Airdrop(ctx context.Context, req *transactionpb.AirdropRequest) (*transactionpb.AirdropResponse, error) {
-	log := s.log.WithFields(logrus.Fields{
-		"method":       "Airdrop",
-		"airdrop_type": req.AirdropType,
-	})
+	log := s.log.With(
+		zap.String("method", "Airdrop"),
+		zap.String("airdrop_type", req.AirdropType.String()),
+	)
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner_account", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner_account", owner.PublicKey().ToBase58()))
 
 	signature := req.Signature
 	req.Signature = nil
@@ -87,7 +87,7 @@ func (s *transactionServer) Airdrop(ctx context.Context, req *transactionpb.Aird
 			Result: transactionpb.AirdropResponse_ALREADY_CLAIMED,
 		}, nil
 	} else if err != intent.ErrIntentNotFound {
-		log.WithError(err).Warn("failure checking if airdrop was already claimed")
+		log.With(zap.Error(err)).Warn("failure checking if airdrop was already claimed")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -106,7 +106,7 @@ func (s *transactionServer) Airdrop(ctx context.Context, req *transactionpb.Aird
 	if !s.conf.disableAntispamChecks.Get(ctx) {
 		allow, err := s.antispamGuard.AllowWelcomeBonus(ctx, owner)
 		if err != nil {
-			log.WithError(err).Warn("failure performing antispam check")
+			log.With(zap.Error(err)).Warn("failure performing antispam check")
 			return nil, status.Error(codes.Internal, "")
 		} else if !allow {
 			return &transactionpb.AirdropResponse{
@@ -123,7 +123,7 @@ func (s *transactionServer) Airdrop(ctx context.Context, req *transactionpb.Aird
 			Result: transactionpb.AirdropResponse_UNAVAILABLE,
 		}, nil
 	default:
-		log.WithError(err).Warn("failure airdropping account")
+		log.With(zap.Error(err)).Warn("failure airdropping account")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -147,30 +147,30 @@ func (s *transactionServer) Airdrop(ctx context.Context, req *transactionpb.Aird
 //
 // todo: This function needs to be more resilient to failures due to balance races
 func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner *common.Account, airdropType AirdropType) (*intent.Record, error) {
-	log := s.log.WithFields(logrus.Fields{
-		"method":       "airdrop",
-		"owner":        owner.PublicKey().ToBase58(),
-		"intent":       intentId,
-		"airdrop_type": airdropType.String(),
-	})
+	log := s.log.With(
+		zap.String("method", "airdrop"),
+		zap.String("owner", owner.PublicKey().ToBase58()),
+		zap.String("intent", intentId),
+		zap.String("airdrop_type", airdropType.String()),
+	)
 
 	// Find the destination account, which will be the user's primary account
 	primaryAccountInfoRecordsByMint, err := s.data.GetLatestAccountInfoByOwnerAddressAndType(ctx, owner.PublicKey().ToBase58(), commonpb.AccountType_PRIMARY)
 	if err == account.ErrAccountInfoNotFound {
-		log.Trace("owner cannot receive airdrop")
+		log.Debug("owner cannot receive airdrop")
 		return nil, ErrInvalidAirdropTarget
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting primary account info record")
+		log.With(zap.Error(err)).Warn("failure getting primary account info record")
 		return nil, err
 	}
 	coreMintPrimaryAccountInfoRecord, ok := primaryAccountInfoRecordsByMint[common.CoreMintAccount.PublicKey().ToBase58()]
 	if !ok {
-		log.Trace("owner cannot receive airdrop")
+		log.Debug("owner cannot receive airdrop")
 		return nil, ErrInvalidAirdropTarget
 	}
 	destination, err := common.NewAccountFromPublicKeyString(coreMintPrimaryAccountInfoRecord.TokenAccount)
 	if err != nil {
-		log.WithError(err).Warn("invalid destination account")
+		log.With(zap.Error(err)).Warn("invalid destination account")
 		return nil, err
 	}
 
@@ -180,20 +180,20 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 	case AirdropTypeWelcomeBonus:
 		nativeAmount, currencyCode, err = s.airdropIntegration.GetWelcomeBonusAmount(ctx, owner)
 		if err != nil {
-			log.WithError(err).Warn("failure getting welcome bonus amount from integration")
+			log.With(zap.Error(err)).Warn("failure getting welcome bonus amount from integration")
 			return nil, err
 		}
 		if nativeAmount == 0 {
-			log.Trace("integration did not allow welcome bonus")
+			log.Debug("integration did not allow welcome bonus")
 			return nil, ErrInvalidAirdropTarget
 		}
 	default:
 		return nil, errors.New("unhandled airdrop type")
 	}
-	log = log.WithFields(logrus.Fields{
-		"native_amount": nativeAmount,
-		"currency":      currencyCode,
-	})
+	log = log.With(
+		zap.Float64("native_amount", nativeAmount),
+		zap.String("currency", string(currencyCode)),
+	)
 
 	var additionalQuarks uint64
 	switch currencyCode {
@@ -207,7 +207,7 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 
 	exchangeRateRecord, err := s.data.GetExchangeRate(ctx, currencyCode, currency_util.GetLatestExchangeRateTime())
 	if err != nil {
-		log.WithError(err).Warn("failure getting other rate")
+		log.With(zap.Error(err)).Warn("failure getting other rate")
 		return nil, err
 	}
 
@@ -216,7 +216,7 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 
 	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, s.data, common.CoreMintAccount, quarkAmount, currency_util.GetLatestExchangeRateTime())
 	if err != nil {
-		log.WithError(err).Warn("failure calculating usd market value")
+		log.With(zap.Error(err)).Warn("failure calculating usd market value")
 		return nil, err
 	}
 
@@ -238,13 +238,13 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 	if err == nil {
 		return existingIntentRecord, nil
 	} else if err != intent.ErrIntentNotFound {
-		log.WithError(err).Warn("failure checking for existing airdrop intent")
+		log.With(zap.Error(err)).Warn("failure checking for existing airdrop intent")
 		return nil, err
 	}
 
 	balanceLock, err := balance.GetOptimisticVersionLock(ctx, s.data, s.airdropper.Vault)
 	if err != nil {
-		log.WithError(err).Warn("failure getting balance lock")
+		log.With(zap.Error(err)).Warn("failure getting balance lock")
 		return nil, err
 	}
 
@@ -252,13 +252,13 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 	// to be over with until we get more funding.
 	balance, err := balance.CalculateFromCache(ctx, s.data, s.airdropper.Vault)
 	if err != nil {
-		log.WithError(err).Warn("failure getting airdropper balance")
+		log.With(zap.Error(err)).Warn("failure getting airdropper balance")
 		return nil, err
 	} else if balance < quarkAmount {
-		log.WithFields(logrus.Fields{
-			"balance":  balance,
-			"required": quarkAmount,
-		}).Warn("airdropper has insufficient balance")
+		log.With(
+			zap.Uint64("balance", balance),
+			zap.Uint64("required", quarkAmount),
+		).Warn("airdropper has insufficient balance")
 		return nil, ErrInsufficientAirdropperBalance
 	}
 
@@ -277,12 +277,12 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 		s.noncePools...,
 	)
 	if err != nil {
-		log.WithError(err).Warn("failure selecting nonce pool")
+		log.With(zap.Error(err)).Warn("failure selecting nonce pool")
 		return nil, err
 	}
 	selectedNonce, err := noncePool.GetNonce(ctx)
 	if err != nil {
-		log.WithError(err).Warn("failure selecting available nonce")
+		log.With(zap.Error(err)).Warn("failure selecting available nonce")
 		return nil, err
 	}
 	defer func() {
@@ -398,7 +398,7 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 		return nil
 	})
 	if err != nil {
-		log.WithError(err).Warn("failure creating airdrop intent")
+		log.With(zap.Error(err)).Warn("failure creating airdrop intent")
 		return nil, err
 	}
 

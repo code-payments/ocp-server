@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	currency_util "github.com/code-payments/ocp-server/pkg/code/currency"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
@@ -25,13 +25,13 @@ var (
 // Guard gates money movement by applying rules on operations of interest to
 // discourage money laundering.
 type Guard struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	data code_data.Provider
 }
 
-func NewGuard(data code_data.Provider) *Guard {
+func NewGuard(log *zap.Logger, data code_data.Provider) *Guard {
 	return &Guard{
-		log:  logrus.StandardLogger().WithField("type", "aml/guard"),
+		log:  log,
 		data: data,
 	}
 }
@@ -72,13 +72,13 @@ func (g *Guard) AllowMoneyMovement(ctx context.Context, intentRecord *intent.Rec
 		return false, err
 	}
 
-	log := g.log.WithFields(logrus.Fields{
-		"method":        "AllowMoneyMovement",
-		"owner":         intentRecord.InitiatorOwnerAccount,
-		"currency":      string(currency),
-		"native_amount": nativeAmount,
-		"usd_value":     usdMarketValue,
-	})
+	log := g.log.With(
+		zap.String("method", "AllowMoneyMovement"),
+		zap.String("owner", intentRecord.InitiatorOwnerAccount),
+		zap.String("currency", string(currency)),
+		zap.Float64("native_amount", nativeAmount),
+		zap.Float64("usd_value", usdMarketValue),
+	)
 
 	sendLimit, ok := currency_util.SendLimits[currency]
 	if !ok {
@@ -96,7 +96,6 @@ func (g *Guard) AllowMoneyMovement(ctx context.Context, intentRecord *intent.Rec
 	// Bound the maximum dollar value of payments in the last day
 	_, usdInLastDay, err := consumptionCalculator(ctx, intentRecord.InitiatorOwnerAccount, time.Now().Add(-24*time.Hour))
 	if err != nil {
-		log.WithError(err).Warn("failure calculating previous day transaction amount")
 		tracer.OnError(err)
 		return false, err
 	}

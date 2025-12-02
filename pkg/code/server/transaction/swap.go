@@ -9,6 +9,7 @@ import (
 
 	"github.com/mr-tron/base58/base58"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -30,7 +31,7 @@ import (
 func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSwapServer) error {
 	ctx := streamer.Context()
 
-	log := s.log.WithField("method", "StartSwap")
+	log := s.log.With(zap.String("method", "StartSwap"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	if s.conf.disableSwaps.Get(ctx) {
@@ -39,7 +40,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 
 	req, err := protoutil.BoundedReceive[transactionpb.StartSwapRequest](ctx, streamer, s.conf.clientReceiveTimeout.Get(ctx))
 	if err != nil {
-		log.WithError(err).Info("error receiving request from client")
+		log.With(zap.Error(err)).Info("error receiving request from client")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -50,10 +51,10 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 
 	owner, err := common.NewAccountFromProto(startReq.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return handleStartSwapError(streamer, err)
 	}
-	log = log.WithField("owner", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner", owner.PublicKey().ToBase58()))
 
 	reqSignature := startReq.Signature
 	startReq.Signature = nil
@@ -67,17 +68,17 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	}
 
 	swapId := base58.Encode(startCurrencyCreatorSwapReq.Id.Value)
-	log = log.WithField("swap_id", swapId)
+	log = log.With(zap.String("swap_id", swapId))
 
 	fromMint, err := common.NewAccountFromProto(startCurrencyCreatorSwapReq.FromMint)
 	if err != nil {
-		log.WithError(err).Warn("invalid source mint account")
+		log.With(zap.Error(err)).Warn("invalid source mint account")
 		return handleStartSwapError(streamer, err)
 	}
 
 	toMint, err := common.NewAccountFromProto(startCurrencyCreatorSwapReq.ToMint)
 	if err != nil {
-		log.WithError(err).Warn("invalid destination mint account")
+		log.With(zap.Error(err)).Warn("invalid destination mint account")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -87,7 +88,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 
 	ownerManagemntState, err := common.GetOwnerManagementState(ctx, s.data, owner)
 	if err != nil {
-		log.WithError(err).Warn("failure getting owner management state")
+		log.With(zap.Error(err)).Warn("failure getting owner management state")
 		return handleStartSwapError(streamer, err)
 	}
 	if ownerManagemntState != common.OwnerManagementStateCodeAccount {
@@ -109,7 +110,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == nil {
 		return handleStartSwapError(streamer, NewSwapDeniedError("attempt to reuse swap id"))
 	} else if err != swap.ErrNotFound {
-		log.WithError(err).Warn("failure checking for existing swap record")
+		log.With(zap.Error(err)).Warn("failure checking for existing swap record")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -125,7 +126,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == common.ErrUnsupportedMint {
 		return handleStartSwapError(streamer, NewSwapValidationError("invalid source mint"))
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting source vm config")
+		log.With(zap.Error(err)).Warn("failure getting source vm config")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -133,13 +134,13 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == common.ErrUnsupportedMint {
 		return handleStartSwapError(streamer, NewSwapValidationError("invalid destination mint"))
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting destination vm config")
+		log.With(zap.Error(err)).Warn("failure getting destination vm config")
 		return handleStartSwapError(streamer, err)
 	}
 
 	ownerSourceTimelockVault, err := owner.ToTimelockVault(sourceVmConfig)
 	if err != nil {
-		log.WithError(err).Warn("failure getting owner destination timelock vault")
+		log.With(zap.Error(err)).Warn("failure getting owner destination timelock vault")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -147,13 +148,13 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == timelock.ErrTimelockNotFound {
 		return handleStartSwapError(streamer, NewSwapValidationError("source timelock vault account not opened"))
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting source timelock record")
+		log.With(zap.Error(err)).Warn("failure getting source timelock record")
 		return handleStartSwapError(streamer, err)
 	}
 
 	balance, err := balance.CalculateFromCache(ctx, s.data, ownerSourceTimelockVault)
 	if err != nil {
-		log.WithError(err).Warn("failure getting owner source timelock vault balance")
+		log.With(zap.Error(err)).Warn("failure getting owner source timelock vault balance")
 		return handleStartSwapError(streamer, err)
 	}
 	if balance < startCurrencyCreatorSwapReq.Amount {
@@ -162,7 +163,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 
 	ownerDestinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
 	if err != nil {
-		log.WithError(err).Warn("failure getting owner destination timelock vault")
+		log.With(zap.Error(err)).Warn("failure getting owner destination timelock vault")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -170,7 +171,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == timelock.ErrTimelockNotFound {
 		return handleStartSwapError(streamer, NewSwapValidationError("destination timelock vault account not opened"))
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting destination timelock record")
+		log.With(zap.Error(err)).Warn("failure getting destination timelock record")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -178,7 +179,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == nil {
 		return handleStartSwapError(streamer, NewSwapValidationError("funding intent already exists"))
 	} else if err != intent.ErrIntentNotFound {
-		log.WithError(err).Warn("failure getting funding intent record")
+		log.With(zap.Error(err)).Warn("failure getting funding intent record")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -193,12 +194,12 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 		s.noncePools...,
 	)
 	if err != nil {
-		log.WithError(err).Warn("failure selecting nonce pool")
+		log.With(zap.Error(err)).Warn("failure selecting nonce pool")
 		return handleStartSwapError(streamer, err)
 	}
 	selectedNonce, err := noncePool.GetNonce(ctx)
 	if err != nil {
-		log.WithError(err).Warn("failure selecting available nonce")
+		log.With(zap.Error(err)).Warn("failure selecting available nonce")
 		return handleStartSwapError(streamer, err)
 	}
 	defer func() {
@@ -223,7 +224,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 
 	req, err = protoutil.BoundedReceive[transactionpb.StartSwapRequest](ctx, streamer, s.conf.clientReceiveTimeout.Get(ctx))
 	if err != nil {
-		log.WithError(err).Info("error receiving request from client")
+		log.With(zap.Error(err)).Info("error receiving request from client")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -274,13 +275,13 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 		err = selectedNonce.MarkReservedWithSignature(ctx, record.ProofSignature)
 		if err != nil {
-			log.WithError(err).Warn("failure reserving nonce")
+			log.With(zap.Error(err)).Warn("failure reserving nonce")
 			return err
 		}
 
 		err = s.data.SaveSwap(ctx, record)
 		if err != nil {
-			log.WithError(err).Warn("failure saving swap record")
+			log.With(zap.Error(err)).Warn("failure saving swap record")
 			return err
 		}
 
@@ -305,18 +306,18 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 }
 
 func (s *transactionServer) GetSwap(ctx context.Context, req *transactionpb.GetSwapRequest) (*transactionpb.GetSwapResponse, error) {
-	log := s.log.WithField("method", "GetSwap")
+	log := s.log.With(zap.String("method", "GetSwap"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner", owner.PublicKey().ToBase58()))
 
 	swapId := base58.Encode(req.Id.Value)
-	log = log.WithField("swap_id", swapId)
+	log = log.With(zap.String("swap_id", swapId))
 
 	signature := req.Signature
 	req.Signature = nil
@@ -330,7 +331,7 @@ func (s *transactionServer) GetSwap(ctx context.Context, req *transactionpb.GetS
 			Result: transactionpb.GetSwapResponse_NOT_FOUND,
 		}, nil
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting swap")
+		log.With(zap.Error(err)).Warn("failure getting swap")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -342,7 +343,7 @@ func (s *transactionServer) GetSwap(ctx context.Context, req *transactionpb.GetS
 
 	protoSwap, err := toProtoSwap(record)
 	if err != nil {
-		log.WithError(err).Warn("failure converting swap to proto")
+		log.With(zap.Error(err)).Warn("failure converting swap to proto")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -353,15 +354,15 @@ func (s *transactionServer) GetSwap(ctx context.Context, req *transactionpb.GetS
 }
 
 func (s *transactionServer) GetPendingSwaps(ctx context.Context, req *transactionpb.GetPendingSwapsRequest) (*transactionpb.GetPendingSwapsResponse, error) {
-	log := s.log.WithField("method", "GetPendingSwaps")
+	log := s.log.With(zap.String("method", "GetPendingSwaps"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner", owner.PublicKey().ToBase58()))
 
 	signature := req.Signature
 	req.Signature = nil
@@ -377,13 +378,13 @@ func (s *transactionServer) GetPendingSwaps(ctx context.Context, req *transactio
 
 	createdSwaps, err := s.data.GetAllSwapsByOwnerAndState(ctx, owner.PublicKey().ToBase58(), swap.StateCreated)
 	if err != nil && err != swap.ErrNotFound {
-		log.WithError(err).Warn("failure getting swaps in CREATED state")
+		log.With(zap.Error(err)).Warn("failure getting swaps in CREATED state")
 		return nil, status.Error(codes.Internal, "")
 	}
 
 	fundedSwaps, err := s.data.GetAllSwapsByOwnerAndState(ctx, owner.PublicKey().ToBase58(), swap.StateFunded)
 	if err != nil && err != swap.ErrNotFound {
-		log.WithError(err).Warn("failure getting swaps in FUNDED state")
+		log.With(zap.Error(err)).Warn("failure getting swaps in FUNDED state")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -398,11 +399,11 @@ func (s *transactionServer) GetPendingSwaps(ctx context.Context, req *transactio
 
 	res := make([]*transactionpb.SwapMetadata, len(allPendingSwaps))
 	for i, pendingSwap := range allPendingSwaps {
-		log := log.WithField("swap_id", pendingSwap.SwapId)
+		log := log.With(zap.String("swap_id", pendingSwap.SwapId))
 
 		res[i], err = toProtoSwap(pendingSwap)
 		if err != nil {
-			log.WithError(err).Warn("failure converting swap to proto")
+			log.With(zap.Error(err)).Warn("failure converting swap to proto")
 			return nil, status.Error(codes.Internal, "")
 		}
 	}
@@ -419,8 +420,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 	ctx, cancel := context.WithTimeout(streamer.Context(), s.conf.swapTimeout.Get(streamer.Context()))
 	defer cancel()
 
-	log := s.log.WithField("method", "Swap")
-	log = log.WithContext(ctx)
+	log := s.log.With(zap.String("method", "Swap"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	if s.conf.disableSwaps.Get(ctx) {
@@ -429,7 +429,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 
 	req, err := protoutil.BoundedReceive[transactionpb.SwapRequest](ctx, streamer, s.conf.clientReceiveTimeout.Get(ctx))
 	if err != nil {
-		log.WithError(err).Info("error receiving request from client")
+		log.With(zap.Error(err)).Info("error receiving request from client")
 		return handleSwapError(streamer, err)
 	}
 
@@ -449,10 +449,10 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 
 	owner, err := common.NewAccountFromProto(statefulReq.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return handleSwapError(streamer, err)
 	}
-	log = log.WithField("owner", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner", owner.PublicKey().ToBase58()))
 
 	reqSignature := statefulReq.Signature
 	statefulReq.Signature = nil
@@ -461,65 +461,65 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 	}
 
 	swapId := base58.Encode(statefulReq.SwapId.Value)
-	log = log.WithField("swap_id", swapId)
+	log = log.With(zap.String("swap_id", swapId))
 
 	swapRecord, err := s.data.GetSwapById(ctx, swapId)
 	if err == swap.ErrNotFound {
 		return handleSwapError(streamer, NewSwapValidationError("swap state not found"))
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting swap record")
+		log.With(zap.Error(err)).Warn("failure getting swap record")
 		return handleSwapError(streamer, err)
 	}
 
 	swapAuthority, err := common.NewAccountFromProto(statefulReq.SwapAuthority)
 	if err != nil {
-		log.WithError(err).Warn("invalid swap authority")
+		log.With(zap.Error(err)).Warn("invalid swap authority")
 		return handleSwapError(streamer, err)
 	}
-	log = log.WithField("swap_authority", swapAuthority.PublicKey().ToBase58())
+	log = log.With(zap.String("swap_authority", swapAuthority.PublicKey().ToBase58()))
 
 	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
 	if err != nil {
-		log.WithError(err).Warn("invalid mint")
+		log.With(zap.Error(err)).Warn("invalid mint")
 		return handleSwapError(streamer, err)
 	}
-	log = log.WithField("from_mint", fromMint.PublicKey().ToBase58())
+	log = log.With(zap.String("from_mint", fromMint.PublicKey().ToBase58()))
 
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
-		log.WithError(err).Warn("invalid mint")
+		log.With(zap.Error(err)).Warn("invalid mint")
 		return handleSwapError(streamer, err)
 	}
-	log = log.WithField("to_mint", toMint.PublicKey().ToBase58())
+	log = log.With(zap.String("to_mint", toMint.PublicKey().ToBase58()))
 
 	nonce, err := common.NewAccountFromPublicKeyString(swapRecord.Nonce)
 	if err != nil {
-		log.WithError(err).Warn("invalid nonce")
+		log.With(zap.Error(err)).Warn("invalid nonce")
 		return handleSwapError(streamer, err)
 	}
 
 	decodedBlockhash, err := base58.Decode(swapRecord.Blockhash)
 	if err != nil {
-		log.WithError(err).Warn("invalid blockhash")
+		log.With(zap.Error(err)).Warn("invalid blockhash")
 		return handleSwapError(streamer, err)
 	}
 	blockhash := solana.Blockhash(decodedBlockhash)
 
 	sourceVmConfig, err := common.GetVmConfigForMint(ctx, s.data, fromMint)
 	if err != nil {
-		log.WithError(err).Warn("failure getting source vm config")
+		log.With(zap.Error(err)).Warn("failure getting source vm config")
 		return handleSwapError(streamer, err)
 	}
 
 	destinationVmConfig, err := common.GetVmConfigForMint(ctx, s.data, toMint)
 	if err != nil {
-		log.WithError(err).Warn("failure getting destination vm config")
+		log.With(zap.Error(err)).Warn("failure getting destination vm config")
 		return handleSwapError(streamer, err)
 	}
 
 	ownerSourceVmSwapAta, err := owner.ToVmSwapAta(sourceVmConfig)
 	if err != nil {
-		log.WithError(err).Warn("failure getting owner source vm swap ata")
+		log.With(zap.Error(err)).Warn("failure getting owner source vm swap ata")
 		return handleSwapError(streamer, err)
 	}
 
@@ -542,7 +542,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 	// todo: for any of these invalid funding cases, we should cancel the swap
 	intentRecord, err := s.data.GetIntent(ctx, swapRecord.FundingId)
 	if err != nil {
-		log.WithError(err).Warn("failure getting funding intent record")
+		log.With(zap.Error(err)).Warn("failure getting funding intent record")
 		return handleSwapError(streamer, errors.New("unexpected nonce state"))
 	}
 	if intentRecord.IntentType != intent.SendPublicPayment {
@@ -561,7 +561,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 
 	err = common.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, s.vmIndexerClient, toMint, owner, true)
 	if err != nil {
-		log.WithError(err).Warn("timed out waiting for destination timelock account initialization")
+		log.With(zap.Error(err)).Warn("timed out waiting for destination timelock account initialization")
 		return handleSwapError(streamer, err)
 	}
 
@@ -611,7 +611,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 
 		alt, err := transaction_util.GetAltForMint(ctx, s.data, mint)
 		if err != nil {
-			log.WithError(err).Warn("failure getting alt")
+			log.With(zap.Error(err)).Warn("failure getting alt")
 			return handleSwapError(streamer, err)
 		}
 		alts = append(alts, alt)
@@ -619,7 +619,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 
 	ixns, err := swapHandler.MakeInstructions(ctx)
 	if err != nil {
-		log.WithError(err).Warn("failure making instructions")
+		log.With(zap.Error(err)).Warn("failure making instructions")
 		return handleSwapError(streamer, err)
 	}
 
@@ -671,7 +671,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 
 	req, err = protoutil.BoundedReceive[transactionpb.SwapRequest](ctx, streamer, s.conf.clientReceiveTimeout.Get(ctx))
 	if err != nil {
-		log.WithError(err).Info("error receiving request from client")
+		log.With(zap.Error(err)).Info("error receiving request from client")
 		return err
 	}
 
@@ -719,7 +719,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 		destinationVmConfig.Authority.PrivateKey().ToBytes(),
 	)
 	if err != nil {
-		log.WithError(err).Info("failure signing transaction")
+		log.With(zap.Error(err)).Info("failure signing transaction")
 		return handleSwapError(streamer, err)
 	}
 
@@ -740,7 +740,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 			txnSignature,
 		)
 		if err != nil {
-			log.WithError(err).Warn("failure updating nonce record")
+			log.With(zap.Error(err)).Warn("failure updating nonce record")
 			return err
 		}
 
@@ -749,7 +749,7 @@ func (s *transactionServer) Swap(streamer transactionpb.Transaction_SwapServer) 
 		swapRecord.TransactionBlob = marshalledTxn
 		err = s.data.SaveSwap(ctx, swapRecord)
 		if err != nil {
-			log.WithError(err).Warn("failure updating swap record")
+			log.With(zap.Error(err)).Warn("failure updating swap record")
 			return err
 		}
 

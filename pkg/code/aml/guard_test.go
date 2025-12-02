@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	currency_util "github.com/code-payments/ocp-server/pkg/code/currency"
@@ -142,9 +143,11 @@ type amlTestEnv struct {
 }
 
 func setupAmlTest(t *testing.T) (env amlTestEnv) {
+	log := zap.Must(zap.NewDevelopment())
+
 	env.ctx = context.Background()
 	env.data = code_data.NewTestDataProvider()
-	env.guard = NewGuard(env.data)
+	env.guard = NewGuard(log, env.data)
 
 	testutil.SetupRandomSubsidizer(t, env.data)
 

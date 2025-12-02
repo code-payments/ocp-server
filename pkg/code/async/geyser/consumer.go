@@ -7,14 +7,14 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	"github.com/code-payments/ocp-server/pkg/metrics"
 )
 
 func (p *service) consumeGeyserProgramUpdateEvents(ctx context.Context) error {
-	log := p.log.WithField("method", "consumeGeyserProgramUpdateEvents")
+	log := p.log.With(zap.String("method", "consumeGeyserProgramUpdateEvents"))
 
 	for {
 		// Is the service stopped?
@@ -26,7 +26,7 @@ func (p *service) consumeGeyserProgramUpdateEvents(ctx context.Context) error {
 
 		err := p.subscribeToProgramUpdatesFromGeyser(ctx, p.conf.grpcPluginEndpoint.Get(ctx), p.conf.grpcPluginXToken.Get(ctx))
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.WithError(err).Warn("program update consumer unexpectedly terminated")
+			log.With(zap.Error(err)).Warn("program update consumer unexpectedly terminated")
 		}
 
 		// Avoid spamming new connections when something is wrong
@@ -35,7 +35,7 @@ func (p *service) consumeGeyserProgramUpdateEvents(ctx context.Context) error {
 }
 
 func (p *service) consumeGeyserSlotUpdateEvents(ctx context.Context) error {
-	log := p.log.WithField("method", "consumeGeyserSlotUpdateEvents")
+	log := p.log.With(zap.String("method", "consumeGeyserSlotUpdateEvents"))
 
 	for {
 		// Is the service stopped?
@@ -47,7 +47,7 @@ func (p *service) consumeGeyserSlotUpdateEvents(ctx context.Context) error {
 
 		err := p.subscribeToSlotUpdatesFromGeyser(ctx, p.conf.grpcPluginEndpoint.Get(ctx), p.conf.grpcPluginXToken.Get(ctx))
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.WithError(err).Warn("slot update consumer unexpectedly terminated")
+			log.With(zap.Error(err)).Warn("slot update consumer unexpectedly terminated")
 		}
 
 		// Avoid spamming new connections when something is wrong
@@ -64,10 +64,10 @@ func (p *service) programUpdateWorker(serviceCtx context.Context, id int) {
 	p.programUpdateWorkerMetrics[id].active = false
 	p.metricStatusLock.Unlock()
 
-	log := p.log.WithFields(logrus.Fields{
-		"method":    "programUpdateWorker",
-		"worker_id": id,
-	})
+	log := p.log.With(
+		zap.String("method", "programUpdateWorker"),
+		zap.Int("worker_id", id),
+	)
 
 	log.Debug("worker started")
 
@@ -93,23 +93,23 @@ func (p *service) programUpdateWorker(serviceCtx context.Context, id int) {
 
 			publicKey, err := common.NewAccountFromPublicKeyBytes(update.Account.Pubkey)
 			if err != nil {
-				log.WithError(err).Warn("invalid public key")
+				log.With(zap.Error(err)).Warn("invalid public key")
 				return
 			}
 
 			program, err := common.NewAccountFromPublicKeyBytes(update.Account.Owner)
 			if err != nil {
-				log.WithError(err).Warn("invalid owner account")
+				log.With(zap.Error(err)).Warn("invalid owner account")
 				return
 			}
 
-			log := log.WithFields(logrus.Fields{
-				"program": program.PublicKey().ToBase58(),
-				"account": publicKey.PublicKey().ToBase58(),
-				"slot":    update.Slot,
-			})
+			log := log.With(
+				zap.String("program", program.PublicKey().ToBase58()),
+				zap.String("account", publicKey.PublicKey().ToBase58()),
+				zap.Uint64("slot", update.Slot),
+			)
 			if update.Account.TxnSignature != nil {
-				log = log.WithField("transaction", base58.Encode(update.Account.TxnSignature))
+				log = log.With(zap.String("transaction", base58.Encode(update.Account.TxnSignature)))
 			}
 
 			handler, ok := p.programUpdateHandlers[program.PublicKey().ToBase58()]
@@ -121,7 +121,7 @@ func (p *service) programUpdateWorker(serviceCtx context.Context, id int) {
 			err = handler.Handle(tracedCtx, update)
 			if err != nil {
 				m.NoticeError(err)
-				log.WithError(err).Warn("failed to process program account update")
+				log.With(zap.Error(err)).Warn("failed to process program account update")
 			}
 
 			p.metricStatusLock.Lock()

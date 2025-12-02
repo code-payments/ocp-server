@@ -3,7 +3,7 @@ package validation
 import (
 	"context"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -17,14 +17,12 @@ type Validator interface {
 // inbound and outbound messages. If an inbound message is invalid, a
 // codes.InvalidArgument is returned. If an outbound message is invalid, a
 // codes.Internal is returned.
-func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
-	log := logrus.StandardLogger().WithField("type", "protobuf/validation/interceptor")
-
+func UnaryServerInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if v, ok := req.(Validator); ok {
 			if err := v.Validate(); err != nil {
 				// We use an info level here because it is outside of 'our' control.
-				log.WithError(err).WithField("req", req).Info("dropping invalid request")
+				log.With(zap.Error(err), zap.Any("req", req)).Info("dropping invalid request")
 				return nil, status.Error(codes.InvalidArgument, err.Error())
 			}
 		}
@@ -37,7 +35,7 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		if v, ok := resp.(Validator); ok {
 			if err := v.Validate(); err != nil {
 				// We warn here because this indicates a problem with 'our' service.
-				log.WithError(err).WithField("resp", req).Warn("dropping invalid response")
+				log.With(zap.Error(err), zap.Any("resp", resp)).Warn("dropping invalid response")
 				return nil, status.Error(codes.Internal, err.Error())
 			}
 		}
@@ -50,14 +48,14 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 // inbound and outbound messages. If an inbound message is invalid, a
 // codes.InvalidArgument is returned. If an outbound message is invalid, a
 // codes.Internal is returned.
-func StreamServerInterceptor() grpc.StreamServerInterceptor {
+func StreamServerInterceptor(log *zap.Logger) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		return handler(srv, &serverStreamWrapper{logrus.StandardLogger().WithField("type", "protobuf/validation/interceptor"), ss})
+		return handler(srv, &serverStreamWrapper{log, ss})
 	}
 }
 
 type serverStreamWrapper struct {
-	log *logrus.Entry
+	log *zap.Logger
 
 	grpc.ServerStream
 }
@@ -69,7 +67,7 @@ func (s *serverStreamWrapper) RecvMsg(req interface{}) error {
 
 	if v, ok := req.(Validator); ok {
 		if err := v.Validate(); err != nil {
-			s.log.WithError(err).WithField("req", req).Info("dropping invalid request")
+			s.log.With(zap.Error(err), zap.Any("req", req)).Info("dropping invalid request")
 			return status.Error(codes.InvalidArgument, err.Error())
 		}
 	}
@@ -80,7 +78,7 @@ func (s *serverStreamWrapper) RecvMsg(req interface{}) error {
 func (s *serverStreamWrapper) SendMsg(resp interface{}) error {
 	if v, ok := resp.(Validator); ok {
 		if err := v.Validate(); err != nil {
-			s.log.WithError(err).WithField("resp", resp).Warn("dropping invalid response")
+			s.log.With(zap.Error(err), zap.Any("resp", resp)).Warn("dropping invalid response")
 			return status.Error(codes.Internal, err.Error())
 		}
 	}

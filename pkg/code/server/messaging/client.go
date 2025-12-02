@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -27,7 +28,7 @@ func init() {
 }
 
 // todo: we can cache and reuse clients
-func getInternalMessagingClient(address string) (messagingpb.MessagingClient, error) {
+func getInternalMessagingClient(log *zap.Logger, address string) (messagingpb.MessagingClient, error) {
 	internalMessagingClientConnsMu.RLock()
 	existing, ok := internalMessagingClientConns[address]
 	if ok {
@@ -49,10 +50,10 @@ func getInternalMessagingClient(address string) (messagingpb.MessagingClient, er
 
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 
-		grpc.WithUnaryInterceptor(validation.UnaryClientInterceptor()),
+		grpc.WithUnaryInterceptor(validation.UnaryClientInterceptor(log)),
 		grpc.WithUnaryInterceptor(headers.UnaryClientInterceptor()),
 
-		grpc.WithStreamInterceptor(validation.StreamClientInterceptor()),
+		grpc.WithStreamInterceptor(validation.StreamClientInterceptor(log)),
 		grpc.WithStreamInterceptor(headers.StreamClientInterceptor()),
 	)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -19,22 +20,22 @@ import (
 )
 
 func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb.VoidGiftCardRequest) (*transactionpb.VoidGiftCardResponse, error) {
-	log := s.log.WithField("method", "VoidGiftCard")
+	log := s.log.With(zap.String("method", "VoidGiftCard"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner_account", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner_account", owner.PublicKey().ToBase58()))
 
 	giftCardVault, err := common.NewAccountFromProto(req.GiftCardVault)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("gift_card_vault_account", giftCardVault.PublicKey().ToBase58())
+	log = log.With(zap.String("gift_card_vault_account", giftCardVault.PublicKey().ToBase58()))
 
 	signature := req.Signature
 	req.Signature = nil
@@ -55,13 +56,13 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 			Result: transactionpb.VoidGiftCardResponse_NOT_FOUND,
 		}, nil
 	default:
-		log.WithError(err).Warn("failure getting gift card account info")
+		log.With(zap.Error(err)).Warn("failure getting gift card account info")
 		return nil, status.Error(codes.Internal, "")
 	}
 
 	giftCardIssuedIntentRecord, err := s.data.GetOriginalGiftCardIssuedIntent(ctx, giftCardVault.PublicKey().ToBase58())
 	if err != nil {
-		log.WithError(err).Warn("failure getting gift card issued intent record")
+		log.With(zap.Error(err)).Warn("failure getting gift card issued intent record")
 		return nil, status.Error(codes.Internal, "")
 	} else if giftCardIssuedIntentRecord.InitiatorOwnerAccount != owner.PublicKey().ToBase58() {
 		return &transactionpb.VoidGiftCardResponse{
@@ -77,7 +78,7 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 
 	globalBalanceLock, err := balance.GetOptimisticVersionLock(ctx, s.data, giftCardVault)
 	if err != nil {
-		log.WithError(err).Warn("failure getting balance lock")
+		log.With(zap.Error(err)).Warn("failure getting balance lock")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -89,19 +90,19 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 	if err == nil {
 		mintAccount, err := common.NewAccountFromPublicKeyString(accountInfoRecord.MintAccount)
 		if err != nil {
-			log.WithError(err).Warn("invalid mint account")
+			log.With(zap.Error(err)).Warn("invalid mint account")
 			return nil, status.Error(codes.Internal, "")
 		}
 
 		vmConfig, err := common.GetVmConfigForMint(ctx, s.data, mintAccount)
 		if err != nil {
-			log.WithError(err).Warn("failure getting vm config")
+			log.With(zap.Error(err)).Warn("failure getting vm config")
 			return nil, status.Error(codes.Internal, "")
 		}
 
 		ownerTimelockAccounts, err := owner.GetTimelockAccounts(vmConfig)
 		if err != nil {
-			log.WithError(err).Warn("failure getting owner timelock accounts")
+			log.With(zap.Error(err)).Warn("failure getting owner timelock accounts")
 			return nil, status.Error(codes.Internal, "")
 		}
 
@@ -114,13 +115,13 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 			Result: transactionpb.VoidGiftCardResponse_OK,
 		}, nil
 	} else if err != action.ErrActionNotFound {
-		log.WithError(err).Warn("failure getting gift card claimed action")
+		log.With(zap.Error(err)).Warn("failure getting gift card claimed action")
 		return nil, status.Error(codes.Internal, "")
 	}
 
 	err = async_account.InitiateProcessToAutoReturnGiftCard(ctx, s.data, giftCardVault, true, globalBalanceLock)
 	if err != nil {
-		log.WithError(err).Warn("failure scheduling auto-return action")
+		log.With(zap.Error(err)).Warn("failure scheduling auto-return action")
 		return nil, status.Error(codes.Internal, "")
 	}
 

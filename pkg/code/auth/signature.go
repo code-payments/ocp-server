@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 
 	"github.com/mr-tron/base58"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -24,13 +24,13 @@ const (
 
 // RPCSignatureVerifier verifies signed requests messages by owner accounts.
 type RPCSignatureVerifier struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	data code_data.Provider
 }
 
-func NewRPCSignatureVerifier(data code_data.Provider) *RPCSignatureVerifier {
+func NewRPCSignatureVerifier(log *zap.Logger, data code_data.Provider) *RPCSignatureVerifier {
 	return &RPCSignatureVerifier{
-		log:  logrus.StandardLogger().WithField("type", "auth/rpc_signature_verifier"),
+		log:  log,
 		data: data,
 	}
 }
@@ -40,14 +40,14 @@ func NewRPCSignatureVerifier(data code_data.Provider) *RPCSignatureVerifier {
 func (v *RPCSignatureVerifier) Authenticate(ctx context.Context, owner *common.Account, message proto.Message, signature *commonpb.Signature) error {
 	defer metrics.TraceMethodCall(ctx, metricsStructName, "Authenticate").End()
 
-	log := v.log.WithFields(logrus.Fields{
-		"method":        "Authenticate",
-		"owner_account": owner.PublicKey().ToBase58(),
-	})
+	log := v.log.With(
+		zap.String("method", "Authenticate"),
+		zap.String("owner_account", owner.PublicKey().ToBase58()),
+	)
 
 	isSignatureValid, err := v.isSignatureVerifiedProtoMessage(owner, message, signature)
 	if err != nil {
-		log.WithError(err).Warn("failure verifying signature")
+		log.With(zap.Error(err)).Warn("failure verifying signature")
 		return status.Error(codes.Internal, "")
 	}
 
@@ -86,11 +86,11 @@ func (v *RPCSignatureVerifier) isSignatureVerifiedProtoMessage(owner *common.Acc
 
 	encoded, err := proto.Marshal(message)
 	if err == nil {
-		v.log.WithFields(logrus.Fields{
-			"proto_message_type": message.ProtoReflect().Descriptor().FullName(),
-			"proto_message":      base64.StdEncoding.EncodeToString(encoded),
-			"signature":          base58.Encode(signature.Value),
-		}).Info("proto message is not signature verified")
+		v.log.With(
+			zap.Any("proto_message_type", message.ProtoReflect().Descriptor().FullName()),
+			zap.String("proto_message", base64.StdEncoding.EncodeToString(encoded)),
+			zap.String("signature", base58.Encode(signature.Value)),
+		).Info("proto message is not signature verified")
 	}
 
 	return false, nil

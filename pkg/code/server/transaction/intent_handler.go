@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v2"
@@ -72,13 +73,15 @@ type CreateIntentHandler interface {
 
 type OpenAccountsIntentHandler struct {
 	conf          *conf
+	log           *zap.Logger
 	data          code_data.Provider
 	antispamGuard *antispam.Guard
 }
 
-func NewOpenAccountsIntentHandler(conf *conf, data code_data.Provider, antispamGuard *antispam.Guard) CreateIntentHandler {
+func NewOpenAccountsIntentHandler(conf *conf, log *zap.Logger, data code_data.Provider, antispamGuard *antispam.Guard) CreateIntentHandler {
 	return &OpenAccountsIntentHandler{
 		conf:          conf,
+		log:           log,
 		data:          data,
 		antispamGuard: antispamGuard,
 	}
@@ -227,7 +230,7 @@ func (h *OpenAccountsIntentHandler) AllowCreation(ctx context.Context, intentRec
 	// Part 4: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
 	if err != nil {
 		return err
 	}
@@ -353,6 +356,7 @@ func (h *OpenAccountsIntentHandler) OnCommitToDB(ctx context.Context) error {
 
 type SendPublicPaymentIntentHandler struct {
 	conf          *conf
+	log           *zap.Logger
 	data          code_data.Provider
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -363,12 +367,14 @@ type SendPublicPaymentIntentHandler struct {
 
 func NewSendPublicPaymentIntentHandler(
 	conf *conf,
+	log *zap.Logger,
 	data code_data.Provider,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 ) CreateIntentHandler {
 	return &SendPublicPaymentIntentHandler{
 		conf:          conf,
+		log:           log,
 		data:          data,
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
@@ -572,7 +578,7 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 	// Part 4: Exchange data validation
 	//
 
-	if err := validateExchangeDataWithinIntent(ctx, h.data, typedMetadata.Mint, typedMetadata.ExchangeData); err != nil {
+	if err := validateExchangeDataWithinIntent(ctx, h.log, h.data, typedMetadata.Mint, typedMetadata.ExchangeData); err != nil {
 		return err
 	}
 
@@ -589,7 +595,7 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 	// Part 6: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
 	if err != nil {
 		return err
 	}
@@ -902,6 +908,7 @@ func (h *SendPublicPaymentIntentHandler) OnCommitToDB(ctx context.Context) error
 
 type ReceivePaymentsPubliclyIntentHandler struct {
 	conf          *conf
+	log           *zap.Logger
 	data          code_data.Provider
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -911,12 +918,14 @@ type ReceivePaymentsPubliclyIntentHandler struct {
 
 func NewReceivePaymentsPubliclyIntentHandler(
 	conf *conf,
+	log *zap.Logger,
 	data code_data.Provider,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 ) CreateIntentHandler {
 	return &ReceivePaymentsPubliclyIntentHandler{
 		conf:          conf,
+		log:           log,
 		data:          data,
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
@@ -1105,7 +1114,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) AllowCreation(ctx context.Context
 	// Part 6: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
 	if err != nil {
 		return err
 	}
@@ -1233,6 +1242,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) OnCommitToDB(ctx context.Context)
 
 type PublicDistributionIntentHandler struct {
 	conf          *conf
+	log           *zap.Logger
 	data          code_data.Provider
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -1242,12 +1252,14 @@ type PublicDistributionIntentHandler struct {
 
 func NewPublicDistributionIntentHandler(
 	conf *conf,
+	log *zap.Logger,
 	data code_data.Provider,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 ) CreateIntentHandler {
 	return &PublicDistributionIntentHandler{
 		conf:          conf,
+		log:           log,
 		data:          data,
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
@@ -1423,7 +1435,7 @@ func (h *PublicDistributionIntentHandler) AllowCreation(ctx context.Context, int
 	// Part 4: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
 	if err != nil {
 		return err
 	}
@@ -1759,7 +1771,7 @@ func validateExternalTokenAccountWithinIntent(ctx context.Context, data code_dat
 	return nil
 }
 
-func validateExchangeDataWithinIntent(ctx context.Context, data code_data.Provider, intentMint *commonpb.SolanaAccountId, proto *transactionpb.ExchangeData) error {
+func validateExchangeDataWithinIntent(ctx context.Context, log *zap.Logger, data code_data.Provider, intentMint *commonpb.SolanaAccountId, proto *transactionpb.ExchangeData) error {
 	intentMintAccount, err := common.GetBackwardsCompatMint(intentMint)
 	if err != nil {
 		return err
@@ -1774,7 +1786,7 @@ func validateExchangeDataWithinIntent(ctx context.Context, data code_data.Provid
 		return NewIntentValidationErrorf("expected exchange data mint to be %s", intentMintAccount.PublicKey().ToBase58())
 	}
 
-	isValid, message, err := currency_util.ValidateClientExchangeData(ctx, data, proto)
+	isValid, message, err := currency_util.ValidateClientExchangeData(ctx, log, data, proto)
 	if err != nil {
 		return err
 	} else if !isValid {
@@ -1788,6 +1800,7 @@ func validateExchangeDataWithinIntent(ctx context.Context, data code_data.Provid
 
 func validateFeePayments(
 	ctx context.Context,
+	log *zap.Logger,
 	data code_data.Provider,
 	conf *conf,
 	intentRecord *intent.Record,
@@ -1852,7 +1865,7 @@ func validateFeePayments(
 	mintQuarksPerUnit := common.GetMintQuarksPerUnit(mintAccount)
 	unitsOfMint := float64(feeAmount) / float64(mintQuarksPerUnit)
 
-	isValid, _, err := currency_util.ValidateClientExchangeData(ctx, data, &transactionpb.ExchangeData{
+	isValid, _, err := currency_util.ValidateClientExchangeData(ctx, log, data, &transactionpb.ExchangeData{
 		Currency:     string(currency_lib.USD),
 		NativeAmount: expectedUsdValue,
 		ExchangeRate: expectedUsdValue / unitsOfMint,

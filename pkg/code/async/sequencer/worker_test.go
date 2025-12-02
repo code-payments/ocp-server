@@ -9,6 +9,7 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
@@ -225,10 +226,13 @@ type workerTestEnv struct {
 }
 
 func setupWorkerEnv(t *testing.T) *workerTestEnv {
+	log := zap.Must(zap.NewDevelopment())
+
 	db := code_data.NewTestDataProvider()
 
 	scheduler := &mockScheduler{}
 	noncePool, err := transaction_util.NewLocalNoncePool(
+		log,
 		db,
 		nil,
 		nonce.EnvironmentSolana,
@@ -242,7 +246,7 @@ func setupWorkerEnv(t *testing.T) *workerTestEnv {
 	intentHandler := &mockIntentHandler{}
 
 	// todo: setup a test vm indexer
-	workerInterface, err := New(db, scheduler, nil, noncePool, withManualTestOverrides(&testOverrides{}))
+	workerInterface, err := New(log, db, scheduler, nil, noncePool, withManualTestOverrides(&testOverrides{}))
 	require.NoError(t, err)
 	worker := workerInterface.(*service)
 	for key := range worker.fulfillmentHandlersByType {

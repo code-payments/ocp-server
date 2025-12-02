@@ -2,9 +2,11 @@ package async_nonce
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/newrelic/go-agent/v3/newrelic"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/data/vault"
 	"github.com/code-payments/ocp-server/pkg/database/query"
@@ -63,16 +65,16 @@ func (p *service) generateKeys(ctx context.Context) error {
 				missing = 5
 			}
 
-			p.log.Warnf("Not enough reserve keys available, generating %d more.", missing)
+			p.log.Info(fmt.Sprintf("Not enough reserve keys available, generating %d more.", missing))
 
 			// We don't have enough in the reserve, so we need to generate some.
 			for i := 0; i < int(missing); i++ {
 				key, err := p.generateKey(ctx)
 				if err != nil {
-					p.log.Error(err)
+					p.log.With(zap.Error(err)).Warn("Failure generating key")
 					continue
 				}
-				p.log.Warnf("key: %s", key.PublicKey)
+				p.log.Debug(fmt.Sprintf("key: %s", key.PublicKey))
 			}
 
 			return nil

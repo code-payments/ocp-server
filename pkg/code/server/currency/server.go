@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -23,23 +23,24 @@ import (
 )
 
 type currencyServer struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	data code_data.Provider
 
 	currencypb.UnimplementedCurrencyServer
 }
 
 func NewCurrencyServer(
+	log *zap.Logger,
 	data code_data.Provider,
 ) currencypb.CurrencyServer {
 	return &currencyServer{
-		log:  logrus.StandardLogger().WithField("type", "currency/server"),
+		log:  log,
 		data: data,
 	}
 }
 
 func (s *currencyServer) GetAllRates(ctx context.Context, req *currencypb.GetAllRatesRequest) (resp *currencypb.GetAllRatesResponse, err error) {
-	log := s.log.WithField("method", "GetAllRates")
+	log := s.log.With(zap.String("method", "GetAllRates"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	var record *currency.MultiRateRecord
@@ -52,7 +53,7 @@ func (s *currencyServer) GetAllRates(ctx context.Context, req *currencypb.GetAll
 	}
 
 	if err != nil {
-		log.WithError(err).Warn("failed to load latest rate")
+		log.With(zap.Error(err)).Warn("failed to load latest rate")
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -64,7 +65,7 @@ func (s *currencyServer) GetAllRates(ctx context.Context, req *currencypb.GetAll
 }
 
 func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsRequest) (*currencypb.GetMintsResponse, error) {
-	log := s.log.WithField("method", "GetMints")
+	log := s.log.With(zap.String("method", "GetMints"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	resp := &currencypb.GetMintsResponse{
@@ -74,11 +75,11 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 	for _, protoMintAddress := range req.Addresses {
 		mintAccount, err := common.NewAccountFromProto(protoMintAddress)
 		if err != nil {
-			log.WithError(err).Warn("invalid mint address")
+			log.With(zap.Error(err)).Warn("invalid mint address")
 			return nil, status.Error(codes.Internal, "")
 		}
 
-		log := log.WithField("mint", mintAccount.PublicKey().ToBase58())
+		log := log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
 
 		var protoMetadata *currencypb.Mint
 		switch mintAccount.PublicKey().ToBase58() {
@@ -102,50 +103,50 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 			if err == currency.ErrNotFound {
 				return &currencypb.GetMintsResponse{Result: currencypb.GetMintsResponse_NOT_FOUND}, nil
 			} else if err != nil {
-				log.WithError(err).Warn("failed to load currency metadata record")
+				log.With(zap.Error(err)).Warn("failed to load currency metadata record")
 				return nil, status.Error(codes.Internal, "")
 			}
 
 			reserveRecord, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), currency_util.GetLatestExchangeRateTime())
 			if err != nil {
-				log.WithError(err).Warn("failed to load currency reserve record")
+				log.With(zap.Error(err)).Warn("failed to load currency reserve record")
 				return nil, status.Error(codes.Internal, "")
 			}
 
 			vmConfig, err := common.GetVmConfigForMint(ctx, s.data, mintAccount)
 			if err != nil {
-				log.WithError(err).Warn("failure getting vm config")
+				log.With(zap.Error(err)).Warn("failure getting vm config")
 				return nil, status.Error(codes.Internal, "")
 			}
 
 			seed, err := common.NewAccountFromPublicKeyString(metadataRecord.Seed)
 			if err != nil {
-				log.WithError(err).Warn("invalid seed")
+				log.With(zap.Error(err)).Warn("invalid seed")
 				return nil, status.Error(codes.Internal, "")
 			}
 			currencyAuthorityAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.Authority)
 			if err != nil {
-				log.WithError(err).Warn("invalid currency authority account")
+				log.With(zap.Error(err)).Warn("invalid currency authority account")
 				return nil, status.Error(codes.Internal, "")
 			}
 			currencyConfigAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.CurrencyConfig)
 			if err != nil {
-				log.WithError(err).Warn("invalid currency config account")
+				log.With(zap.Error(err)).Warn("invalid currency config account")
 				return nil, status.Error(codes.Internal, "")
 			}
 			liquidityPoolAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.LiquidityPool)
 			if err != nil {
-				log.WithError(err).Warn("invalid liquidity pool account")
+				log.With(zap.Error(err)).Warn("invalid liquidity pool account")
 				return nil, status.Error(codes.Internal, "")
 			}
 			mintVaultAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultMint)
 			if err != nil {
-				log.WithError(err).Warn("invalid mint vault account")
+				log.With(zap.Error(err)).Warn("invalid mint vault account")
 				return nil, status.Error(codes.Internal, "")
 			}
 			coreMintVaultAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultCore)
 			if err != nil {
-				log.WithError(err).Warn("invalid core mint vault account")
+				log.With(zap.Error(err)).Warn("invalid core mint vault account")
 				return nil, status.Error(codes.Internal, "")
 			}
 

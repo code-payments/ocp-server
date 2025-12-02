@@ -11,7 +11,7 @@ import (
 
 	"github.com/mr-tron/base58"
 	"github.com/newrelic/go-agent/v3/newrelic"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
@@ -78,36 +78,36 @@ func (p *service) giftCardAutoReturnWorker(serviceCtx context.Context, interval 
 }
 
 func (p *service) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountInfoRecord *account.Record) error {
-	log := p.log.WithFields(logrus.Fields{
-		"method":  "maybeInitiateGiftCardAutoReturn",
-		"account": accountInfoRecord.TokenAccount,
-	})
+	log := p.log.With(
+		zap.String("method", "maybeInitiateGiftCardAutoReturn"),
+		zap.String("account", accountInfoRecord.TokenAccount),
+	)
 
 	if accountInfoRecord.AccountType != commonpb.AccountType_REMOTE_SEND_GIFT_CARD {
-		log.Trace("skipping account that isn't a gift card")
+		log.Debug("skipping account that isn't a gift card")
 		return errors.New("expected a gift card account")
 	}
 
 	giftCardVaultAccount, err := common.NewAccountFromPublicKeyString(accountInfoRecord.TokenAccount)
 	if err != nil {
-		log.WithError(err).Warn("invalid vault account")
+		log.With(zap.Error(err)).Warn("invalid vault account")
 		return err
 	}
 
 	balanceLock, err := balance.GetOptimisticVersionLock(ctx, p.data, giftCardVaultAccount)
 	if err != nil {
-		log.WithError(err).Warn("failure getting balance lock")
+		log.With(zap.Error(err)).Warn("failure getting balance lock")
 		return err
 	}
 
 	_, err = p.data.GetGiftCardClaimedAction(ctx, giftCardVaultAccount.PublicKey().ToBase58())
 	if err == nil {
-		log.Trace("gift card is claimed and will be removed from worker queue")
+		log.Debug("gift card is claimed and will be removed from worker queue")
 
 		// Cleanup anything related to gift card auto-return, since it cannot be scheduled
 		err = InitiateProcessToCleanupGiftCardAutoReturn(ctx, p.data, giftCardVaultAccount)
 		if err != nil {
-			log.WithError(err).Warn("failure cleaning up auto-return action")
+			log.With(zap.Error(err)).Warn("failure cleaning up auto-return action")
 			return err
 		}
 
@@ -122,18 +122,18 @@ func (p *service) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 	// Note: Without distributed locks, we assume SubmitIntent uses expiry - delta
 	//       to ensure race conditions aren't possible
 	if time.Since(accountInfoRecord.CreatedAt) < GiftCardExpiry {
-		log.Trace("skipping gift card that hasn't hit the expiry window")
+		log.Debug("skipping gift card that hasn't hit the expiry window")
 		return nil
 	}
 
-	log.Trace("initiating process to return gift card balance to issuer")
+	log.Debug("initiating process to return gift card balance to issuer")
 
 	// There's no action to claim the gift card and the expiry window has been met.
 	// It's time to initiate the process of auto-returning the funds back to the
 	// issuer.
 	err = InitiateProcessToAutoReturnGiftCard(ctx, p.data, giftCardVaultAccount, false, balanceLock)
 	if err != nil {
-		log.WithError(err).Warn("failure initiating process to return gift card balance to issuer")
+		log.With(zap.Error(err)).Warn("failure initiating process to return gift card balance to issuer")
 		return err
 	}
 

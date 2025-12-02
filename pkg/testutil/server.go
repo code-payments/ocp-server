@@ -9,7 +9,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -34,7 +34,7 @@ type Server struct {
 }
 
 // NewServer creates a new Server.
-func NewServer(opts ...ServerOption) (*grpc.ClientConn, *Server, error) {
+func NewServer(log *zap.Logger, opts ...ServerOption) (*grpc.ClientConn, *Server, error) {
 	port, err := netutil.GetAvailablePortForAddress("localhost")
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "failed to find free port")
@@ -48,17 +48,17 @@ func NewServer(opts ...ServerOption) (*grpc.ClientConn, *Server, error) {
 	o := serverOpts{
 		unaryServerInterceptors: []grpc.UnaryServerInterceptor{
 			headers.UnaryServerInterceptor(),
-			validation.UnaryServerInterceptor(),
+			validation.UnaryServerInterceptor(log),
 		},
 		streamServerInterceptors: []grpc.StreamServerInterceptor{
 			headers.StreamServerInterceptor(),
-			validation.StreamServerInterceptor(),
+			validation.StreamServerInterceptor(log),
 		},
 		unaryClientInterceptors: []grpc.UnaryClientInterceptor{
-			validation.UnaryClientInterceptor(),
+			validation.UnaryClientInterceptor(log),
 		},
 		streamClientInterceptors: []grpc.StreamClientInterceptor{
-			validation.StreamClientInterceptor(),
+			validation.StreamClientInterceptor(log),
 		},
 	}
 
@@ -75,7 +75,8 @@ func NewServer(opts ...ServerOption) (*grpc.ClientConn, *Server, error) {
 	)
 
 	if err != nil {
-		listener.Close()
+		err := listener.Close()
+		log.With(zap.Error(err)).Debug("stopped")
 		return nil, nil, errors.Wrapf(err, "failed to create grpc.ClientConn")
 	}
 
@@ -138,12 +139,7 @@ func (s *Server) Serve() (stopFunc func(), err error) {
 				return
 			}
 
-			err := serv.Serve(lis)
-			logrus.
-				StandardLogger().
-				WithField("type", "testutil/server").
-				WithError(err).
-				Debug("stopped")
+			serv.Serve(lis)
 			stopFunc()
 		}()
 

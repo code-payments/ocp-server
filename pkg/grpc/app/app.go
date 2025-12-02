@@ -4,12 +4,12 @@ import (
 	"crypto/tls"
 	"expvar"
 	"flag"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -17,8 +17,8 @@ import (
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -28,7 +28,6 @@ import (
 	"github.com/code-payments/ocp-server/pkg/grpc/headers"
 	"github.com/code-payments/ocp-server/pkg/grpc/metrics"
 	"github.com/code-payments/ocp-server/pkg/grpc/protobuf/validation"
-	metrics_util "github.com/code-payments/ocp-server/pkg/metrics"
 	"github.com/code-payments/ocp-server/pkg/osutil"
 )
 
@@ -74,10 +73,8 @@ func init() {
 	signal.Notify(osSigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 }
 
-func Run(app App, options ...Option) error {
+func Run(log *zap.Logger, app App, options ...Option) error {
 	flag.Parse()
-
-	logger := logrus.StandardLogger().WithField("type", "grpc/app")
 
 	// viper.ReadInConfig only returns ConfigFileNotFoundError if it has to search
 	// for a default config file because one hasn't been explicitly set. That is,
@@ -86,25 +83,25 @@ func Run(app App, options ...Option) error {
 	if _, err := os.Stat(*configPath); err == nil {
 		viper.SetConfigFile(*configPath)
 	} else if !os.IsNotExist(err) {
-		logger.WithError(err).Errorf("failed to check if config exists")
+		log.With(zap.Error(err)).Error("failed to check if config exists")
 		os.Exit(1)
 	}
 
 	err := viper.ReadInConfig()
 	_, isConfigNotFound := err.(viper.ConfigFileNotFoundError)
 	if err != nil && !isConfigNotFound {
-		logger.WithError(err).Error("failed to load config")
+		log.With(zap.Error(err)).Error("failed to load config")
 		os.Exit(1)
 	}
 
 	config := defaultConfig
 	if err := viper.Unmarshal(&config); err != nil {
-		logger.WithError(err).Error("failed to unmarshal config")
+		log.With(zap.Error(err)).Error("failed to unmarshal config")
 		os.Exit(1)
 	}
 
 	if len(config.AppName) == 0 {
-		logger.Error("must specify an application name")
+		log.With(zap.Error(err)).Error("must specify an application name")
 		os.Exit(1)
 	}
 
@@ -119,14 +116,12 @@ func Run(app App, options ...Option) error {
 			newrelic.ConfigAppLogForwardingEnabled(true),
 		)
 		if err != nil {
-			logrus.WithError(err).Error("error connecting to new relic")
+			log.With(zap.Error(err)).Error("error connecting to new relic")
 			os.Exit(1)
 		}
 
 		metricsProvider = nr
 	}
-
-	configureLogger(config, metricsProvider)
 
 	// We don't want to expose pprof/expvar publically, so we reset the default
 	// http ServeMux, which will have those installed due to the init() function
@@ -150,7 +145,7 @@ func Run(app App, options ...Option) error {
 		go func() {
 			for {
 				if err := http.ListenAndServe(config.DebugListenAddress, debugHTTPMux); err != nil {
-					logger.WithError(err).Warn("Debug HTTP server failed. Retrying in 5s...")
+					log.With(zap.Error(err)).Error("Debug HTTP server failed. Retrying in 5s...")
 				}
 				time.Sleep(5 * time.Second)
 			}
@@ -175,7 +170,7 @@ func Run(app App, options ...Option) error {
 			close(memoryLeakShutdownCh)
 		})
 		if err != nil {
-			logger.WithError(err).Error("failed to initialize memory leak cron")
+			log.With(zap.Error(err)).Error("failed to initialize memory leak cron")
 			os.Exit(1)
 		}
 		cronJob.Start()
@@ -186,50 +181,50 @@ func Run(app App, options ...Option) error {
 
 	insecureLis, err = net.Listen("tcp", config.InsecureListenAddress)
 	if err != nil {
-		logger.WithError(err).Errorf("failed to listen on %s", config.InsecureListenAddress)
+		log.With(zap.Error(err)).Error(fmt.Sprintf("failed to listen on %s", config.InsecureListenAddress))
 		os.Exit(1)
 	}
 
 	if config.TLSCertificate != "" {
 		if config.TLSKey == "" {
-			logger.Error("tls key must be provided if certificate is specified")
+			log.With(zap.Error(err)).Error("tls key must be provided if certificate is specified")
 			os.Exit(1)
 		}
 
 		certBytes, err := LoadFile(config.TLSCertificate)
 		if err != nil {
-			logger.WithError(err).Error("failed to load tls certificate")
+			log.With(zap.Error(err)).Error("failed to load tls certificate")
 			os.Exit(1)
 		}
 
 		keyBytes, err := LoadFile(config.TLSKey)
 		if err != nil {
-			logger.WithError(err).Error("failed to load tls key")
+			log.With(zap.Error(err)).Error("failed to load tls key")
 			os.Exit(1)
 		}
 
 		cert, err := tls.X509KeyPair(certBytes, keyBytes)
 		if err != nil {
-			logger.WithError(err).Error("invalid certificate/private key")
+			log.With(zap.Error(err)).Error("invalid certificate/private key")
 			os.Exit(1)
 		}
 
 		transportCreds = credentials.NewServerTLSFromCert(&cert)
 		secureLis, err = net.Listen("tcp", config.ListenAddress)
 		if err != nil {
-			logger.WithError(err).Errorf("failed to listen on %s", config.ListenAddress)
+			log.With(zap.Error(err)).Error(fmt.Sprintf("failed to listen on %s", config.ListenAddress))
 			os.Exit(1)
 		}
 	}
 
 	defaultUnaryServerInterceptors := []grpc.UnaryServerInterceptor{
 		headers.UnaryServerInterceptor(),
-		validation.UnaryServerInterceptor(),
+		validation.UnaryServerInterceptor(log),
 		client.MinVersionUnaryServerInterceptor(),
 	}
 	defaultStreamServerInterceptors := []grpc.StreamServerInterceptor{
 		headers.StreamServerInterceptor(),
-		validation.StreamServerInterceptor(),
+		validation.StreamServerInterceptor(log),
 		client.MinVersionStreamServerInterceptor(),
 	}
 	if metricsProvider != nil {
@@ -239,13 +234,13 @@ func Run(app App, options ...Option) error {
 		defaultUnaryServerInterceptors = []grpc.UnaryServerInterceptor{
 			headers.UnaryServerInterceptor(),
 			metrics.CustomNewRelicUnaryServerInterceptor(metricsProvider),
-			validation.UnaryServerInterceptor(),
+			validation.UnaryServerInterceptor(log),
 			client.MinVersionUnaryServerInterceptor(),
 		}
 		defaultStreamServerInterceptors = []grpc.StreamServerInterceptor{
 			headers.StreamServerInterceptor(),
 			metrics.CustomNewRelicStreamServerInterceptor(metricsProvider),
-			validation.StreamServerInterceptor(),
+			validation.StreamServerInterceptor(log),
 			client.MinVersionStreamServerInterceptor(),
 		}
 	}
@@ -259,7 +254,7 @@ func Run(app App, options ...Option) error {
 	}
 
 	if err := app.Init(config.AppConfig, metricsProvider); err != nil {
-		logger.WithError(err).Error("failed to initialize application")
+		log.With(zap.Error(err)).Error("failed to initialize application")
 		os.Exit(1)
 	}
 
@@ -284,9 +279,9 @@ func Run(app App, options ...Option) error {
 	if secureLis != nil {
 		go func() {
 			if err := secureServ.Serve(secureLis); err != nil {
-				logger.WithError(err).Error("grpc serve stopped")
+				log.With(zap.Error(err)).Error("grpc serve stopped")
 			} else {
-				logger.Info("grpc server stopped")
+				log.Info("grpc server stopped")
 			}
 
 			close(secureServShutdownCh)
@@ -295,9 +290,9 @@ func Run(app App, options ...Option) error {
 
 	go func() {
 		if err := insecureServ.Serve(insecureLis); err != nil {
-			logger.WithError(err).Error("grpc serve stopped")
+			log.With(zap.Error(err)).Error("grpc serve stopped")
 		} else {
-			logger.Info("grpc server stopped")
+			log.Info("grpc server stopped")
 		}
 
 		close(inssecureServShutdownCh)
@@ -309,15 +304,15 @@ func Run(app App, options ...Option) error {
 	//    3. The application has shutdown (for whatever reason)
 	select {
 	case <-osSigCh:
-		logger.Info("interrupt received, shutting down")
+		log.Info("interrupt received, shutting down")
 	case <-secureServShutdownCh:
-		logger.Info("secure grpc server shutdown")
+		log.Info("secure grpc server shutdown")
 	case <-inssecureServShutdownCh:
-		logger.Info("insecure grpc server shutdown")
+		log.Info("insecure grpc server shutdown")
 	case <-memoryLeakShutdownCh:
-		logger.Info("shutdown to deal with memory leak")
+		log.Info("shutdown to deal with memory leak")
 	case <-app.ShutdownChan():
-		logger.Info("app shutdown")
+		log.Info("app shutdown")
 	}
 
 	shutdownCh := make(chan struct{})
@@ -344,21 +339,4 @@ func Run(app App, options ...Option) error {
 	case <-time.After(config.ShutdownGracePeriod):
 		return errors.Errorf("failed to stop the application within %v", config.ShutdownGracePeriod)
 	}
-}
-
-func configureLogger(config BaseConfig, metricsProvider *newrelic.Application) {
-	if metricsProvider != nil {
-		logrus.SetFormatter(metrics_util.NewCustomNewRelicLogFormatter(metricsProvider, &logrus.JSONFormatter{}))
-	} else {
-		logrus.SetFormatter(&logrus.JSONFormatter{})
-	}
-
-	level, err := logrus.ParseLevel(strings.ToLower(config.LogLevel))
-	if err != nil {
-		logrus.StandardLogger().WithField("log_level", config.LogLevel).Warn("unknown log level, ignoring")
-	} else {
-		logrus.SetLevel(level)
-	}
-
-	logrus.SetOutput(os.Stdout)
 }

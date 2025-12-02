@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -36,31 +36,31 @@ type balanceMetadata struct {
 }
 
 type server struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	data code_data.Provider
 	auth *auth_util.RPCSignatureVerifier
 
 	accountpb.UnimplementedAccountServer
 }
 
-func NewAccountServer(data code_data.Provider) accountpb.AccountServer {
+func NewAccountServer(log *zap.Logger, data code_data.Provider) accountpb.AccountServer {
 	return &server{
-		log:  logrus.StandardLogger().WithField("type", "account/server"),
+		log:  log,
 		data: data,
-		auth: auth_util.NewRPCSignatureVerifier(data),
+		auth: auth_util.NewRPCSignatureVerifier(log, data),
 	}
 }
 
 func (s *server) IsCodeAccount(ctx context.Context, req *accountpb.IsCodeAccountRequest) (*accountpb.IsCodeAccountResponse, error) {
-	log := s.log.WithField("method", "IsCodeAccount")
+	log := s.log.With(zap.String("method", "IsCodeAccount"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner_account", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner_account", owner.PublicKey().ToBase58()))
 
 	signature := req.Signature
 	req.Signature = nil
@@ -74,7 +74,7 @@ func (s *server) IsCodeAccount(ctx context.Context, req *accountpb.IsCodeAccount
 			Result: accountpb.IsCodeAccountResponse_NOT_FOUND,
 		}, nil
 	} else if err != nil {
-		log.WithError(err).Warn("failure getting owner management state")
+		log.With(zap.Error(err)).Warn("failure getting owner management state")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -103,15 +103,15 @@ func (s *server) IsCodeAccount(ctx context.Context, req *accountpb.IsCodeAccount
 }
 
 func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTokenAccountInfosRequest) (*accountpb.GetTokenAccountInfosResponse, error) {
-	log := s.log.WithField("method", "GetTokenAccountInfos")
+	log := s.log.With(zap.String("method", "GetTokenAccountInfos"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner_account", owner.PublicKey().ToBase58())
+	log = log.With(zap.String("owner_account", owner.PublicKey().ToBase58()))
 
 	ownerSignature := req.Signature
 	req.Signature = nil
@@ -121,10 +121,10 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	if req.RequestingOwner != nil {
 		requestingOwner, err = common.NewAccountFromProto(req.RequestingOwner)
 		if err != nil {
-			log.WithError(err).Warn("invalid requesting owner account")
+			log.With(zap.Error(err)).Warn("invalid requesting owner account")
 			return nil, status.Error(codes.Internal, "")
 		}
-		log = log.WithField("requesting_owner_account", requestingOwner.PublicKey().ToBase58())
+		log = log.With(zap.String("requesting_owner_account", requestingOwner.PublicKey().ToBase58()))
 
 		requestingOwnerSignature = req.RequestingOwnerSignature
 		req.RequestingOwnerSignature = nil
@@ -147,7 +147,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 
 		resp, err := s.addRequestingOwnerMetadata(ctx, cachedResp, requestingOwner)
 		if err != nil {
-			log.WithError(err).Warn("failure adding requesting owner metadata")
+			log.With(zap.Error(err)).Warn("failure adding requesting owner metadata")
 			return nil, status.Error(codes.Internal, "")
 		}
 		return resp, nil
@@ -156,7 +156,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	// Fetch all account records
 	allRecordsByMintAndType, err := common.GetLatestTokenAccountRecordsForOwner(ctx, s.data, owner)
 	if err != nil {
-		log.WithError(err).Warn("failure getting latest account records")
+		log.With(zap.Error(err)).Warn("failure getting latest account records")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -189,7 +189,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	case *accountpb.GetTokenAccountInfosRequest_FilterByTokenAddress:
 		filterAccount, err := common.NewAccountFromProto(typed.FilterByTokenAddress)
 		if err != nil {
-			log.WithError(err).Warn("invalid token address filter")
+			log.With(zap.Error(err)).Warn("invalid token address filter")
 			return nil, status.Error(codes.Internal, "")
 		}
 		for _, records := range allRecords {
@@ -207,7 +207,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	case *accountpb.GetTokenAccountInfosRequest_FilterByMintAddress:
 		filterAccount, err := common.NewAccountFromProto(typed.FilterByMintAddress)
 		if err != nil {
-			log.WithError(err).Warn("invalid mint address filter")
+			log.With(zap.Error(err)).Warn("invalid mint address filter")
 			return nil, status.Error(codes.Internal, "")
 		}
 		for _, records := range allRecords {
@@ -225,7 +225,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 			records.General.RequiresDepositSync = true
 			err = s.data.UpdateAccountInfo(ctx, records.General)
 			if err != nil {
-				log.WithError(err).WithField("token_account", records.General.TokenAccount).Warn("failure marking primary account for deposit sync")
+				log.With(zap.Error(err), zap.String("token_account", records.General.TokenAccount)).Warn("failure marking primary account for deposit sync")
 			}
 		}
 	}
@@ -233,18 +233,18 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	// Fetch balances
 	balanceMetadataByTokenAccount, err := s.fetchBalances(ctx, filteredRecords)
 	if err != nil {
-		log.WithError(err).Warn("failure fetching balances")
+		log.With(zap.Error(err)).Warn("failure fetching balances")
 		return nil, status.Error(codes.Internal, "")
 	}
 
 	// Construct token account info
 	tokenAccountInfos := make(map[string]*accountpb.TokenAccountInfo)
 	for _, records := range filteredRecords {
-		log := log.WithField("token_account", records.General.TokenAccount)
+		log := log.With(zap.String("token_account", records.General.TokenAccount))
 
 		proto, err := s.getProtoAccountInfo(ctx, records, balanceMetadataByTokenAccount[records.General.TokenAccount])
 		if err != nil {
-			log.WithError(err).Warn("failure getting proto account info")
+			log.With(zap.Error(err)).Warn("failure getting proto account info")
 			return nil, status.Error(codes.Internal, "")
 		}
 
@@ -274,7 +274,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 
 	resp, err = s.addRequestingOwnerMetadata(ctx, resp, requestingOwner)
 	if err != nil {
-		log.WithError(err).Warn("failure adding requesting owner metadata")
+		log.With(zap.Error(err)).Warn("failure adding requesting owner metadata")
 		return nil, status.Error(codes.Internal, "")
 	}
 	return resp, nil

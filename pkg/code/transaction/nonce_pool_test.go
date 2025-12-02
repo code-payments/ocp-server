@@ -9,6 +9,7 @@ import (
 
 	"github.com/mr-tron/base58"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
@@ -285,11 +286,14 @@ type localNoncePoolTest struct {
 }
 
 func newLocalNoncePoolTest(t *testing.T) *localNoncePoolTest {
+	log := zap.Must(zap.NewDevelopment())
+
 	data := code_data.NewTestDataProvider()
 
 	testutil.SetupRandomSubsidizer(t, data)
 
 	pool, err := NewLocalNoncePool(
+		log,
 		data,
 		nil,
 		nonce.EnvironmentSolana,
@@ -310,7 +314,7 @@ func newLocalNoncePoolTest(t *testing.T) *localNoncePoolTest {
 }
 
 func (np *localNoncePoolTest) initializeNonces(amount int, env nonce.Environment, envInstance string, purpose nonce.Purpose) {
-	for i := 0; i < amount; i++ {
+	for range amount {
 		var bh solana.Blockhash
 		rand.Read(bh[:])
 		err := np.data.SaveNonce(context.Background(), &nonce.Record{

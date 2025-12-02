@@ -5,10 +5,10 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
-	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v2"
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
+	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v2"
 
 	"github.com/code-payments/ocp-server/pkg/code/aml"
 	"github.com/code-payments/ocp-server/pkg/code/antispam"
@@ -20,8 +20,9 @@ import (
 )
 
 type transactionServer struct {
-	log  *logrus.Entry
 	conf *conf
+
+	log *zap.Logger
 
 	data            code_data.Provider
 	vmIndexerClient indexerpb.IndexerClient
@@ -48,6 +49,7 @@ type transactionServer struct {
 }
 
 func NewTransactionServer(
+	log *zap.Logger,
 	data code_data.Provider,
 	vmIndexerClient indexerpb.IndexerClient,
 	submitIntentIntegration SubmitIntentIntegration,
@@ -86,13 +88,14 @@ func NewTransactionServer(
 	}
 
 	s := &transactionServer{
-		log:  logrus.StandardLogger().WithField("type", "transaction/v2/server"),
 		conf: conf,
+
+		log: log,
 
 		data:            data,
 		vmIndexerClient: vmIndexerClient,
 
-		auth: auth_util.NewRPCSignatureVerifier(data),
+		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
 		submitIntentIntegration: submitIntentIntegration,
 		airdropIntegration:      airdropIntegration,

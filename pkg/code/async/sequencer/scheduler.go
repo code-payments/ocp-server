@@ -2,15 +2,17 @@ package async_sequencer
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
+	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
 	"github.com/code-payments/ocp-server/pkg/code/data/action"
 	"github.com/code-payments/ocp-server/pkg/code/data/fulfillment"
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
+	"github.com/code-payments/ocp-server/pkg/pointer"
 )
 
 // Scheduler decides when fulfillments can be scheduled for submission to the
@@ -22,7 +24,7 @@ type Scheduler interface {
 }
 
 type contextualScheduler struct {
-	log            *logrus.Entry
+	log            *zap.Logger
 	data           code_data.Provider
 	conf           *conf
 	handlersByType map[fulfillment.Type]FulfillmentHandler
@@ -50,9 +52,9 @@ type contextualScheduler struct {
 //     problem (likely a wavefunction collapse implementation).
 //  2. Fulfillments that require client signatures are validated to guarantee
 //     success before being created.
-func NewContextualScheduler(data code_data.Provider, indexerClient indexerpb.IndexerClient, configProvider ConfigProvider) Scheduler {
+func NewContextualScheduler(log *zap.Logger, data code_data.Provider, indexerClient indexerpb.IndexerClient, configProvider ConfigProvider) Scheduler {
 	return &contextualScheduler{
-		log:                     logrus.StandardLogger().WithField("type", "sequencer/scheduler/contextual"),
+		log:                     log,
 		data:                    data,
 		conf:                    configProvider(),
 		handlersByType:          getFulfillmentHandlers(data, indexerClient),
@@ -62,18 +64,13 @@ func NewContextualScheduler(data code_data.Provider, indexerClient indexerpb.Ind
 
 // CanSubmitToBlockchain implements Scheduler.CanSubmitToBlockchain
 func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfillmentRecord *fulfillment.Record) (bool, error) {
-	log := s.log.WithFields(logrus.Fields{
-		"method":           "CanSubmitToBlockchain",
-		"intent_type":      fulfillmentRecord.IntentType.String(),
-		"fulfillment_type": fulfillmentRecord.FulfillmentType.String(),
-		"intent":           fulfillmentRecord.Intent,
-		"signature":        fulfillmentRecord.Signature,
-	})
-	if fulfillmentRecord.Signature == nil {
-		log = log.WithField("signature", "<nil>")
-	} else {
-		log = log.WithField("signature", *fulfillmentRecord.Signature)
-	}
+	log := s.log.With(
+		zap.String("method", "CanSubmitToBlockchain"),
+		zap.String("intent_type", fulfillmentRecord.IntentType.String()),
+		zap.String("fulfillment_type", fulfillmentRecord.FulfillmentType.String()),
+		zap.String("intent", fulfillmentRecord.Intent),
+		zap.String("signature", *pointer.StringOrDefault(fulfillmentRecord.Signature, "<nil>")),
+	)
 
 	handler, ok := s.handlersByType[fulfillmentRecord.FulfillmentType]
 	if !ok {
@@ -128,7 +125,7 @@ func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfill
 		log.Debug("not scheduling fulfillment with action in unknown state")
 		return false, nil
 	case action.StateRevoked, action.StateFailed:
-		log.Warnf("cannot schedule fulfillment with action in %s state", actionRecord.State.String())
+		log.Warn(fmt.Sprintf("cannot schedule fulfillment with action in %s state", actionRecord.State.String()))
 		return false, nil
 	}
 
@@ -138,18 +135,18 @@ func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfill
 
 	// Is fulfillment scheduling manually disabled
 	if s.conf.disableTransactionScheduling.Get(ctx) {
-		log.Trace("not scheduling fulfillment because scheduling is disabled")
+		log.Debug("not scheduling fulfillment because scheduling is disabled")
 		return false, nil
 	}
 
 	// Account-level circuit breaker based on whether there's a failed fulfillment
 	// for any involved account.
 	for _, account := range involvedAccounts {
-		log = log.WithField("account", account)
+		log = log.With(zap.String("account", account))
 
 		numFailedFulfillments, err := s.data.GetFulfillmentCountByStateAndAddress(ctx, fulfillment.StateFailed, account)
 		if err != nil {
-			log.WithError(err).Warn("failure getting failed fulfillment count for account")
+			log.With(zap.Error(err)).Warn("failure getting failed fulfillment count for account")
 			return false, err
 		}
 
@@ -167,7 +164,7 @@ func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfill
 
 	numFailedFulfillments, err := s.data.GetFulfillmentCountByIntentAndState(ctx, fulfillmentRecord.Intent, fulfillment.StateFailed)
 	if err != nil {
-		log.WithError(err).Warn("failure getting failed fulfillment count for intent")
+		log.With(zap.Error(err)).Warn("failure getting failed fulfillment count for intent")
 		return false, err
 	}
 
@@ -179,7 +176,7 @@ func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfill
 	// Global circuit breaker based on the total failed fulfillment count
 	numFailedFulfillments, err = s.data.GetFulfillmentCountByState(ctx, fulfillment.StateFailed)
 	if err != nil {
-		log.WithError(err).Warn("failure getting globlal failed fulfillment count")
+		log.With(zap.Error(err)).Warn("failure getting globlal failed fulfillment count")
 		return false, err
 	}
 
@@ -194,12 +191,12 @@ func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfill
 
 	isScheduled, err := handler.CanSubmitToBlockchain(ctx, fulfillmentRecord)
 	if err != nil {
-		log.WithError(err).Warn("handler failed scheduling check")
+		log.With(zap.Error(err)).Warn("handler failed scheduling check")
 		return false, err
 	}
 
 	if !isScheduled {
-		log.Trace("handler did not schedule fulfillment")
+		log.Debug("handler did not schedule fulfillment")
 		return false, nil
 	}
 
@@ -222,11 +219,11 @@ func (s *contextualScheduler) CanSubmitToBlockchain(ctx context.Context, fulfill
 			log.Warn("not scheduling fulfillment because the subsidizer requires additional funding")
 			return false, nil
 		} else if err != nil {
-			log.WithError(err).Warn("failure checking minimum subidizer balance")
+			log.With(zap.Error(err)).Warn("failure checking minimum subidizer balance")
 			return false, err
 		}
 	}
 
-	log.Trace("scheduling this fulfillment for submission to blockchain")
+	log.Debug("scheduling this fulfillment for submission to blockchain")
 	return true, nil
 }

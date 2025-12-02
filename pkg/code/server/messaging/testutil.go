@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -38,10 +39,12 @@ type testEnv struct {
 }
 
 func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
-	conn1, serv1, err := testutil.NewServer()
+	log := zap.Must(zap.NewDevelopment())
+
+	conn1, serv1, err := testutil.NewServer(log)
 	require.NoError(t, err)
 
-	conn2, serv2, err := testutil.NewServer()
+	conn2, serv2, err := testutil.NewServer(log)
 	require.NoError(t, err)
 
 	data := code_data.NewTestDataProvider()
@@ -73,14 +76,14 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 		},
 	}))
 
-	s1 := NewMessagingClientAndServer(data, auth.NewRPCSignatureVerifier(data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
+	s1 := NewMessagingClientAndServer(log, data, auth.NewRPCSignatureVerifier(log, data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
 	env.server1 = &serverEnv{
 		ctx:        context.Background(),
 		server:     s1,
 		subsidizer: subsidizer,
 	}
 
-	s2 := NewMessagingClientAndServer(data, auth.NewRPCSignatureVerifier(data), conn2.Target(), withManualTestOverrides(&testOverrides{}))
+	s2 := NewMessagingClientAndServer(log, data, auth.NewRPCSignatureVerifier(log, data), conn2.Target(), withManualTestOverrides(&testOverrides{}))
 	env.server2 = &serverEnv{
 		ctx:        context.Background(),
 		server:     s2,

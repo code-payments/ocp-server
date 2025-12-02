@@ -3,6 +3,7 @@ package transaction_v2
 import (
 	"context"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -19,28 +20,28 @@ import (
 )
 
 func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *transactionpb.CanWithdrawToAccountRequest) (*transactionpb.CanWithdrawToAccountResponse, error) {
-	log := s.log.WithField("method", "CanWithdrawToAccount")
+	log := s.log.With(zap.String("method", "CanWithdrawToAccount"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	accountToCheck, err := common.NewAccountFromProto(req.Account)
 	if err != nil {
-		log.WithError(err).Warn("invalid account provided")
+		log.With(zap.Error(err)).Warn("invalid account provided")
 		return &transactionpb.CanWithdrawToAccountResponse{
 			IsValidPaymentDestination: false,
 			AccountType:               transactionpb.CanWithdrawToAccountResponse_Unknown,
 		}, nil
 	}
-	log = log.WithField("account", accountToCheck.PublicKey().ToBase58())
+	log = log.With(zap.String("account", accountToCheck.PublicKey().ToBase58()))
 
 	mintAccount, err := common.GetBackwardsCompatMint(req.Mint)
 	if err != nil {
-		log.WithError(err).Warn("invalid mint provided")
+		log.With(zap.Error(err)).Warn("invalid mint provided")
 		return &transactionpb.CanWithdrawToAccountResponse{
 			IsValidPaymentDestination: false,
 			AccountType:               transactionpb.CanWithdrawToAccountResponse_Unknown,
 		}, nil
 	}
-	log = log.WithField("mint", mintAccount.PublicKey().ToBase58())
+	log = log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
 
 	isOnCurve := accountToCheck.IsOnCurve()
 
@@ -59,7 +60,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 		case account.ErrAccountInfoNotFound:
 			// Nothing to do
 		default:
-			log.WithError(err).Warn("failure checking account info db")
+			log.With(zap.Error(err)).Warn("failure checking account info db")
 			return nil, status.Error(codes.Internal, "")
 		}
 	}
@@ -79,7 +80,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 		case token.ErrAccountNotFound, solana.ErrNoAccountInfo, token.ErrInvalidTokenAccount:
 			// Nothing to do
 		default:
-			log.WithError(err).Warn("failure checking against blockchain as a token account")
+			log.With(zap.Error(err)).Warn("failure checking against blockchain as a token account")
 			return nil, status.Error(codes.Internal, "")
 		}
 	}
@@ -97,7 +98,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 		isVmDepositPda = true
 	case timelock.ErrTimelockNotFound:
 	default:
-		log.WithError(err).Warn("failure checking timelock db as a deposit pda account")
+		log.With(zap.Error(err)).Warn("failure checking timelock db as a deposit pda account")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -109,7 +110,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 			isVmSwapPda = true
 		case timelock.ErrTimelockNotFound:
 		default:
-			log.WithError(err).Warn("failure checking timelock db as a swap pda account")
+			log.With(zap.Error(err)).Warn("failure checking timelock db as a swap pda account")
 			return nil, status.Error(codes.Internal, "")
 		}
 	}
@@ -124,7 +125,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 	if isVmDepositPda || isVmSwapPda {
 		accountInfoRecord, err := s.data.GetAccountInfoByTokenAddress(ctx, timelockRecord.VaultAddress)
 		if err != nil {
-			log.WithError(err).Warn("failure checking account info db")
+			log.With(zap.Error(err)).Warn("failure checking account info db")
 			return nil, status.Error(codes.Internal, "")
 		}
 
@@ -138,7 +139,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 
 	ata, err := accountToCheck.ToAssociatedTokenAccount(mintAccount)
 	if err != nil {
-		log.WithError(err).Warn("failure getting ata address")
+		log.With(zap.Error(err)).Warn("failure getting ata address")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -171,7 +172,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 			AccountType:               transactionpb.CanWithdrawToAccountResponse_Unknown,
 		}, nil
 	default:
-		log.WithError(err).Warn("failure checking against blockchain as an owner account")
+		log.With(zap.Error(err)).Warn("failure checking against blockchain as an owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
 }

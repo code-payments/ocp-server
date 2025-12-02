@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/async"
 	"github.com/code-payments/ocp-server/pkg/code/common"
@@ -12,18 +12,18 @@ import (
 )
 
 type service struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	conf *conf
 	data code_data.Provider
 
 	airdropper *common.TimelockAccounts
 }
 
-func New(data code_data.Provider, configProvider ConfigProvider) async.Service {
+func New(log *zap.Logger, data code_data.Provider, configProvider ConfigProvider) async.Service {
 	ctx := context.Background()
 
 	p := &service{
-		log:  logrus.StandardLogger().WithField("service", "account"),
+		log:  log,
 		conf: configProvider(),
 		data: data,
 	}
@@ -41,14 +41,14 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 	go func() {
 		err := p.giftCardAutoReturnWorker(ctx, interval)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("gift card auto-return processing loop terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("gift card auto-return processing loop terminated unexpectedly")
 		}
 	}()
 
 	go func() {
 		err := p.metricsGaugeWorker(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("account metrics gauge loop terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("account metrics gauge loop terminated unexpectedly")
 		}
 	}()
 
@@ -59,10 +59,10 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 }
 
 func (p *service) mustLoadAirdropper(ctx context.Context) {
-	log := p.log.WithFields(logrus.Fields{
-		"method": "mustLoadAirdropper",
-		"key":    p.conf.airdropperOwnerPublicKey.Get(ctx),
-	})
+	log := p.log.With(
+		zap.String("method", "mustLoadAirdropper"),
+		zap.String("key", p.conf.airdropperOwnerPublicKey.Get(ctx)),
+	)
 
 	err := func() error {
 		vmConfig, err := common.GetVmConfigForMint(ctx, p.data, common.CoreMintAccount)
@@ -89,6 +89,6 @@ func (p *service) mustLoadAirdropper(ctx context.Context) {
 		return nil
 	}()
 	if err != nil {
-		log.WithError(err).Fatal("failure loading account")
+		log.With(zap.Error(err)).Fatal("failure loading account")
 	}
 }

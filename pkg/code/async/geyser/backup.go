@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/newrelic/go-agent/v3/newrelic"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	"github.com/code-payments/ocp-server/pkg/code/data/account"
@@ -23,7 +23,7 @@ import (
 // real time (or near real time) updates at scale.
 
 func (p *service) backupTimelockStateWorker(serviceCtx context.Context, state timelock_token.TimelockState, interval time.Duration) error {
-	log := p.log.WithField("method", "backupTimelockStateWorker")
+	log := p.log.With(zap.String("method", "backupTimelockStateWorker"))
 	log.Debug("worker started")
 
 	p.metricStatusLock.Lock()
@@ -70,7 +70,7 @@ func (p *service) backupTimelockStateWorker(serviceCtx context.Context, state ti
 					cursor = query.EmptyCursor
 					return
 				} else if err != nil {
-					log.WithError(err).Warn("failed to get timelock records")
+					log.With(zap.Error(err)).Warn("failed to get timelock records")
 					return
 				}
 
@@ -81,11 +81,11 @@ func (p *service) backupTimelockStateWorker(serviceCtx context.Context, state ti
 					go func(timelockRecord *timelock.Record) {
 						defer wg.Done()
 
-						log := log.WithField("timelock", timelockRecord.Address)
+						log := log.With(zap.String("timelock", timelockRecord.Address))
 
 						err := updateTimelockAccountRecord(tracedCtx, p.data, timelockRecord)
 						if err != nil {
-							log.WithError(err).Warn("failed to update timelock account")
+							log.With(zap.Error(err)).Warn("failed to update timelock account")
 						}
 					}(timelockRecord)
 				}
@@ -103,7 +103,7 @@ func (p *service) backupTimelockStateWorker(serviceCtx context.Context, state ti
 }
 
 func (p *service) backupExternalDepositWorker(serviceCtx context.Context, interval time.Duration) error {
-	log := p.log.WithField("method", "backupExternalDepositWorker")
+	log := p.log.With(zap.String("method", "backupExternalDepositWorker"))
 	log.Debug("worker started")
 
 	p.metricStatusLock.Lock()
@@ -130,7 +130,7 @@ func (p *service) backupExternalDepositWorker(serviceCtx context.Context, interv
 				if err == account.ErrAccountInfoNotFound {
 					return
 				} else if err != nil {
-					log.WithError(err).Warn("failed to get account info records")
+					log.With(zap.Error(err)).Warn("failed to get account info records")
 					return
 				}
 
@@ -143,24 +143,24 @@ func (p *service) backupExternalDepositWorker(serviceCtx context.Context, interv
 
 						authorityAccount, err := common.NewAccountFromPublicKeyString(accountInfoRecord.AuthorityAccount)
 						if err != nil {
-							log.WithError(err).Warn("invalid authority account")
+							log.With(zap.Error(err)).Warn("invalid authority account")
 							return
 						}
 
 						mintAccount, err := common.NewAccountFromPublicKeyString(accountInfoRecord.MintAccount)
 						if err != nil {
-							log.WithError(err).Warn("invalid mint account")
+							log.With(zap.Error(err)).Warn("invalid mint account")
 							return
 						}
 
-						log := log.WithFields(logrus.Fields{
-							"authority": authorityAccount.PublicKey().ToBase58(),
-							"mint":      mintAccount.PublicKey().ToBase58(),
-						})
+						log := log.With(
+							zap.String("authority", authorityAccount.PublicKey().ToBase58()),
+							zap.String("mint", mintAccount.PublicKey().ToBase58()),
+						)
 
 						err = fixMissingExternalDeposits(tracedCtx, p.data, p.vmIndexerClient, p.integration, authorityAccount, mintAccount)
 						if err != nil {
-							log.WithError(err).Warn("failed to fix missing external deposits")
+							log.With(zap.Error(err)).Warn("failed to fix missing external deposits")
 						}
 					}(accountInfoRecord)
 				}

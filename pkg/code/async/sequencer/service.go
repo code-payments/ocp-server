@@ -2,10 +2,11 @@ package async_sequencer
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
@@ -25,7 +26,7 @@ var (
 )
 
 type service struct {
-	log                       *logrus.Entry
+	log                       *zap.Logger
 	conf                      *conf
 	data                      code_data.Provider
 	scheduler                 Scheduler
@@ -36,13 +37,13 @@ type service struct {
 	intentHandlersByType      map[intent.Type]IntentHandler
 }
 
-func New(data code_data.Provider, scheduler Scheduler, vmIndexerClient indexerpb.IndexerClient, solanaNoncePool *transaction.LocalNoncePool, configProvider ConfigProvider) (async.Service, error) {
+func New(log *zap.Logger, data code_data.Provider, scheduler Scheduler, vmIndexerClient indexerpb.IndexerClient, solanaNoncePool *transaction.LocalNoncePool, configProvider ConfigProvider) (async.Service, error) {
 	if err := solanaNoncePool.Validate(nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeOnDemandTransaction); err != nil {
 		return nil, err
 	}
 
 	return &service{
-		log:                       logrus.StandardLogger().WithField("service", "sequencer"),
+		log:                       log,
 		conf:                      configProvider(),
 		data:                      data,
 		scheduler:                 scheduler,
@@ -73,7 +74,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 			//       work perfectly in a multi-threaded or multi-node environment.
 			err := p.worker(ctx, state, interval)
 			if err != nil && err != context.Canceled {
-				p.log.WithError(err).Warnf("fulfillment processing loop terminated unexpectedly for state %d", state)
+				p.log.With(zap.Error(err)).Warn(fmt.Sprintf("fulfillment processing loop terminated unexpectedly for state %d", state))
 			}
 
 		}(item)
@@ -82,7 +83,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 	go func() {
 		err := p.metricsGaugeWorker(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("fulfillment metrics gauge loop terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("fulfillment metrics gauge loop terminated unexpectedly")
 		}
 	}()
 

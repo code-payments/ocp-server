@@ -42,25 +42,27 @@ func GetVmConfigForMint(ctx context.Context, data code_data.Provider, mint *Acco
 			Omnibus:   CodeVmOmnibusAccount,
 			Mint:      CoreMintAccount,
 		}, nil
-	case jeffyMintAccount.PublicKey().ToBase58():
-		if jeffyAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, jeffyAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
+		/*
+			case jeffyMintAccount.PublicKey().ToBase58():
+				if jeffyAuthority.PrivateKey() == nil {
+					vaultRecord, err := data.GetKey(ctx, jeffyAuthority.PublicKey().ToBase58())
+					if err != nil {
+						return nil, err
+					}
 
-			jeffyAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
+					jeffyAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+					if err != nil {
+						return nil, err
+					}
+				}
 
-		return &VmConfig{
-			Authority: jeffyAuthority,
-			Vm:        jeffyVmAccount,
-			Omnibus:   jeffyVmOmnibusAccount,
-			Mint:      mint,
-		}, nil
+				return &VmConfig{
+					Authority: jeffyAuthority,
+					Vm:        jeffyVmAccount,
+					Omnibus:   jeffyVmOmnibusAccount,
+					Mint:      mint,
+				}, nil
+		*/
 	default:
 		return nil, ErrUnsupportedMint
 	}

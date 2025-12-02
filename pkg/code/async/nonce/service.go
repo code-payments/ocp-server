@@ -2,10 +2,11 @@ package async_nonce
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
@@ -22,7 +23,7 @@ var (
 )
 
 type service struct {
-	log             *logrus.Entry
+	log             *zap.Logger
 	conf            *conf
 	data            code_data.Provider
 	vmIndexerClient indexerpb.IndexerClient
@@ -30,9 +31,9 @@ type service struct {
 	rent uint64
 }
 
-func New(data code_data.Provider, vmIndexerClient indexerpb.IndexerClient, configProvider ConfigProvider) async.Service {
+func New(log *zap.Logger, data code_data.Provider, vmIndexerClient indexerpb.IndexerClient, configProvider ConfigProvider) async.Service {
 	return &service{
-		log:             logrus.StandardLogger().WithField("service", "nonce"),
+		log:             log,
 		conf:            configProvider(),
 		data:            data,
 		vmIndexerClient: vmIndexerClient,
@@ -57,7 +58,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 
 			err := p.worker(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, state, interval)
 			if err != nil && err != context.Canceled {
-				p.log.WithError(err).Warnf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, state)
+				p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, state))
 			}
 
 		}(state)
@@ -76,7 +77,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 
 				err := p.worker(ctx, nonce.EnvironmentCvm, vm, state, interval)
 				if err != nil && err != context.Canceled {
-					p.log.WithError(err).Warnf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentCvm, vm, state)
+					p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentCvm, vm, state))
 				}
 
 			}(vm, state)
@@ -86,7 +87,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 	go func() {
 		err := p.metricsGaugeWorker(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("nonce metrics gauge loop terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("nonce metrics gauge loop terminated unexpectedly")
 		}
 	}()
 

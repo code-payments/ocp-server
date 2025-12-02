@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mr-tron/base58"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -44,7 +44,7 @@ const (
 )
 
 type server struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	conf *conf
 	data code_data.Provider
 
@@ -63,10 +63,11 @@ type server struct {
 //
 // todo: Proper separation of internal client and server
 func NewMessagingClient(
+	log *zap.Logger,
 	data code_data.Provider,
 ) InternalMessageClient {
 	return &server{
-		log:  logrus.StandardLogger().WithField("type", "messaging/client"),
+		log:  log,
 		data: data,
 	}
 }
@@ -75,13 +76,14 @@ func NewMessagingClient(
 //
 // todo: Proper separation of internal client and server
 func NewMessagingClientAndServer(
+	log *zap.Logger,
 	data code_data.Provider,
 	rpcSignatureVerifier *auth.RPCSignatureVerifier,
 	broadcastAddress string,
 	configProvider ConfigProvider,
 ) *server {
 	return &server{
-		log:                  logrus.StandardLogger().WithField("type", "messaging/client_and_server"),
+		log:                  log,
 		conf:                 configProvider(),
 		data:                 data,
 		streams:              make(map[string]*messageStream),
@@ -112,15 +114,15 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 
 	streamKey := base58.Encode(req.GetRequest().RendezvousKey.Value)
 
-	log := s.log.WithFields(logrus.Fields{
-		"method":         "OpenMessageStreamWithKeepAlive",
-		"rendezvous_key": streamKey,
-	})
+	log := s.log.With(
+		zap.String("method", "OpenMessageStreamWithKeepAlive"),
+		zap.String("rendezvous_key", streamKey),
+	)
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(streamKey)
 	if err != nil {
-		log.WithError(err).Warn("rendezvous key isn't a valid public key")
+		log.With(zap.Error(err)).Warn("rendezvous key isn't a valid public key")
 		return status.Error(codes.Internal, "")
 	}
 
@@ -137,12 +139,12 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 		s.streamsMu.Unlock()
 		// There's an existing stream on this server that must be terminated first.
 		// Warn to see how often this happens in practice
-		log.Warnf("existing stream detected on this server (stream=%p) ; aborting", existingMs)
+		log.Warn(fmt.Sprintf("existing stream detected on this server (stream=%p) ; aborting", existingMs))
 		return status.Error(codes.Aborted, "stream already exists")
 	}
 
 	ms := newMessageStream(messageStreamBufferSize)
-	log.Tracef("setting up new stream (stream=%p)", ms)
+	log.Debug(fmt.Sprintf("setting up new stream (stream=%p)", ms))
 	s.streams[streamKey] = ms
 
 	myStreamMu, ok := s.individualStreamMu[streamKey]
@@ -165,7 +167,7 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 	defer func() {
 		s.streamsMu.Lock()
 
-		log.Tracef("closing streamer (stream=%s)", ssRef)
+		log.Debug(fmt.Sprintf("closing streamer (stream=%s)", ssRef))
 
 		// We check to see if the current active stream is the one that we created.
 		// If it is, we can just remove it since it's closed. Otherwise, we leave it
@@ -180,7 +182,7 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 		err := s.data.DeleteRendezvous(ctx, streamKey, s.broadcastAddress)
 		if err != nil {
-			log.WithError(err).Warn("failed to cleanup rendezvous record")
+			log.With(zap.Error(err)).Warn("failed to cleanup rendezvous record")
 		}
 		cancel()
 
@@ -190,10 +192,10 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 	// Sanity check whether the stream is still valid before doing expensive operations
 	select {
 	case <-timeoutChan:
-		log.Tracef("stream timed out ; ending stream (stream=%s)", ssRef)
+		log.Debug(fmt.Sprintf("stream timed out ; ending stream (stream=%s)", ssRef))
 		return status.Error(codes.DeadlineExceeded, "")
 	case <-ctx.Done():
-		log.Tracef("stream context cancelled ; ending stream (stream=%s)", ssRef)
+		log.Debug(fmt.Sprintf("stream context cancelled ; ending stream (stream=%s)", ssRef))
 		return status.Error(codes.Canceled, "")
 	default:
 	}
@@ -207,14 +209,14 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 	}
 	err = s.data.PutRendezvous(ctx, rendezvousRecord)
 	if err == rendezvous.ErrExists {
-		log.Warnf("existing stream detected on another server (stream=%s) ; aborting", ssRef)
+		log.Warn(fmt.Sprintf("existing stream detected on another server (stream=%s) ; aborting", ssRef))
 		return status.Error(codes.Aborted, "stream already exists")
 	} else if err != nil {
-		log.WithError(err).Warn("failure saving rendezvous record")
+		log.With(zap.Error(err)).Warn("failure saving rendezvous record")
 		return status.Error(codes.Internal, "")
 	}
 
-	log.Tracef("stream rendezvous record initialized (stream=%s)", ssRef)
+	log.Debug(fmt.Sprintf("stream rendezvous record initialized (stream=%s)", ssRef))
 
 	// Since ordering doesn't matter, we can async flush QoS. Importantly, this
 	// must occur after setting the rendezvous DB record to avoid race conditions
@@ -229,7 +231,7 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 		select {
 		case msg, ok := <-ms.streamCh:
 			if !ok {
-				log.Tracef("message stream closed ; ending stream (stream=%s)", ssRef)
+				log.Debug(fmt.Sprintf("message stream closed ; ending stream (stream=%s)", ssRef))
 				return status.Error(codes.Aborted, "message stream closed")
 			}
 
@@ -241,11 +243,11 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 				},
 			})
 			if err != nil {
-				log.WithError(err).Info("failed to forward message")
+				log.With(zap.Error(err)).Info("failed to forward message")
 				return err
 			}
 		case <-updateRendezvousRecordCh:
-			log.Tracef("refreshing rendezvous record (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("refreshing rendezvous record (stream=%s)", ssRef))
 
 			expiry := time.Now().Add(rendezvousRecordExpiryTime)
 			if expiry.After(timesOutAfter) {
@@ -254,16 +256,16 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 
 			err = s.data.ExtendRendezvousExpiry(ctx, streamKey, s.broadcastAddress, expiry)
 			if err == rendezvous.ErrNotFound {
-				log.Tracef("existing stream detected on another server ; ending stream (stream=%s)", ssRef)
+				log.Debug(fmt.Sprintf("existing stream detected on another server ; ending stream (stream=%s)", ssRef))
 				return status.Error(codes.Aborted, "")
 			} else if err != nil {
-				log.WithError(err).Warn("failure refreshing rendezvous record")
+				log.With(zap.Error(err)).Warn("failure refreshing rendezvous record")
 				return status.Error(codes.Internal, "")
 			}
 
 			updateRendezvousRecordCh = time.After(rendezvousRecordRefreshInterval)
 		case <-sendPingCh:
-			log.Tracef("sending ping to client (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("sending ping to client (stream=%s)", ssRef))
 
 			sendPingCh = time.After(messageStreamPingDelay)
 
@@ -276,17 +278,17 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 				},
 			})
 			if err != nil {
-				log.Tracef("stream is unhealthy ; aborting (stream=%s)", ssRef)
+				log.Debug(fmt.Sprintf("stream is unhealthy ; aborting (stream=%s)", ssRef))
 				return status.Error(codes.Aborted, "terminating unhealthy stream")
 			}
 		case <-streamHealthCh:
-			log.Tracef("stream is unhealthy ; aborting (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("stream is unhealthy ; aborting (stream=%s)", ssRef))
 			return status.Error(codes.Aborted, "terminating unhealthy stream")
 		case <-timeoutChan:
-			log.Tracef("stream timed out ; ending stream (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("stream timed out ; ending stream (stream=%s)", ssRef))
 			return status.Error(codes.DeadlineExceeded, "")
 		case <-ctx.Done():
-			log.Tracef("stream context cancelled ; ending stream (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("stream context cancelled ; ending stream (stream=%s)", ssRef))
 			return status.Error(codes.Canceled, "")
 		}
 	}
@@ -316,7 +318,7 @@ func (s *server) boundedRecv(
 // Very naive implementation to start
 func (s *server) monitorOpenMessageStreamHealth(
 	ctx context.Context,
-	log *logrus.Entry,
+	log *zap.Logger,
 	ssRef string,
 	streamer messagingpb.Messaging_OpenMessageStreamWithKeepAliveServer,
 ) <-chan struct{} {
@@ -332,7 +334,7 @@ func (s *server) monitorOpenMessageStreamHealth(
 
 			switch req.RequestOrPong.(type) {
 			case *messagingpb.OpenMessageStreamWithKeepAliveRequest_Pong:
-				log.Tracef("received pong from client (stream=%s)", ssRef)
+				log.Debug(fmt.Sprintf("received pong from client (stream=%s)", ssRef))
 			default:
 				// Client sent something unexpected. Terminate the stream
 				return
@@ -353,15 +355,15 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 
 	streamKey := base58.Encode(req.RendezvousKey.Value)
 
-	log := s.log.WithFields(logrus.Fields{
-		"method":         "OpenMessageStream",
-		"rendezvous_key": streamKey,
-	})
+	log := s.log.With(
+		zap.String("method", "OpenMessageStream"),
+		zap.String("rendezvous_key", streamKey),
+	)
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(streamKey)
 	if err != nil {
-		log.WithError(err).Warn("rendezvous key isn't a valid public key")
+		log.With(zap.Error(err)).Warn("rendezvous key isn't a valid public key")
 		return status.Error(codes.Internal, "")
 	}
 
@@ -380,12 +382,12 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 		s.streamsMu.Unlock()
 		// There's an existing stream on this server that must be terminated first.
 		// Warn to see how often this happens in practice
-		log.Warnf("existing stream detected on this server (stream=%p) ; aborting", existingMs)
+		log.Warn(fmt.Sprintf("existing stream detected on this server (stream=%p) ; aborting", existingMs))
 		return status.Error(codes.Aborted, "stream already exists")
 	}
 
 	ms := newMessageStream(messageStreamBufferSize)
-	log.Tracef("setting up new stream (stream=%p)", ms)
+	log.Debug(fmt.Sprintf("setting up new stream (stream=%p)", ms))
 	s.streams[streamKey] = ms
 
 	myStreamMu, ok := s.individualStreamMu[streamKey]
@@ -408,7 +410,7 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 	defer func() {
 		s.streamsMu.Lock()
 
-		log.Tracef("closing streamer (stream=%s)", ssRef)
+		log.Debug(fmt.Sprintf("closing streamer (stream=%s)", ssRef))
 
 		// We check to see if the current active stream is the one that we created.
 		// If it is, we can just remove it since it's closed. Otherwise, we leave it
@@ -423,7 +425,7 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 		err := s.data.DeleteRendezvous(ctx, streamKey, s.broadcastAddress)
 		if err != nil {
-			log.WithError(err).Warn("failed to cleanup rendezvous record")
+			log.With(zap.Error(err)).Warn("failed to cleanup rendezvous record")
 		}
 		cancel()
 
@@ -433,10 +435,10 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 	// Sanity check whether the stream is still valid before doing expensive operations
 	select {
 	case <-timeoutChan:
-		log.Tracef("stream timed out ; ending stream (stream=%s)", ssRef)
+		log.Debug(fmt.Sprintf("stream timed out ; ending stream (stream=%s)", ssRef))
 		return status.Error(codes.DeadlineExceeded, "")
 	case <-streamer.Context().Done():
-		log.Tracef("stream context cancelled ; ending stream (stream=%s)", ssRef)
+		log.Debug(fmt.Sprintf("stream context cancelled ; ending stream (stream=%s)", ssRef))
 		return status.Error(codes.Canceled, "")
 	default:
 	}
@@ -450,14 +452,14 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 	}
 	err = s.data.PutRendezvous(ctx, rendezvousRecord)
 	if err == rendezvous.ErrExists {
-		log.Warnf("existing stream detected on another server (stream=%s) ; aborting", ssRef)
+		log.Warn(fmt.Sprintf("existing stream detected on another server (stream=%s) ; aborting", ssRef))
 		return status.Error(codes.Aborted, "stream already exists")
 	} else if err != nil {
-		log.WithError(err).Warn("failure saving rendezvous record")
+		log.With(zap.Error(err)).Warn("failure saving rendezvous record")
 		return status.Error(codes.Internal, "")
 	}
 
-	log.Tracef("stream rendezvous record initialized (stream=%s)", ssRef)
+	log.Debug(fmt.Sprintf("stream rendezvous record initialized (stream=%s)", ssRef))
 
 	// Since ordering doesn't matter, we can async flush QoS. Importantly, this
 	// must occur after setting the rendezvous DB record to avoid race conditions
@@ -470,7 +472,7 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 		select {
 		case msg, ok := <-ms.streamCh:
 			if !ok {
-				log.Tracef("message stream closed ; ending stream (stream=%s)", ssRef)
+				log.Debug(fmt.Sprintf("message stream closed ; ending stream (stream=%s)", ssRef))
 				return status.Error(codes.Aborted, "")
 			}
 
@@ -478,11 +480,11 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 				Messages: []*messagingpb.Message{msg},
 			})
 			if err != nil {
-				log.WithError(err).Info("failed to forward message")
+				log.With(zap.Error(err)).Info("failed to forward message")
 				return err
 			}
 		case <-updateRendezvousRecordCh:
-			log.Tracef("refreshing rendezvous record (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("refreshing rendezvous record (stream=%s)", ssRef))
 
 			expiry := time.Now().Add(rendezvousRecordExpiryTime)
 			if expiry.After(timesOutAfter) {
@@ -491,19 +493,19 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 
 			err = s.data.ExtendRendezvousExpiry(ctx, streamKey, s.broadcastAddress, expiry)
 			if err == rendezvous.ErrNotFound {
-				log.Tracef("existing stream detected on another server ; ending stream (stream=%s)", ssRef)
+				log.Debug(fmt.Sprintf("existing stream detected on another server ; ending stream (stream=%s)", ssRef))
 				return status.Error(codes.Aborted, "")
 			} else if err != nil {
-				log.WithError(err).Warn("failure refreshing rendezvous record")
+				log.With(zap.Error(err)).Warn("failure refreshing rendezvous record")
 				return status.Error(codes.Internal, "")
 			}
 
 			updateRendezvousRecordCh = time.After(rendezvousRecordRefreshInterval)
 		case <-timeoutChan:
-			log.Tracef("stream timed out ; ending stream (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("stream timed out ; ending stream (stream=%s)", ssRef))
 			return status.Error(codes.DeadlineExceeded, "")
 		case <-ctx.Done():
-			log.Tracef("stream context cancelled ; ending stream (stream=%s)", ssRef)
+			log.Debug(fmt.Sprintf("stream context cancelled ; ending stream (stream=%s)", ssRef))
 			return status.Error(codes.Canceled, "")
 		}
 	}
@@ -511,15 +513,15 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 
 // PollMessages implements messagingpb.MessagingServer.PollMessages.
 func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessagesRequest) (*messagingpb.PollMessagesResponse, error) {
-	log := s.log.WithFields(logrus.Fields{
-		"method":         "PollMessages",
-		"rendezvous_key": base58.Encode(req.RendezvousKey.Value),
-	})
+	log := s.log.With(
+		zap.String("method", "PollMessages"),
+		zap.String("rendezvous_key", base58.Encode(req.RendezvousKey.Value)),
+	)
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(base58.Encode(req.RendezvousKey.Value))
 	if err != nil {
-		log.WithError(err).Warn("rendezvous key isn't a valid public key")
+		log.With(zap.Error(err)).Warn("rendezvous key isn't a valid public key")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -531,7 +533,7 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 
 	records, err := s.data.GetMessages(ctx, rendezvousAccount.PublicKey().ToBase58())
 	if err != nil {
-		log.WithError(err).Warn("failed to load undelivered messages")
+		log.With(zap.Error(err)).Warn("failed to load undelivered messages")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -541,7 +543,7 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 		if err := proto.Unmarshal(r.Message, &message); err != nil {
 			// todo(safety): this is the equivalent QoS brick case, although should be less problematic.
 			//               we could have a valve to ignore, and also to delete
-			log.WithError(err).Warn("Failed to unmarshal message bytes")
+			log.With(zap.Error(err)).Warn("Failed to unmarshal message bytes")
 			return nil, status.Error(codes.Internal, "")
 		}
 
@@ -562,26 +564,26 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 
 // AckMessages implements messagingpb.MessagingServer.AckMessages.
 func (s *server) AckMessages(ctx context.Context, req *messagingpb.AckMessagesRequest) (*messagingpb.AckMesssagesResponse, error) {
-	log := s.log.WithFields(logrus.Fields{
-		"method": "AckMessages",
-		"acks":   len(req.MessageIds),
-	})
+	log := s.log.With(
+		zap.String("method", "AckMessages"),
+		zap.Int("acks", len(req.MessageIds)),
+	)
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	account := base58.Encode(req.RendezvousKey.Value)
 
-	log = log.WithField("account_id", account)
+	log = log.With(zap.String("account_id", account))
 
 	// todo(perf): support batch deletes?
 	for _, id := range req.MessageIds {
 		converted, err := uuid.FromBytes(id.Value)
 		if err != nil {
-			log.WithError(err).Warn("Failed to convert message ID bytes to UUID")
+			log.With(zap.Error(err)).Warn("Failed to convert message ID bytes to UUID")
 			return nil, status.Error(codes.Internal, "")
 		}
 
 		if err := s.data.DeleteMessage(ctx, account, converted); err != nil {
-			log.WithError(err).Warn("Failed to delete message")
+			log.With(zap.Error(err)).Warn("Failed to delete message")
 			return nil, status.Error(codes.Internal, "")
 		}
 	}
@@ -593,15 +595,15 @@ func (s *server) AckMessages(ctx context.Context, req *messagingpb.AckMessagesRe
 func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRequest) (*messagingpb.SendMessageResponse, error) {
 	streamKey := base58.Encode(req.RendezvousKey.Value)
 
-	log := s.log.WithFields(logrus.Fields{
-		"method":         "SendMessage",
-		"rendezvous_key": streamKey,
-	})
+	log := s.log.With(
+		zap.String("method", "SendMessage"),
+		zap.String("rendezvous_key", streamKey),
+	)
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(streamKey)
 	if err != nil {
-		log.WithError(err).Warn("rendezvous key isn't a valid public key")
+		log.With(zap.Error(err)).Warn("rendezvous key isn't a valid public key")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -614,7 +616,7 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 	if req.Message.Id != nil {
 		verified, err := s.verifyForwardedSendMessageRequest(ctx, req)
 		if err != nil {
-			log.WithError(err).Warn("failure verifying if message was internally forwarded")
+			log.With(zap.Error(err)).Warn("failure verifying if message was internally forwarded")
 			return nil, status.Error(codes.Internal, "")
 		} else if !verified {
 			return nil, status.Error(codes.InvalidArgument, "message.id cannot be set by clients")
@@ -626,7 +628,7 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 
 		if stream != nil {
 			if err := stream.notify(req.Message, notifyTimeout); err != nil {
-				log.WithError(err).Warnf("failed to notify session stream, closing streamer (stream=%p)", stream)
+				log.With(zap.Error(err)).Warn(fmt.Sprintf("failed to notify session stream, closing streamer (stream=%p)", stream))
 			}
 		}
 
@@ -655,11 +657,11 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 	//
 
 	case *messagingpb.Message_RequestToGrabBill:
-		log = log.WithField("message_type", "request_to_grab_bill")
+		log = log.With(zap.String("message_type", "request_to_grab_bill"))
 		messageHandler = NewRequestToGrabBillMessageHandler(s.data)
 
 	case *messagingpb.Message_RequestToGiveBill:
-		log = log.WithField("message_type", "request_to_give_bill")
+		log = log.With(zap.String("message_type", "request_to_give_bill"))
 		messageHandler = NewRequestToGiveBillMessageHandler(s.data)
 
 	default:
@@ -674,14 +676,14 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 	if err != nil {
 		switch err.(type) {
 		case MessageValidationError:
-			log.WithError(err).Warn("client sent an invalid message")
+			log.With(zap.Error(err)).Warn("client sent an invalid message")
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		case MessageAuthenticationError:
 			return nil, status.Error(codes.Unauthenticated, err.Error())
 		case MessageAuthorizationError:
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		default:
-			log.WithError(err).Warn("failure validating message")
+			log.With(zap.Error(err)).Warn("failure validating message")
 			return nil, status.Error(codes.Internal, "")
 		}
 	}
@@ -695,7 +697,7 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 
 	messageWithGeneratedIDAndSignatureBytes, err := proto.Marshal(req.Message)
 	if err != nil {
-		log.WithError(err).Warn("Failed to marshal message")
+		log.With(zap.Error(err)).Warn("Failed to marshal message")
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -714,13 +716,13 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 
 		err = s.data.CreateMessage(ctx, record)
 		if err != nil {
-			log.WithError(err).Warn("failed to create message")
+			log.With(zap.Error(err)).Warn("failed to create message")
 			return err
 		}
 
 		err = messageHandler.OnSuccess(ctx)
 		if err != nil {
-			log.WithError(err).Warn("failure calling message hanlder success callback")
+			log.With(zap.Error(err)).Warn("failure calling message hanlder success callback")
 			return err
 		}
 
@@ -769,14 +771,14 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 func (s *server) flush(ctx context.Context, accountID *messagingpb.RendezvousKey, stream *messageStream) {
 	accountStr := base58.Encode(accountID.Value)
 
-	log := s.log.WithFields(logrus.Fields{
-		"method":     "flush",
-		"account_id": accountStr,
-	})
+	log := s.log.With(
+		zap.String("method", "flush"),
+		zap.String("account_id", accountStr),
+	)
 
 	records, err := s.data.GetMessages(ctx, accountStr)
 	if err != nil {
-		log.WithError(err).Warn("Failed to load undelivered messages")
+		log.With(zap.Error(err)).Warn("Failed to load undelivered messages")
 		return
 	}
 
@@ -785,12 +787,12 @@ func (s *server) flush(ctx context.Context, accountID *messagingpb.RendezvousKey
 		if err := proto.Unmarshal(r.Message, &message); err != nil {
 			// todo(safety): this is the equivalent QoS brick case, although should be less problematic.
 			//               we could have a valve to ignore, and also to delete
-			log.WithError(err).Warn("Failed to unmarshal message bytes")
+			log.With(zap.Error(err)).Warn("Failed to unmarshal message bytes")
 			return
 		}
 
 		if err := stream.notify(&message, notifyTimeout); err != nil {
-			log.WithError(err).Warn("Failed to send undelivered message")
+			log.With(zap.Error(err)).Warn("Failed to send undelivered message")
 			return
 		}
 	}

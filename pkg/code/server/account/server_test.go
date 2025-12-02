@@ -10,6 +10,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
@@ -40,7 +41,9 @@ type testEnv struct {
 }
 
 func setup(t *testing.T) (env testEnv, cleanup func()) {
-	conn, serv, err := testutil.NewServer()
+	log := zap.Must(zap.NewDevelopment())
+
+	conn, serv, err := testutil.NewServer(log)
 	require.NoError(t, err)
 
 	env.ctx = context.Background()
@@ -48,7 +51,7 @@ func setup(t *testing.T) (env testEnv, cleanup func()) {
 	env.data = code_data.NewTestDataProvider()
 	env.subsidizer = testutil.SetupRandomSubsidizer(t, env.data)
 
-	s := NewAccountServer(env.data)
+	s := NewAccountServer(log, env.data)
 	env.server = s.(*server)
 
 	serv.RegisterService(func(server *grpc.Server) {

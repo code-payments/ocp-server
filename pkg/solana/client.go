@@ -13,7 +13,6 @@ import (
 
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"github.com/ybbus/jsonrpc"
 
 	"github.com/code-payments/ocp-server/pkg/retry"
@@ -205,7 +204,6 @@ type rpcResponse struct {
 }
 
 type client struct {
-	log     *logrus.Entry
 	client  jsonrpc.RPCClient
 	retrier retry.Retrier
 
@@ -222,7 +220,6 @@ func New(endpoint string) Client {
 // NewWithRPCOptions returns a client configured with the specified RPC options.
 func NewWithRPCOptions(endpoint string, opts *jsonrpc.RPCClientOpts) Client {
 	return &client{
-		log:    logrus.StandardLogger().WithField("type", "solana/client"),
 		client: jsonrpc.NewClientWithOpts(endpoint, opts),
 		retrier: retry.NewRetrier(
 			retry.RetriableErrors(errRateLimited, errServiceError),
@@ -276,7 +273,6 @@ func (c *client) handleRpcError(method string, err error) error {
 		return err
 	}
 	if rpcErr.Code == 429 {
-		c.log.WithField("method", method).Error("rate limited")
 		return errRateLimited
 	}
 	if rpcErr.Code >= 500 || rpcErr.Code == rpcNodeUnhealthyCode {

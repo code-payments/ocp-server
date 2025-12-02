@@ -79,9 +79,6 @@ func StartPostgresDB(pool *dockertest.Pool) (db *sql.DB, closeFunc func(), err e
 	hostAndPort := resource.GetHostPort(fmt.Sprintf("%d/tcp", port))
 	databaseUrl := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", user, password, hostAndPort, dbname)
 
-	// logrus.StandardLogger().Println("Connecting to database on url: ", databaseUrl)
-	// logrus.StandardLogger().Println("Setting container auto-kill to: ", containerAutoKill, " seconds")
-
 	// You may need to adjust this number if it is too low for your test environment.
 	resource.Expire(containerAutoKill) // Tell docker to hard kill the container in 120 seconds
 

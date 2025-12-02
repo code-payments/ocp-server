@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
+	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 	geyserpb "github.com/code-payments/ocp-server/pkg/code/async/geyser/api/gen"
 	timelock_token "github.com/code-payments/ocp-server/pkg/solana/timelock/v1"
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
 	"github.com/code-payments/ocp-server/pkg/code/async"
 
@@ -23,7 +23,7 @@ type eventWorkerMetrics struct {
 
 // todo: we can consolidate the various subscription streams into one
 type service struct {
-	log             *logrus.Entry
+	log             *zap.Logger
 	data            code_data.Provider
 	vmIndexerClient indexerpb.IndexerClient
 	conf            *conf
@@ -47,10 +47,10 @@ type service struct {
 	backupExternalDepositWorkerStatus bool
 }
 
-func New(data code_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, configProvider ConfigProvider) async.Service {
+func New(log *zap.Logger, data code_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, configProvider ConfigProvider) async.Service {
 	conf := configProvider()
 	return &service{
-		log:                        logrus.StandardLogger().WithField("service", "geyser_consumer"),
+		log:                        log,
 		data:                       data,
 		vmIndexerClient:            vmIndexerClient,
 		conf:                       configProvider(),
@@ -66,20 +66,20 @@ func (p *service) Start(ctx context.Context, _ time.Duration) error {
 	go func() {
 		err := p.backupTimelockStateWorker(ctx, timelock_token.StateLocked, p.conf.backupTimelockWorkerInterval.Get(ctx))
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("timelock backup worker terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("timelock backup worker terminated unexpectedly")
 		}
 	}()
 	go func() {
 		err := p.backupTimelockStateWorker(ctx, timelock_token.StateUnknown, p.conf.backupTimelockWorkerInterval.Get(ctx))
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("timelock backup worker terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("timelock backup worker terminated unexpectedly")
 		}
 	}()
 
 	go func() {
 		err := p.backupExternalDepositWorker(ctx, p.conf.backupExternalDepositWorkerInterval.Get(ctx))
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("external deposit backup worker terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("external deposit backup worker terminated unexpectedly")
 		}
 	}()
 
@@ -98,13 +98,13 @@ func (p *service) Start(ctx context.Context, _ time.Duration) error {
 	go func() {
 		err := p.consumeGeyserProgramUpdateEvents(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("geyser event consumer terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("geyser event consumer terminated unexpectedly")
 		}
 	}()
 	go func() {
 		err := p.consumeGeyserSlotUpdateEvents(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("geyser event consumer terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("geyser event consumer terminated unexpectedly")
 		}
 	}()
 
@@ -112,7 +112,7 @@ func (p *service) Start(ctx context.Context, _ time.Duration) error {
 	go func() {
 		err := p.metricsGaugeWorker(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("metrics gauge loop terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("metrics gauge loop terminated unexpectedly")
 		}
 	}()
 

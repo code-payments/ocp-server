@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/newrelic/go-agent/v3/newrelic"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/async"
 	"github.com/code-payments/ocp-server/pkg/code/common"
@@ -20,13 +20,13 @@ import (
 )
 
 type reserveService struct {
-	log  *logrus.Entry
+	log  *zap.Logger
 	data code_data.Provider
 }
 
-func NewReserveService(data code_data.Provider) async.Service {
+func NewReserveService(log *zap.Logger, data code_data.Provider) async.Service {
 	return &reserveService{
-		log:  logrus.StandardLogger().WithField("service", "reserve"),
+		log:  log,
 		data: data,
 	}
 }
@@ -35,7 +35,7 @@ func (p *reserveService) Start(serviceCtx context.Context, interval time.Duratio
 	for {
 		_, err := retry.Retry(
 			func() error {
-				p.log.Trace("updating exchange rates")
+				p.log.Debug("updating exchange rates")
 
 				nr := serviceCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
 				m := nr.StartTransaction("async__currency_reserve_service")
@@ -45,7 +45,7 @@ func (p *reserveService) Start(serviceCtx context.Context, interval time.Duratio
 				err := p.UpdateAllLaunchpadCurrencyReserves(tracedCtx)
 				if err != nil {
 					m.NoticeError(err)
-					p.log.WithError(err).Warn("failed to process current rate data")
+					p.log.With(zap.Error(err)).Warn("failed to process current rate data")
 				}
 
 				return err
@@ -56,7 +56,7 @@ func (p *reserveService) Start(serviceCtx context.Context, interval time.Duratio
 		if err != nil {
 			if err != context.Canceled {
 				// Should not happen since only non-retriable error is context.Canceled
-				p.log.WithError(err).Warn("unexpected error when processing current reserve data")
+				p.log.With(zap.Error(err)).Warn("unexpected error when processing current reserve data")
 			}
 
 			return err

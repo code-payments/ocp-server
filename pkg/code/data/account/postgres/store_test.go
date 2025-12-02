@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ory/dockertest/v3"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/data/account"
 	"github.com/code-payments/ocp-server/pkg/code/data/account/tests"
@@ -55,24 +55,24 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	log := logrus.StandardLogger()
+	log := zap.Must(zap.NewDevelopment())
 
 	testPool, err := dockertest.NewPool("")
 	if err != nil {
-		log.WithError(err).Error("Error creating docker pool")
+		log.With(zap.Error(err)).Error("Error creating docker pool")
 		os.Exit(1)
 	}
 
 	var cleanUpFunc func()
 	db, cleanUpFunc, err := postgrestest.StartPostgresDB(testPool)
 	if err != nil {
-		log.WithError(err).Error("Error starting postgres image")
+		log.With(zap.Error(err)).Error("Error starting postgres image")
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	if err := createTestTables(db); err != nil {
-		logrus.StandardLogger().WithError(err).Error("Error creating test tables")
+	if err := createTestTables(log, db); err != nil {
+		log.With(zap.Error(err)).Error("Error creating test tables")
 		cleanUpFunc()
 		os.Exit(1)
 	}
@@ -84,8 +84,8 @@ func TestMain(m *testing.M) {
 			panic(pc)
 		}
 
-		if err := resetTestTables(db); err != nil {
-			logrus.StandardLogger().WithError(err).Error("Error resetting test tables")
+		if err := resetTestTables(log, db); err != nil {
+			log.With(zap.Error(err)).Error("Error resetting test tables")
 			cleanUpFunc()
 			os.Exit(1)
 		}
@@ -100,21 +100,21 @@ func TestAccountPostgresStore(t *testing.T) {
 	tests.RunTests(t, testStore, teardown)
 }
 
-func createTestTables(db *sql.DB) error {
+func createTestTables(log *zap.Logger, db *sql.DB) error {
 	_, err := db.Exec(tableCreate)
 	if err != nil {
-		logrus.StandardLogger().WithError(err).Error("could not create test tables")
+		log.With(zap.Error(err)).Error("could not create test tables")
 		return err
 	}
 	return nil
 }
 
-func resetTestTables(db *sql.DB) error {
+func resetTestTables(log *zap.Logger, db *sql.DB) error {
 	_, err := db.Exec(tableDestroy)
 	if err != nil {
-		logrus.StandardLogger().WithError(err).Error("could not drop test tables")
+		log.With(zap.Error(err)).Error("could not drop test tables")
 		return err
 	}
 
-	return createTestTables(db)
+	return createTestTables(log, db)
 }

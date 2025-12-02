@@ -7,7 +7,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 // HeaderKey is the key to store all the header information in the context
@@ -82,7 +81,6 @@ func GetASCIIHeaderByName(ctx context.Context, name string) (string, error) {
 	}
 	data, exists := selectedHeader[name]
 	if !exists {
-		logrus.StandardLogger().Tracef("Header %s not found in type %s. An empty string will be returned", name, ASCII)
 		return "", nil
 	}
 	if val, ok := data.(string); ok {
@@ -160,7 +158,6 @@ func getHeader(ctx context.Context, destination proto.Message, name string, head
 	headerName := getPrefixedHeaderName(name, headerType)
 	data, exists := selectedHeader[headerName]
 	if !exists {
-		logrus.StandardLogger().Tracef("Header %s not found in type %s. Proto %s will have default values", headerName, headerType, proto.MessageName(destination))
 		return fmt.Errorf("%s %s header not found", headerType, proto.MessageName(destination))
 	}
 	if rawBytes, ok := data.([]byte); ok {
@@ -181,7 +178,6 @@ func getStringHeader(ctx context.Context, name string, headerType Type) (string,
 	headerName := getPrefixedHeaderName(name, headerType)
 	data, exists := selectedHeader[headerName]
 	if !exists {
-		logrus.StandardLogger().Tracef("Header %s not found in type %s.", headerName, headerType)
 		return "", fmt.Errorf("%s string header not found", headerType)
 	}
 	if val, ok := data.(string); ok {

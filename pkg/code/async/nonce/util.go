@@ -7,6 +7,7 @@ import (
 
 	"github.com/mr-tron/base58/base58"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
@@ -195,11 +196,11 @@ func (p *service) checkForMissingTx(ctx context.Context, nonce *nonce.Record) er
 }
 
 func (p *service) broadcastTx(ctx context.Context, tx *solana.Transaction) {
-	log := p.log.WithField("method", "broadcastTx")
+	log := p.log.With(zap.String("method", "broadcastTx"))
 
 	_, err := p.data.SubmitBlockchainTransaction(ctx, tx)
 	if err != nil {
-		log.WithError(err).Warn("failure submitting transaction to blockchain")
+		log.With(zap.Error(err)).Warn("failure submitting transaction to blockchain")
 	}
 
 	timeoutChan := time.After(40 * time.Second)
@@ -208,7 +209,7 @@ func (p *service) broadcastTx(ctx context.Context, tx *solana.Transaction) {
 		case <-time.After(5 * time.Second):
 			_, err = p.data.SubmitBlockchainTransaction(ctx, tx)
 			if err != nil {
-				log.WithError(err).Warn("failure submitting transaction to blockchain")
+				log.With(zap.Error(err)).Warn("failure submitting transaction to blockchain")
 			}
 		case <-timeoutChan:
 			return

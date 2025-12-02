@@ -11,7 +11,7 @@ import (
 	"github.com/mr-tron/base58/base58"
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
@@ -247,7 +247,7 @@ func SelectNoncePool(env nonce.Environment, envInstance string, poolType nonce.P
 // such that the consumption of poolSize/2 nonces is _slower_ than the
 // operation to top up the pool.
 type LocalNoncePool struct {
-	log *logrus.Entry
+	log *zap.Logger
 
 	data code_data.Provider
 
@@ -270,6 +270,7 @@ type LocalNoncePool struct {
 }
 
 func NewLocalNoncePool(
+	log *zap.Logger,
 	data code_data.Provider,
 	metricsProvider *newrelic.Application,
 	env nonce.Environment,
@@ -278,12 +279,11 @@ func NewLocalNoncePool(
 	opts ...NoncePoolOption,
 ) (*LocalNoncePool, error) {
 	np := &LocalNoncePool{
-		log: logrus.StandardLogger().WithFields(logrus.Fields{
-			"type":                 "transaction/LocalNoncePool",
-			"environment":          env.String(),
-			"environment_instance": envInstance,
-			"pool_type":            poolType.String(),
-		}),
+		log: log.With(
+			zap.String("environment", env.String()),
+			zap.String("environment_instance", envInstance),
+			zap.String("pool_type", poolType.String()),
+		),
 
 		data: data,
 
@@ -376,7 +376,7 @@ func (np *LocalNoncePool) Validate(
 }
 
 func (np *LocalNoncePool) Close() error {
-	log := np.log.WithField("method", "Close")
+	log := np.log.With(zap.String("method", "Close"))
 
 	np.mu.Lock()
 	defer np.mu.Unlock()
@@ -398,7 +398,7 @@ func (np *LocalNoncePool) Close() error {
 		n.record.ClaimExpiresAt = nil
 
 		if err := np.data.SaveNonce(ctx, n.record); err != nil {
-			log.WithError(err).WithField("nonce", n.record.Address).Warn("Failed to release nonce on shutdown")
+			log.With(zap.Error(err), zap.String("nonce", n.record.Address)).Warn("Failed to release nonce on shutdown")
 		} else {
 			remaining--
 		}
@@ -468,7 +468,7 @@ func (np *LocalNoncePool) load(ctx context.Context, limit int) (int, error) {
 }
 
 func (np *LocalNoncePool) refreshPool() {
-	log := np.log.WithField("method", "refreshPool")
+	log := np.log.With(zap.String("method", "refreshPool"))
 
 	for {
 		select {
@@ -487,15 +487,15 @@ func (np *LocalNoncePool) refreshPool() {
 		}
 
 		limit := np.opts.desiredPoolSize - size
-		log := log.WithField("limit", limit)
+		log := log.With(zap.Int("limit", limit))
 		log.Debug("Refreshing nonce pool")
 		loaded, err := np.load(np.workerCtx, limit)
 		if err != nil {
-			log.WithError(err).Warn("Failed to refresh nonce pool")
+			log.With(zap.Error(err)).Warn("Failed to refresh nonce pool")
 		} else if loaded < limit {
-			log.WithField("count", loaded).Warn("Unable to refresh nonce pool with desired number of nonces")
+			log.With(zap.Int("count", loaded)).Warn("Unable to refresh nonce pool with desired number of nonces")
 		} else {
-			log.WithField("count", loaded).Debug("Nonce pool refreshed")
+			log.With(zap.Int("count", loaded)).Debug("Nonce pool refreshed")
 		}
 	}
 }
@@ -513,7 +513,7 @@ func (np *LocalNoncePool) refreshNonces() {
 }
 
 func (np *LocalNoncePool) refreshNoncesNow() {
-	log := np.log.WithField("method", "refreshNoncesNow")
+	log := np.log.With(zap.String("method", "refreshNoncesNow"))
 
 	now := time.Now()
 	refreshList := make([]*Nonce, 0)
@@ -540,10 +540,10 @@ func (np *LocalNoncePool) refreshNoncesNow() {
 		return
 	}
 
-	log.WithField("count", len(refreshList)).Debug("Refreshing nonces")
+	log.With(zap.Int("count", len(refreshList))).Debug("Refreshing nonces")
 
 	for _, n := range refreshList {
-		log := log.WithField("nonce", n.record.Address)
+		log := log.With(zap.String("nonce", n.record.Address))
 		log.Debug("Refreshing nonce")
 
 		if time.Since(*n.record.ClaimExpiresAt) >= 0 {
@@ -558,7 +558,7 @@ func (np *LocalNoncePool) refreshNoncesNow() {
 		n.record.ClaimExpiresAt = pointer.Time(n.record.ClaimExpiresAt.Add(np.opts.minExpiration))
 		err := np.data.SaveNonce(np.workerCtx, n.record)
 		if err != nil {
-			log.WithError(err).Warn("Failed to refresh nonce, abandoning")
+			log.With(zap.Error(err)).Warn("Failed to refresh nonce, abandoning")
 		} else {
 			np.mu.Lock()
 			np.freeList = append(np.freeList, n)

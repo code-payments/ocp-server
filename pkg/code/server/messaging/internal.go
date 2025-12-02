@@ -3,12 +3,13 @@ package messaging
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
@@ -113,10 +114,10 @@ func (s *server) InternallyCreateMessage(ctx context.Context, rendezvousKey *com
 func (s *server) internallyForwardMessage(ctx context.Context, req *messagingpb.SendMessageRequest) error {
 	streamKey := base58.Encode(req.RendezvousKey.Value)
 
-	log := s.log.WithFields(logrus.Fields{
-		"method":         "internallyForwardMessage",
-		"rendezvous_key": streamKey,
-	})
+	log := s.log.With(
+		zap.String("method", "internallyForwardMessage"),
+		zap.String("rendezvous_key", streamKey),
+	)
 
 	var err error
 	if !headers.AreHeadersInitialized(ctx) {
@@ -129,7 +130,7 @@ func (s *server) internallyForwardMessage(ctx context.Context, req *messagingpb.
 	rendezvousRecord, err := s.data.GetRendezvous(ctx, streamKey)
 	switch err {
 	case nil:
-		log := log.WithField("receiver_address", rendezvousRecord.Address)
+		log := log.With(zap.String("receiver_address", rendezvousRecord.Address))
 
 		// Expired rendezvous record that likely wasn't cleaned up. Avoid forwarding,
 		// since we expect a broken state.
@@ -150,43 +151,43 @@ func (s *server) internallyForwardMessage(ctx context.Context, req *messagingpb.
 
 			if stream != nil {
 				if err := stream.notify(req.Message, notifyTimeout); err != nil {
-					log.WithError(err).Warnf("failed to notify session stream, closing streamer (stream=%p)", stream)
+					log.With(zap.Error(err)).Warn(fmt.Sprintf("failed to notify session stream, closing streamer (stream=%p)", stream))
 				}
 			}
 
 			return nil
 		}
 
-		client, err := getInternalMessagingClient(rendezvousRecord.Address)
+		client, err := getInternalMessagingClient(s.log, rendezvousRecord.Address)
 		if err != nil {
-			log.WithError(err).Warn("failure creating internal grpc messaging client")
+			log.With(zap.Error(err)).Warn("failure creating internal grpc messaging client")
 			return err
 		}
 
 		reqBytes, err := proto.Marshal(req)
 		if err != nil {
-			log.WithError(err).Warn("failure marshalling request proto")
+			log.With(zap.Error(err)).Warn("failure marshalling request proto")
 			return err
 		}
 		reqSignature := ed25519.Sign(common.GetSubsidizer().PrivateKey().ToBytes(), reqBytes)
 
 		err = headers.SetASCIIHeader(ctx, internalSignatureHeaderName, base58.Encode(reqSignature))
 		if err != nil {
-			log.WithError(err).Warn("failure setting signature header")
+			log.With(zap.Error(err)).Warn("failure setting signature header")
 			return err
 		}
 
-		log.Trace("forwarding message")
+		log.Debug("forwarding message")
 
 		// Any errors forwarding the message need to be propagated back to the client.
 		// It'll be up to the client to attempt a retry with a new message. Duplicates
 		// are ok with the current message stream use cases.
 		resp, err := client.SendMessage(ctx, req)
 		if err != nil {
-			log.WithError(err).Warn("failure sending redirected request")
+			log.With(zap.Error(err)).Warn("failure sending redirected request")
 			return err
 		} else if resp.Result != messagingpb.SendMessageResponse_OK {
-			log.WithField("result", resp.Result).Warn("non-OK result sending redirected request")
+			log.With(zap.String("result", resp.Result.String())).Warn("non-OK result sending redirected request")
 			return err
 		}
 
@@ -194,7 +195,7 @@ func (s *server) internallyForwardMessage(ctx context.Context, req *messagingpb.
 		log.Debug("dropping message without rendezvous record")
 
 	default:
-		log.WithError(err).Warn("failure getting rendezvous record")
+		log.With(zap.Error(err)).Warn("failure getting rendezvous record")
 		return err
 	}
 

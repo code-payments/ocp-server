@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/newrelic/go-agent/v3/newrelic"
+	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/pkg/code/data/nonce"
 	"github.com/code-payments/ocp-server/pkg/metrics"
@@ -63,7 +64,7 @@ func (p *service) generateNonceAccountsOnSolanaMainnet(serviceCtx context.Contex
 			num_potentially_available := num_available + num_claimed + num_released + num_unknown
 			if num_potentially_available >= desiredPoolSize {
 				if hasWarnedUser {
-					p.log.Warn("The nonce pool size is reached.")
+					p.log.Info("The nonce pool size is reached.")
 					hasWarnedUser = false
 				}
 				return nil
@@ -76,7 +77,7 @@ func (p *service) generateNonceAccountsOnSolanaMainnet(serviceCtx context.Contex
 
 			_, err = p.createSolanaMainnetNonce(tracedCtx, purpose)
 			if err != nil {
-				p.log.WithError(err).Warn("failure creating nonce")
+				p.log.With(zap.Error(err)).Warn("failure creating nonce")
 				return err
 			}
 

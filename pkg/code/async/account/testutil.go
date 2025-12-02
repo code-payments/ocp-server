@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
@@ -39,6 +40,8 @@ type testGiftCard struct {
 }
 
 func setup(t *testing.T) *testEnv {
+	log := zap.Must(zap.NewDevelopment())
+
 	data := code_data.NewTestDataProvider()
 
 	require.NoError(t, common.InjectTestSubsidizer(context.Background(), data, testutil.NewRandomAccount(t)))
@@ -53,7 +56,7 @@ func setup(t *testing.T) *testEnv {
 	return &testEnv{
 		ctx:     context.Background(),
 		data:    data,
-		service: New(data, WithEnvConfigs()).(*service),
+		service: New(log, data, WithEnvConfigs()).(*service),
 	}
 }
 

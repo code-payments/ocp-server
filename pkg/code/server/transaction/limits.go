@@ -2,8 +2,10 @@ package transaction_v2
 
 import (
 	"context"
+	"fmt"
 	"math"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -16,15 +18,15 @@ import (
 )
 
 func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.GetLimitsRequest) (*transactionpb.GetLimitsResponse, error) {
-	log := s.log.WithField("method", "GetLimits")
+	log := s.log.With(zap.String("method", "GetLimits"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	ownerAccount, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
-		log.WithError(err).Warn("invalid owner account")
+		log.With(zap.Error(err)).Warn("invalid owner account")
 		return nil, status.Error(codes.Internal, "")
 	}
-	log = log.WithField("owner_account", ownerAccount.PublicKey().ToBase58())
+	log = log.With(zap.String("owner_account", ownerAccount.PublicKey().ToBase58()))
 
 	sig := req.Signature
 	req.Signature = nil
@@ -34,19 +36,19 @@ func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.Ge
 
 	multiRateRecord, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
 	if err != nil {
-		log.WithError(err).Warn("failure getting current exchange rates")
+		log.With(zap.Error(err)).Warn("failure getting current exchange rates")
 		return nil, status.Error(codes.Internal, "")
 	}
 
 	usdRate, ok := multiRateRecord.Rates[string(currency_lib.USD)]
 	if !ok {
-		log.WithError(err).Warn("usd rate is missing")
+		log.With(zap.Error(err)).Warn("usd rate is missing")
 		return nil, status.Error(codes.Internal, "")
 	}
 
 	_, consumedUsdForPayments, err := s.data.GetTransactedAmountForAntiMoneyLaundering(ctx, ownerAccount.PublicKey().ToBase58(), req.ConsumedSince.AsTime())
 	if err != nil {
-		log.WithError(err).Warn("failure calculating consumed usd payment value")
+		log.With(zap.Error(err)).Warn("failure calculating consumed usd payment value")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -59,7 +61,7 @@ func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.Ge
 	for currency, sendLimit := range currency_util.SendLimits {
 		otherRate, ok := multiRateRecord.Rates[string(currency)]
 		if !ok {
-			log.Debugf("%s rate is missing", currency)
+			log.Debug(fmt.Sprintf("%s rate is missing", currency))
 			continue
 		}
 

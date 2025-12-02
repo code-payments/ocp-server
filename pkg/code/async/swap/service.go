@@ -2,9 +2,10 @@ package async_swap
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
@@ -14,16 +15,16 @@ import (
 )
 
 type service struct {
-	log             *logrus.Entry
+	log             *zap.Logger
 	conf            *conf
 	data            code_data.Provider
 	vmIndexerClient indexerpb.IndexerClient
 	integration     Integration
 }
 
-func New(data code_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, configProvider ConfigProvider) async.Service {
+func New(log *zap.Logger, data code_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, configProvider ConfigProvider) async.Service {
 	return &service{
-		log:             logrus.StandardLogger().WithField("service", "swap"),
+		log:             log,
 		conf:            configProvider(),
 		data:            data,
 		vmIndexerClient: vmIndexerClient,
@@ -44,7 +45,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 
 			err := p.worker(ctx, state, interval)
 			if err != nil && err != context.Canceled {
-				p.log.WithError(err).Warnf("swap processing loop terminated unexpectedly for state %s", state.String())
+				p.log.With(zap.Error(err)).Warn(fmt.Sprintf("swap processing loop terminated unexpectedly for state %s", state.String()))
 			}
 
 		}(state)
@@ -53,7 +54,7 @@ func (p *service) Start(ctx context.Context, interval time.Duration) error {
 	go func() {
 		err := p.metricsGaugeWorker(ctx)
 		if err != nil && err != context.Canceled {
-			p.log.WithError(err).Warn("swap metrics gauge loop terminated unexpectedly")
+			p.log.With(zap.Error(err)).Warn("swap metrics gauge loop terminated unexpectedly")
 		}
 	}()
 

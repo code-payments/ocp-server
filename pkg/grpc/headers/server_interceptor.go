@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -12,9 +11,8 @@ import (
 // UnaryServerInterceptor returns a grpc.UnaryServerInterceptor that takes all the appropriate
 // headerPrefixes from the metadata and puts it into the context
 func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
-	log := logrus.StandardLogger().WithField("type", "headers/interceptor")
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		ctx = getAllHeaders(ctx, log)
+		ctx = getAllHeaders(ctx)
 		return handler(ctx, req)
 	}
 }
@@ -23,15 +21,12 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 // headerPrefixes from the metadata and puts it into the context of the streamWrapper
 func StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		log := logrus.StandardLogger().WithField("type", "headers/interceptor")
-
-		ctx := getAllHeaders(ss.Context(), log)
-		return handler(srv, &streamWrapper{log: log, ServerStream: ss, ctx: ctx})
+		ctx := getAllHeaders(ss.Context())
+		return handler(srv, &streamWrapper{ServerStream: ss, ctx: ctx})
 	}
 }
 
 type streamWrapper struct {
-	log *logrus.Entry
 	grpc.ServerStream
 	ctx context.Context
 }
@@ -53,7 +48,7 @@ func (s *streamWrapper) Context() context.Context {
 
 // getAllHeaders retrieve all the headerPrefixes from the contexts metadata, and puts them into the
 // context to be easily accessible
-func getAllHeaders(ctx context.Context, log *logrus.Entry) context.Context {
+func getAllHeaders(ctx context.Context) context.Context {
 	var rootHeader = Headers{}
 	var propagatingHeader = Headers{}
 	var incomingHeader = Headers{}
@@ -63,7 +58,6 @@ func getAllHeaders(ctx context.Context, log *logrus.Entry) context.Context {
 		for key := range md {
 			// Shouldn't ever happen, but check just in case
 			if len(md[key]) < 1 {
-				log.Infof("key %s had no data in headers", key)
 				continue
 			}
 

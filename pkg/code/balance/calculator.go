@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 
 	"github.com/code-payments/ocp-server/pkg/code/common"
 	code_data "github.com/code-payments/ocp-server/pkg/code/data"
@@ -194,14 +193,8 @@ func CalculateFromBlockchain(ctx context.Context, data code_data.Provider, token
 // the net balance by applying payment intents to the current balance.
 func NetBalanceFromIntentActions(ctx context.Context, data code_data.Provider) Strategy {
 	return func(ctx context.Context, tokenAccount *common.Account, state *State) (*State, error) {
-		log := logrus.StandardLogger().WithFields(logrus.Fields{
-			"method":  "NetBalanceFromIntentActions",
-			"account": tokenAccount.PublicKey().ToBase58(),
-		})
-
 		netBalance, err := data.GetNetBalanceFromActions(ctx, tokenAccount.PublicKey().ToBase58())
 		if err != nil {
-			log.WithError(err).Warn("failure getting net balance from intent actions")
 			return nil, errors.Wrap(err, "error getting net balance from intent actions")
 		}
 
@@ -214,14 +207,8 @@ func NetBalanceFromIntentActions(ctx context.Context, data code_data.Provider) S
 // from deposits from external accounts.
 func FundingFromExternalDeposits(ctx context.Context, data code_data.Provider) Strategy {
 	return func(ctx context.Context, tokenAccount *common.Account, state *State) (*State, error) {
-		log := logrus.StandardLogger().WithFields(logrus.Fields{
-			"method":  "FundingFromExternalDeposits",
-			"account": tokenAccount.PublicKey().ToBase58(),
-		})
-
 		amount, err := data.GetTotalExternalDepositedAmountInQuarks(ctx, tokenAccount.PublicKey().ToBase58())
 		if err != nil {
-			log.WithError(err).Warn("failure getting external deposit amount")
 			return nil, errors.Wrap(err, "error getting external deposit amount")
 		}
 		state.current += int64(amount)
@@ -360,11 +347,8 @@ func defaultBatchCalculationFromCache(ctx context.Context, data code_data.Provid
 // the net balance by applying payment intents to the current balance.
 func NetBalanceFromIntentActionsBatch(ctx context.Context, data code_data.Provider) BatchStrategy {
 	return func(ctx context.Context, tokenAccounts []string, state *BatchState) (*BatchState, error) {
-		log := logrus.StandardLogger().WithField("method", "NetBalanceFromIntentActionsBatch")
-
 		netBalanceByAccount, err := data.GetNetBalanceFromActionsBatch(ctx, tokenAccounts...)
 		if err != nil {
-			log.WithError(err).Warn("failure getting net balance from intent actions")
 			return nil, errors.Wrap(err, "error getting net balance from intent actions")
 		}
 
@@ -380,11 +364,8 @@ func NetBalanceFromIntentActionsBatch(ctx context.Context, data code_data.Provid
 // funding from deposits from external accounts.
 func FundingFromExternalDepositsBatch(ctx context.Context, data code_data.Provider) BatchStrategy {
 	return func(ctx context.Context, tokenAccounts []string, state *BatchState) (*BatchState, error) {
-		log := logrus.StandardLogger().WithField("method", "FundingFromExternalDepositsBatch")
-
 		amountByAccount, err := data.GetTotalExternalDepositedAmountInQuarksBatch(ctx, tokenAccounts...)
 		if err != nil {
-			log.WithError(err).Warn("failure getting external deposit amount")
 			return nil, errors.Wrap(err, "error getting external deposit amount")
 		}
 
