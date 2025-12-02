@@ -1,0 +1,382 @@
+package transaction
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"errors"
+
+	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/solana"
+	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
+	"github.com/code-payments/ocp-server/solana/cvm"
+	"github.com/code-payments/ocp-server/solana/token"
+)
+
+// todo: The argument sizes are blowing out of proportion, though there's likely
+//       a larger refactor going to happen anyways when we support batching of
+//       many virtual instructions into a single Solana transaction.
+
+// MakeNoncedTransaction makes a transaction that's backed by a nonce. The returned
+// transaction is not signed.
+func MakeNoncedTransaction(nonce *Nonce, instructions ...solana.Instruction) (solana.Transaction, error) {
+	if len(instructions) == 0 {
+		return solana.Transaction{}, errors.New("no instructions provided")
+	}
+
+	payer := common.GetSubsidizer() // todo: Should this be the VM authority?
+
+	advanceNonceInstruction, err := makeAdvanceNonceInstruction(nonce.Account, payer)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	instructions = append([]solana.Instruction{advanceNonceInstruction}, instructions...)
+
+	txn := solana.NewLegacyTransaction(payer.PublicKey().ToBytes(), instructions...)
+	txn.SetBlockhash(nonce.Blockhash)
+	return txn, nil
+}
+
+func MakeOpenAccountTransaction(
+	nonce *Nonce,
+
+	vmConfig *common.VmConfig,
+
+	memory *common.Account,
+	accountIndex uint16,
+
+	timelockAccounts *common.TimelockAccounts,
+) (solana.Transaction, error) {
+	if !bytes.Equal(vmConfig.Vm.PublicKey().ToBytes(), timelockAccounts.Vm.PublicKey().ToBytes()) {
+		return solana.Transaction{}, errors.New("vm mismatch")
+	}
+
+	initializeInstruction, err := timelockAccounts.GetInitializeInstruction(vmConfig.Authority, memory, accountIndex)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	instructions := []solana.Instruction{
+		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitLimit(50_000),
+		initializeInstruction,
+	}
+	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+func MakeCompressAccountTransaction(
+	nonce *Nonce,
+
+	vmConfig *common.VmConfig,
+
+	memory *common.Account,
+	accountIndex uint16,
+
+	storage *common.Account,
+
+	virtualAccountState []byte,
+) (solana.Transaction, error) {
+	hasher := sha256.New()
+	hasher.Write(virtualAccountState)
+	hashedVirtualAccountState := hasher.Sum(nil)
+
+	signature := ed25519.Sign(vmConfig.Authority.PrivateKey().ToBytes(), hashedVirtualAccountState)
+
+	compressInstruction := cvm.NewCompressInstruction(
+		&cvm.CompressInstructionAccounts{
+			VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
+			Vm:          vmConfig.Vm.PublicKey().ToBytes(),
+			VmMemory:    memory.PublicKey().ToBytes(),
+			VmStorage:   storage.PublicKey().ToBytes(),
+		},
+		&cvm.CompressInstructionArgs{
+			AccountIndex: accountIndex,
+			Signature:    cvm.Signature(signature),
+		},
+	)
+
+	instructions := []solana.Instruction{
+		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitLimit(200_000),
+		compressInstruction,
+	}
+	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+func MakeInternalWithdrawTransaction(
+	nonce *Nonce,
+
+	vmConfig *common.VmConfig,
+
+	virtualSignature solana.Signature,
+
+	nonceMemory *common.Account,
+	nonceIndex uint16,
+
+	sourceMemory *common.Account,
+	sourceIndex uint16,
+
+	destinationMemory *common.Account,
+	destinationIndex uint16,
+) (solana.Transaction, error) {
+	mergedMemoryBanks, err := MergeMemoryBanks(nonceMemory, sourceMemory, destinationMemory)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	vixn := cvm.NewWithdrawVirtualInstruction(&cvm.WithdrawVirtualInstructionArgs{
+		Signature: cvm.Signature(virtualSignature),
+	})
+
+	execInstruction := cvm.NewExecInstruction(
+		&cvm.ExecInstructionAccounts{
+			VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
+			Vm:          vmConfig.Vm.PublicKey().ToBytes(),
+			VmMemA:      mergedMemoryBanks.A,
+			VmMemB:      mergedMemoryBanks.B,
+			VmMemC:      mergedMemoryBanks.C,
+		},
+		&cvm.ExecInstructionArgs{
+			Opcode:     vixn.Opcode,
+			MemIndices: []uint16{nonceIndex, sourceIndex, destinationIndex},
+			MemBanks:   mergedMemoryBanks.Indices,
+			Data:       vixn.Data,
+		},
+	)
+
+	instructions := []solana.Instruction{
+		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitLimit(100_000),
+		execInstruction,
+	}
+	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+func MakeExternalWithdrawTransaction(
+	nonce *Nonce,
+
+	vmConfig *common.VmConfig,
+
+	virtualSignature solana.Signature,
+
+	nonceMemory *common.Account,
+	nonceIndex uint16,
+
+	sourceMemory *common.Account,
+	sourceIndex uint16,
+
+	externalDestination *common.Account,
+) (solana.Transaction, error) {
+	mergedMemoryBanks, err := MergeMemoryBanks(nonceMemory, sourceMemory)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	vmOmnibusPublicKeyBytes := ed25519.PublicKey(vmConfig.Omnibus.PublicKey().ToBytes())
+
+	externalAddressPublicKeyBytes := ed25519.PublicKey(externalDestination.PublicKey().ToBytes())
+
+	vixn := cvm.NewWithdrawVirtualInstruction(&cvm.WithdrawVirtualInstructionArgs{
+		Signature: cvm.Signature(virtualSignature),
+	})
+
+	execInstruction := cvm.NewExecInstruction(
+		&cvm.ExecInstructionAccounts{
+			VmAuthority:     vmConfig.Authority.PublicKey().ToBytes(),
+			Vm:              vmConfig.Vm.PublicKey().ToBytes(),
+			VmMemA:          mergedMemoryBanks.A,
+			VmMemB:          mergedMemoryBanks.B,
+			VmOmnibus:       &vmOmnibusPublicKeyBytes,
+			ExternalAddress: &externalAddressPublicKeyBytes,
+		},
+		&cvm.ExecInstructionArgs{
+			Opcode:     vixn.Opcode,
+			MemIndices: []uint16{nonceIndex, sourceIndex},
+			MemBanks:   mergedMemoryBanks.Indices,
+			Data:       vixn.Data,
+		},
+	)
+
+	instructions := []solana.Instruction{
+		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitLimit(100_000),
+		execInstruction,
+	}
+	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+func MakeInternalTransferWithAuthorityTransaction(
+	nonce *Nonce,
+
+	vmConfig *common.VmConfig,
+
+	virtualSignature solana.Signature,
+
+	nonceMemory *common.Account,
+	nonceIndex uint16,
+
+	sourceMemory *common.Account,
+	sourceIndex uint16,
+
+	destinationMemory *common.Account,
+	destinationIndex uint16,
+
+	quarks uint64,
+) (solana.Transaction, error) {
+	mergedMemoryBanks, err := MergeMemoryBanks(nonceMemory, sourceMemory, destinationMemory)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	vixn := cvm.NewTransferVirtualInstruction(&cvm.TransferVirtualInstructionArgs{
+		Amount:    quarks,
+		Signature: cvm.Signature(virtualSignature),
+	})
+
+	execInstruction := cvm.NewExecInstruction(
+		&cvm.ExecInstructionAccounts{
+			VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
+			Vm:          vmConfig.Vm.PublicKey().ToBytes(),
+			VmMemA:      mergedMemoryBanks.A,
+			VmMemB:      mergedMemoryBanks.B,
+			VmMemC:      mergedMemoryBanks.C,
+		},
+		&cvm.ExecInstructionArgs{
+			Opcode:     vixn.Opcode,
+			MemIndices: []uint16{nonceIndex, sourceIndex, destinationIndex},
+			MemBanks:   mergedMemoryBanks.Indices,
+			Data:       vixn.Data,
+		},
+	)
+
+	instructions := []solana.Instruction{
+		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitLimit(100_000),
+		execInstruction,
+	}
+	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+func MakeExternalTransferWithAuthorityTransaction(
+	nonce *Nonce,
+
+	vmConfig *common.VmConfig,
+
+	virtualSignature solana.Signature,
+
+	nonceMemory *common.Account,
+	nonceIndex uint16,
+
+	sourceMemory *common.Account,
+	sourceIndex uint16,
+
+	externalDestinationOwner *common.Account,
+	externalDestination *common.Account,
+
+	isCreateOnSend bool,
+	mint *common.Account,
+	quarks uint64,
+) (solana.Transaction, error) {
+	mergedMemoryBanks, err := MergeMemoryBanks(nonceMemory, sourceMemory)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	externalAddressPublicKeyBytes := ed25519.PublicKey(externalDestination.PublicKey().ToBytes())
+
+	vmOmnibusPublicKeyBytes := ed25519.PublicKey(vmConfig.Omnibus.PublicKey().ToBytes())
+
+	vixn := cvm.NewExternalTransferVirtualInstruction(&cvm.TransferVirtualInstructionArgs{
+		Amount:    quarks,
+		Signature: cvm.Signature(virtualSignature),
+	})
+
+	execInstruction := cvm.NewExecInstruction(
+		&cvm.ExecInstructionAccounts{
+			VmAuthority:     vmConfig.Authority.PublicKey().ToBytes(),
+			Vm:              vmConfig.Vm.PublicKey().ToBytes(),
+			VmMemA:          mergedMemoryBanks.A,
+			VmMemB:          mergedMemoryBanks.B,
+			VmOmnibus:       &vmOmnibusPublicKeyBytes,
+			ExternalAddress: &externalAddressPublicKeyBytes,
+		},
+		&cvm.ExecInstructionArgs{
+			Opcode:     vixn.Opcode,
+			MemIndices: []uint16{nonceIndex, sourceIndex},
+			MemBanks:   mergedMemoryBanks.Indices,
+			Data:       vixn.Data,
+		},
+	)
+
+	computeLimit := 100_000
+	if isCreateOnSend {
+		computeLimit = 125_000
+	}
+
+	instructions := []solana.Instruction{
+		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitLimit(uint32(computeLimit)),
+	}
+	if isCreateOnSend {
+		if externalDestinationOwner == nil {
+			return solana.Transaction{}, errors.New("destination owner is required")
+		}
+
+		createIdempotentInstruction, ata, err := token.CreateAssociatedTokenAccountIdempotent(
+			common.GetSubsidizer().PublicKey().ToBytes(), // todo: Should this be the VM authority?
+			externalDestinationOwner.PublicKey().ToBytes(),
+			mint.PublicKey().ToBytes(),
+		)
+		if err != nil {
+			return solana.Transaction{}, err
+		} else if !bytes.Equal(externalDestination.PublicKey().ToBytes(), ata) {
+			return solana.Transaction{}, errors.New("invalid destination owner")
+		}
+
+		instructions = append(instructions, createIdempotentInstruction)
+	}
+	instructions = append(instructions, execInstruction)
+	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+type MergedMemoryBankResult struct {
+	A       *ed25519.PublicKey
+	B       *ed25519.PublicKey
+	C       *ed25519.PublicKey
+	D       *ed25519.PublicKey
+	Indices []uint8
+}
+
+func MergeMemoryBanks(accounts ...*common.Account) (*MergedMemoryBankResult, error) {
+	indices := make([]uint8, len(accounts))
+	orderedBanks := make([]*ed25519.PublicKey, 4)
+
+	for i, account := range accounts {
+		for j, bank := range orderedBanks {
+			if bank == nil {
+				publicKey := ed25519.PublicKey(account.PublicKey().ToBytes())
+				orderedBanks[j] = &publicKey
+				indices[i] = uint8(j)
+				break
+			}
+
+			if bytes.Equal(*bank, account.PublicKey().ToBytes()) {
+				indices[i] = uint8(j)
+				break
+			}
+
+			if j == len(orderedBanks)-1 {
+				return nil, errors.New("too many memory banks")
+			}
+		}
+	}
+
+	return &MergedMemoryBankResult{
+		A:       orderedBanks[0],
+		B:       orderedBanks[1],
+		C:       orderedBanks[2],
+		D:       orderedBanks[3],
+		Indices: indices,
+	}, nil
+}

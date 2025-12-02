@@ -1,7 +1,7 @@
 # Open Code Protocol Server
 
 [![Release](https://img.shields.io/github/v/release/code-payments/ocp-server.svg)](https://github.com/code-payments/ocp-server/releases/latest)
-[![PkgGoDev](https://pkg.go.dev/badge/github.com/code-payments/ocp-server)](https://pkg.go.dev/github.com/code-payments/ocp-server/pkg)
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/code-payments/ocp-server)](https://pkg.go.dev/github.com/code-payments/ocp-server)
 [![Tests](https://github.com/code-payments/ocp-server/actions/workflows/test.yml/badge.svg)](https://github.com/code-payments/ocp-server/actions/workflows/test.yml)
 [![GitHub License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat)](https://github.com/code-payments/ocp-server/blob/main/LICENSE.md)
 
@@ -29,11 +29,11 @@ make test
 
 ## Project Structure
 
-The implementations powering the Open Code Protocol ecosystem (Flipcash App, SDK, etc) can be found under the `pkg/code/` directory. All other code under the `pkg/` directory are generic libraries and utilities.
+The implementations powering the Open Code Protocol (Intent System, Sequencer, etc) can be found int the `ocp/` package. All other packages are generic libraries and utilities.
 
 To begin diving into core systems, we recommend starting with the following packages:
-- `pkg/code/async/`: Asynchronous workers that perform tasks outside of RPC and web calls
-- `pkg/code/server/`: gRPC and web service implementations
+- `ocp/rpc/`: gRPC and web service implementations
+- `ocp/worker/`: Backend workers that perform tasks outside of RPC and web calls
 
 ## APIs
 
