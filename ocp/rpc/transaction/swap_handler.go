@@ -156,8 +156,6 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 			VaultTarget: destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
 			VaultBase:   destinationCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
 			BuyerBase:   temporaryCoreMintAta.PublicKey().ToBytes(),
-			FeeTarget:   destinationCurrencyAccounts.FeesMint.PublicKey().ToBytes(),
-			FeeBase:     destinationCurrencyAccounts.FeesBase.PublicKey().ToBytes(),
 
 			VmAuthority: destinationVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          destinationVmConfig.Vm.PublicKey().ToBytes(),
@@ -326,8 +324,6 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 			VaultTarget:  sourceCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
 			VaultBase:    sourceCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
 			SellerTarget: temporarySourceCurrencyAta.PublicKey().ToBytes(),
-			FeeTarget:    sourceCurrencyAccounts.FeesMint.PublicKey().ToBytes(),
-			FeeBase:      sourceCurrencyAccounts.FeesBase.PublicKey().ToBytes(),
 
 			VmAuthority: destinationVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          destinationVmConfig.Vm.PublicKey().ToBytes(),
@@ -523,8 +519,6 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 			VaultBase:    sourceCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
 			SellerTarget: temporarySourceCurrencyAta.PublicKey().ToBytes(),
 			SellerBase:   temporaryCoreMintAta.PublicKey().ToBytes(),
-			FeeTarget:    sourceCurrencyAccounts.FeesMint.PublicKey().ToBytes(),
-			FeeBase:      sourceCurrencyAccounts.FeesBase.PublicKey().ToBytes(),
 		},
 		&currencycreator.SellTokensInstructionArgs{
 			InAmount:     h.amount,
@@ -542,8 +536,6 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 			VaultTarget: destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
 			VaultBase:   destinationCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
 			BuyerBase:   temporaryCoreMintAta.PublicKey().ToBytes(),
-			FeeTarget:   destinationCurrencyAccounts.FeesMint.PublicKey().ToBytes(),
-			FeeBase:     destinationCurrencyAccounts.FeesBase.PublicKey().ToBytes(),
 
 			VmAuthority: destinationVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          destinationVmConfig.Vm.PublicKey().ToBytes(),

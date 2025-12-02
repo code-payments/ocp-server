@@ -23,21 +23,12 @@ func TestEstimatValueExchange(t *testing.T) {
 }
 
 func TestEstimateBuy(t *testing.T) {
-	received, fees := EstimateBuy(&EstimateBuyArgs{
+	received := EstimateBuy(&EstimateBuyArgs{
 		BuyAmountInQuarks:     100000000,        // $100
 		CurrentSupplyInQuarks: 7179502000000000, // 717,950.2 tokens
 		ValueMintDecimals:     6,
-		BuyFeeBps:             0, //0%
 	})
-	fmt.Printf("%d total, %d received, %d fees\n", received+fees, received, fees)
-
-	received, fees = EstimateBuy(&EstimateBuyArgs{
-		BuyAmountInQuarks:     100000000,        // $100
-		CurrentSupplyInQuarks: 7179502000000000, // 717,950.2 tokens
-		ValueMintDecimals:     6,
-		BuyFeeBps:             100, // 1%
-	})
-	fmt.Printf("%d total, %d received, %d fees\n", received+fees, received, fees)
+	fmt.Printf("%d total, %d received\n", received, received)
 }
 
 func TestEstimateSell(t *testing.T) {
@@ -64,7 +55,7 @@ func TestEstimates_CsvTable(t *testing.T) {
 
 	fmt.Println("value locked,total circulating supply,payment value,payment quarks,sell value,new circulating supply")
 	for valueLocked := startValue; valueLocked <= endValue; valueLocked *= 10 {
-		totalCirculatingSupply, _ := EstimateBuy(&EstimateBuyArgs{
+		totalCirculatingSupply := EstimateBuy(&EstimateBuyArgs{
 			BuyAmountInQuarks:     valueLocked,
 			CurrentSupplyInQuarks: 0,
 			ValueMintDecimals:     6,
@@ -86,7 +77,7 @@ func TestEstimates_CsvTable(t *testing.T) {
 			diff := int64(paymentValue) - int64(sellValue)
 			require.True(t, diff >= -1 && diff <= 1)
 
-			newCirculatingSupply, _ := EstimateBuy(&EstimateBuyArgs{
+			newCirculatingSupply := EstimateBuy(&EstimateBuyArgs{
 				BuyAmountInQuarks:     valueLocked - paymentValue,
 				CurrentSupplyInQuarks: 0,
 				ValueMintDecimals:     6,

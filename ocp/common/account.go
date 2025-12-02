@@ -543,8 +543,6 @@ type LaunchpadCurrencyAccounts struct {
 	VaultBaseBump      uint8
 	VaultMint          *Account
 	VaultMintBump      uint8
-	FeesBase           *Account
-	FeesMint           *Account
 }
 
 func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*LaunchpadCurrencyAccounts, error) {
@@ -568,14 +566,6 @@ func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*Lau
 	if err != nil {
 		return nil, err
 	}
-	feesBase, err := NewAccountFromPublicKeyString(metadataRecord.FeesCore)
-	if err != nil {
-		return nil, err
-	}
-	feesMint, err := NewAccountFromPublicKeyString(metadataRecord.FeesMint)
-	if err != nil {
-		return nil, err
-	}
 	return &LaunchpadCurrencyAccounts{
 		Mint:               mint,
 		CurrencyConfig:     currencyConfig,
@@ -586,8 +576,6 @@ func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*Lau
 		VaultBaseBump:      metadataRecord.VaultCoreBump,
 		VaultMint:          vaultMint,
 		VaultMintBump:      metadataRecord.VaultMintBump,
-		FeesBase:           feesBase,
-		FeesMint:           feesMint,
 	}, nil
 }
 

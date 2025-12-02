@@ -26,8 +26,6 @@ type BuyTokensInstructionAccounts struct {
 	VaultBase   ed25519.PublicKey
 	BuyerTarget ed25519.PublicKey
 	BuyerBase   ed25519.PublicKey
-	FeeTarget   ed25519.PublicKey
-	FeeBase     ed25519.PublicKey
 }
 
 func NewBuyTokensInstruction(
@@ -94,16 +92,6 @@ func NewBuyTokensInstruction(
 			{
 				PublicKey:  accounts.BuyerBase,
 				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeTarget,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeBase,
-				IsWritable: false,
 				IsSigner:   false,
 			},
 			{
