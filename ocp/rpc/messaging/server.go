@@ -21,6 +21,7 @@ import (
 	messagingpb "github.com/code-payments/ocp-protobuf-api/generated/go/messaging/v1"
 
 	"github.com/code-payments/ocp-server/grpc/client"
+	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/retry"
 	"github.com/code-payments/ocp-server/retry/backoff"
 
@@ -224,7 +225,9 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 	go s.flush(ctx, req.GetRequest().RendezvousKey, ms)
 
 	sendPingCh := time.After(0)
-	streamHealthCh := s.monitorOpenMessageStreamHealth(ctx, log, ssRef, streamer)
+	streamHealthCh := protoutil.MonitorStreamHealth(ctx, log, streamer, func(t *messagingpb.OpenMessageStreamWithKeepAliveRequest) bool {
+		return t.GetPong() != nil
+	})
 	updateRendezvousRecordCh := time.After(rendezvousRecordRefreshInterval)
 
 	for {
@@ -313,35 +316,6 @@ func (s *server) boundedRecv(
 	case <-time.After(timeout):
 		return nil, status.Error(codes.DeadlineExceeded, "timed out receiving message")
 	}
-}
-
-// Very naive implementation to start
-func (s *server) monitorOpenMessageStreamHealth(
-	ctx context.Context,
-	log *zap.Logger,
-	ssRef string,
-	streamer messagingpb.Messaging_OpenMessageStreamWithKeepAliveServer,
-) <-chan struct{} {
-	streamHealthChan := make(chan struct{})
-	go func() {
-		defer close(streamHealthChan)
-
-		for {
-			req, err := s.boundedRecv(ctx, streamer, messageStreamKeepAliveRecvTimeout)
-			if err != nil {
-				return
-			}
-
-			switch req.RequestOrPong.(type) {
-			case *messagingpb.OpenMessageStreamWithKeepAliveRequest_Pong:
-				log.Debug(fmt.Sprintf("received pong from client (stream=%s)", ssRef))
-			default:
-				// Client sent something unexpected. Terminate the stream
-				return
-			}
-		}
-	}()
-	return streamHealthChan
 }
 
 // OpenMessageStream implements messagingpb.MessagingServer.OpenMessageStream.
