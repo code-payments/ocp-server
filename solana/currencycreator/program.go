@@ -12,7 +12,7 @@ var (
 )
 
 var (
-	PROGRAM_ADDRESS = mustBase58Decode("ccZLx5N31asHhCa7hFmvdC9EGYVam13L8WXPTjPEiJY")
+	PROGRAM_ADDRESS = mustBase58Decode("ccZLx5N31asHhCa7hFmvdC9EGYVam13L8WXPTjPEiJY") // todo: v2 program address
 	PROGRAM_ID      = ed25519.PublicKey(PROGRAM_ADDRESS)
 )
 

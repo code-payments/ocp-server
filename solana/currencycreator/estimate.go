@@ -39,10 +39,9 @@ type EstimateBuyArgs struct {
 	BuyAmountInQuarks     uint64
 	CurrentSupplyInQuarks uint64
 	ValueMintDecimals     uint8
-	BuyFeeBps             uint16
 }
 
-func EstimateBuy(args *EstimateBuyArgs) (uint64, uint64) {
+func EstimateBuy(args *EstimateBuyArgs) uint64 {
 	scale := big.NewFloat(math.Pow10(int(args.ValueMintDecimals))).SetPrec(defaultCurvePrec)
 	unscaledBuyAmount := big.NewFloat(float64(args.BuyAmountInQuarks)).SetPrec(defaultCurvePrec)
 	scaledBuyAmount := new(big.Float).Quo(unscaledBuyAmount, scale)
@@ -56,13 +55,9 @@ func EstimateBuy(args *EstimateBuyArgs) (uint64, uint64) {
 	unscaledTokens := new(big.Float).Mul(scaledTokens, scale)
 
 	scale = big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
-	feePctValue := new(big.Float).SetPrec(defaultCurvePrec).Quo(big.NewFloat(float64(args.BuyFeeBps)), big.NewFloat(10000))
-	scaledFees := new(big.Float).Mul(scaledTokens, feePctValue)
-	unscaledFees := new(big.Float).Mul(scaledFees, scale)
 
 	tokens, _ := unscaledTokens.Int64()
-	fees, _ := unscaledFees.Int64()
-	return uint64(tokens - fees), uint64(fees)
+	return uint64(tokens)
 }
 
 type EstimateSellArgs struct {

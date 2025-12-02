@@ -7,8 +7,7 @@ import (
 )
 
 const (
-	InitializePoolInstructionArgsSize = (2 + // buy_fee
-		2 + // sell_fee
+	InitializePoolInstructionArgsSize = (2 + // sell_fee
 		1 + // bump
 		1 + // vault_target_bump
 		1 + // vault_base_bump
@@ -16,7 +15,6 @@ const (
 )
 
 type InitializePoolInstructionArgs struct {
-	BuyFee          uint16
 	SellFee         uint16
 	Bump            uint8
 	VaultTargetBump uint8
@@ -31,8 +29,6 @@ type InitializePoolInstructionAccounts struct {
 	Pool        ed25519.PublicKey
 	VaultTarget ed25519.PublicKey
 	VaultBase   ed25519.PublicKey
-	FeeTarget   ed25519.PublicKey
-	FeeBase     ed25519.PublicKey
 }
 
 func NewInitializePoolInstruction(
@@ -45,7 +41,6 @@ func NewInitializePoolInstruction(
 	data := make([]byte, 1+InitializePoolInstructionArgsSize)
 
 	putInstructionType(data, InstructionTypeInitializePool, &offset)
-	putUint16(data, args.BuyFee, &offset)
 	putUint16(data, args.SellFee, &offset)
 	putUint8(data, args.Bump, &offset)
 	putUint8(data, args.VaultTargetBump, &offset)
@@ -91,15 +86,6 @@ func NewInitializePoolInstruction(
 			}, {
 				PublicKey:  accounts.VaultBase,
 				IsWritable: true,
-				IsSigner:   false,
-			}, {
-				PublicKey:  accounts.FeeTarget,
-				IsWritable: false,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeBase,
-				IsWritable: false,
 				IsSigner:   false,
 			},
 			{

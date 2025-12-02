@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
@@ -143,10 +143,6 @@ func testMetadataRoundTrip(t *testing.T, s currency.Store) {
 		VaultCore:     "A9NVHVuorNL4y2YFxdwdU3Hqozxw1Y1YJ81ZPxJsRrT4",
 		VaultCoreBump: 255,
 
-		FeesMint:  "BfWacqZVHQt3VNwPugXAkLrApgCTnjgF6nQb7xEMqeDu",
-		BuyFeeBps: currencycreator.DefaultBuyFeeBps,
-
-		FeesCore:   "5EcVYL8jHRKeeQqg6eYVBzc73ecH1PFzzaavoQBKRYy5",
 		SellFeeBps: currencycreator.DefaultSellFeeBps,
 
 		Alt: "EkAeTCceLWbmZrAzVZanDJBtHSnkAWndMFgmTnUnVLRR",
@@ -221,9 +217,6 @@ func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.Metadata
 	assert.Equal(t, obj1.VaultMintBump, obj2.VaultMintBump)
 	assert.Equal(t, obj1.VaultCore, obj2.VaultCore)
 	assert.Equal(t, obj1.VaultCoreBump, obj2.VaultCoreBump)
-	assert.Equal(t, obj1.FeesMint, obj2.FeesMint)
-	assert.Equal(t, obj1.BuyFeeBps, obj2.BuyFeeBps)
-	assert.Equal(t, obj1.FeesCore, obj2.FeesCore)
 	assert.Equal(t, obj1.SellFeeBps, obj2.SellFeeBps)
 	assert.Equal(t, obj1.Alt, obj2.Alt)
 	assert.Equal(t, obj1.CreatedBy, obj2.CreatedBy)

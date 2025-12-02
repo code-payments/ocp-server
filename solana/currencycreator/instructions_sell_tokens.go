@@ -26,8 +26,6 @@ type SellTokensInstructionAccounts struct {
 	VaultBase    ed25519.PublicKey
 	SellerTarget ed25519.PublicKey
 	SellerBase   ed25519.PublicKey
-	FeeTarget    ed25519.PublicKey
-	FeeBase      ed25519.PublicKey
 }
 
 func NewSellTokensInstruction(
@@ -93,16 +91,6 @@ func NewSellTokensInstruction(
 			},
 			{
 				PublicKey:  accounts.SellerBase,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeTarget,
-				IsWritable: false,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeBase,
 				IsWritable: true,
 				IsSigner:   false,
 			},

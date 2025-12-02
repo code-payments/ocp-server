@@ -7,8 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	q "github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 
 	pgutil "github.com/code-payments/ocp-server/database/postgres"
 )
@@ -76,10 +76,6 @@ type metadataModel struct {
 	VaultCore     string `db:"vault_core"`
 	VaultCoreBump uint8  `db:"vault_core_bump"`
 
-	FeesMint  string `db:"fees_mint"`
-	BuyFeeBps uint16 `db:"buy_fee_bps"`
-
-	FeesCore   string `db:"fees_core"`
 	SellFeeBps uint16 `db:"sell_fee_bps"`
 
 	Alt string `db:"alt"`
@@ -121,10 +117,6 @@ func toMetadataModel(obj *currency.MetadataRecord) (*metadataModel, error) {
 		VaultCore:     obj.VaultCore,
 		VaultCoreBump: obj.VaultCoreBump,
 
-		FeesMint:  obj.FeesMint,
-		BuyFeeBps: obj.BuyFeeBps,
-
-		FeesCore:   obj.FeesCore,
 		SellFeeBps: obj.SellFeeBps,
 
 		Alt: obj.Alt,
@@ -163,10 +155,6 @@ func fromMetadataModel(obj *metadataModel) *currency.MetadataRecord {
 		VaultCore:     obj.VaultCore,
 		VaultCoreBump: obj.VaultCoreBump,
 
-		FeesMint:  obj.FeesMint,
-		BuyFeeBps: obj.BuyFeeBps,
-
-		FeesCore:   obj.FeesCore,
 		SellFeeBps: obj.SellFeeBps,
 
 		Alt: obj.Alt,
@@ -258,9 +246,9 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+metadataTableName+`
-			(name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, fees_mint, buy_fee_bps, fees_core, sell_fee_bps, alt, created_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
-			RETURNING id, name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, fees_mint, buy_fee_bps, fees_core, sell_fee_bps, alt, created_by, created_at`,
+			(name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+			RETURNING id, name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at`,
 			m.Name,
 			m.Symbol,
 			m.Description,
@@ -278,9 +266,6 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.VaultMintBump,
 			m.VaultCore,
 			m.VaultCoreBump,
-			m.FeesMint,
-			m.BuyFeeBps,
-			m.FeesCore,
 			m.SellFeeBps,
 			m.Alt,
 			m.CreatedBy,
@@ -362,7 +347,7 @@ func dbGetAllExchangeRatesForRange(ctx context.Context, db *sqlx.DB, symbol stri
 func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*metadataModel, error) {
 	res := &metadataModel{}
 	err := db.GetContext(ctx, res,
-		`SELECT id, name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, fees_mint, buy_fee_bps, fees_core, sell_fee_bps, alt, created_by, created_at
+		`SELECT id, name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at
 		FROM `+metadataTableName+`
 		WHERE mint = $1`,
 		mint,

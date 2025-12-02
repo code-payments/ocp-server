@@ -58,10 +58,6 @@ const (
 		vault_core TEXT UNIQUE NOT NULL,
 		vault_core_bump INTEGER NOT NULL,
 
-		fees_mint TEXT NOT NULL,
-		buy_fee_bps INTEGER NOT NULL,
-
-		fees_core TEXT NOT NULL,
 		sell_fee_bps INTEGER NOT NULL,
 
 		alt TEXT NOT NULL,
