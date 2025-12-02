@@ -11,7 +11,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
-	"github.com/code-payments/ocp-server/solana/cvm"
+	vm_program "github.com/code-payments/ocp-server/solana/vm"
 )
 
 func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, mint, owner *common.Account, waitForInitialization bool) error {
@@ -62,7 +62,7 @@ func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_dat
 	return errors.New("timed out waiting for initialization")
 }
 
-func GetVirtualTimelockAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, owner *common.Account) (*cvm.VirtualTimelockAccount, *common.Account, uint16, error) {
+func GetVirtualTimelockAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, owner *common.Account) (*vm_program.VirtualTimelockAccount, *common.Account, uint16, error) {
 	resp, err := vmIndexerClient.GetVirtualTimelockAccounts(ctx, &indexerpb.GetVirtualTimelockAccountsRequest{
 		VmAccount: &indexerpb.Address{Value: vm.PublicKey().ToBytes()},
 		Owner:     &indexerpb.Address{Value: owner.PublicKey().ToBytes()},
@@ -86,9 +86,9 @@ func GetVirtualTimelockAccountStateInMemory(ctx context.Context, vmIndexerClient
 	}
 
 	protoAccount := resp.Items[0].Account
-	state := cvm.VirtualTimelockAccount{
+	state := vm_program.VirtualTimelockAccount{
 		Owner: protoAccount.Owner.Value,
-		Nonce: cvm.Hash(protoAccount.Nonce.Value),
+		Nonce: vm_program.Hash(protoAccount.Nonce.Value),
 
 		TokenBump:    uint8(protoAccount.TokenBump),
 		UnlockBump:   uint8(protoAccount.UnlockBump),
@@ -109,7 +109,7 @@ func GetVirtualTimelockAccountLocationInMemory(ctx context.Context, vmIndexerCli
 	return memory, memoryIndex, nil
 }
 
-func GetVirtualDurableNonceAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, nonce *common.Account) (*cvm.VirtualDurableNonce, *common.Account, uint16, error) {
+func GetVirtualDurableNonceAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, nonce *common.Account) (*vm_program.VirtualDurableNonce, *common.Account, uint16, error) {
 	resp, err := vmIndexerClient.GetVirtualDurableNonce(ctx, &indexerpb.GetVirtualDurableNonceRequest{
 		VmAccount: &indexerpb.Address{Value: vm.PublicKey().ToBytes()},
 		Address:   &indexerpb.Address{Value: nonce.PublicKey().ToBytes()},
@@ -131,9 +131,9 @@ func GetVirtualDurableNonceAccountStateInMemory(ctx context.Context, vmIndexerCl
 	}
 
 	protoAccount := resp.Item.Account
-	state := cvm.VirtualDurableNonce{
+	state := vm_program.VirtualDurableNonce{
 		Address: protoAccount.Address.Value,
-		Value:   cvm.Hash(protoAccount.Value.Value),
+		Value:   vm_program.Hash(protoAccount.Value.Value),
 	}
 
 	return &state, memory, uint16(protoMemory.Index), nil

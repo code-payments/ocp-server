@@ -32,7 +32,7 @@ import (
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_SubmitIntentServer) error {
@@ -318,7 +318,7 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 
 		requiresClientSignature bool
 		expectedSigner          *common.Account
-		virtualIxnHash          *cvm.CompactMessage
+		virtualIxnHash          *vm.CompactMessage
 
 		intentOrderingIndexOverriden bool
 	}
@@ -401,7 +401,7 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 			requiresNonce, vmAccount := actionHandler.RequiresNonce(j)
 			if requiresNonce {
 				noncePool, err := transaction.SelectNoncePool(
-					nonce.EnvironmentCvm,
+					nonce.EnvironmentVm,
 					vmAccount.PublicKey().ToBase58(),
 					nonce.PurposeClientIntent,
 					s.noncePools...,

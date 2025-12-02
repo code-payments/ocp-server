@@ -9,8 +9,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	"github.com/code-payments/ocp-server/solana/token"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 // todo: The argument sizes are blowing out of proportion, though there's likely
@@ -83,16 +83,16 @@ func MakeCompressAccountTransaction(
 
 	signature := ed25519.Sign(vmConfig.Authority.PrivateKey().ToBytes(), hashedVirtualAccountState)
 
-	compressInstruction := cvm.NewCompressInstruction(
-		&cvm.CompressInstructionAccounts{
+	compressInstruction := vm.NewCompressInstruction(
+		&vm.CompressInstructionAccounts{
 			VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          vmConfig.Vm.PublicKey().ToBytes(),
 			VmMemory:    memory.PublicKey().ToBytes(),
 			VmStorage:   storage.PublicKey().ToBytes(),
 		},
-		&cvm.CompressInstructionArgs{
+		&vm.CompressInstructionArgs{
 			AccountIndex: accountIndex,
-			Signature:    cvm.Signature(signature),
+			Signature:    vm.Signature(signature),
 		},
 	)
 
@@ -125,19 +125,19 @@ func MakeInternalWithdrawTransaction(
 		return solana.Transaction{}, err
 	}
 
-	vixn := cvm.NewWithdrawVirtualInstruction(&cvm.WithdrawVirtualInstructionArgs{
-		Signature: cvm.Signature(virtualSignature),
+	vixn := vm.NewWithdrawVirtualInstruction(&vm.WithdrawVirtualInstructionArgs{
+		Signature: vm.Signature(virtualSignature),
 	})
 
-	execInstruction := cvm.NewExecInstruction(
-		&cvm.ExecInstructionAccounts{
+	execInstruction := vm.NewExecInstruction(
+		&vm.ExecInstructionAccounts{
 			VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          vmConfig.Vm.PublicKey().ToBytes(),
 			VmMemA:      mergedMemoryBanks.A,
 			VmMemB:      mergedMemoryBanks.B,
 			VmMemC:      mergedMemoryBanks.C,
 		},
-		&cvm.ExecInstructionArgs{
+		&vm.ExecInstructionArgs{
 			Opcode:     vixn.Opcode,
 			MemIndices: []uint16{nonceIndex, sourceIndex, destinationIndex},
 			MemBanks:   mergedMemoryBanks.Indices,
@@ -177,12 +177,12 @@ func MakeExternalWithdrawTransaction(
 
 	externalAddressPublicKeyBytes := ed25519.PublicKey(externalDestination.PublicKey().ToBytes())
 
-	vixn := cvm.NewWithdrawVirtualInstruction(&cvm.WithdrawVirtualInstructionArgs{
-		Signature: cvm.Signature(virtualSignature),
+	vixn := vm.NewWithdrawVirtualInstruction(&vm.WithdrawVirtualInstructionArgs{
+		Signature: vm.Signature(virtualSignature),
 	})
 
-	execInstruction := cvm.NewExecInstruction(
-		&cvm.ExecInstructionAccounts{
+	execInstruction := vm.NewExecInstruction(
+		&vm.ExecInstructionAccounts{
 			VmAuthority:     vmConfig.Authority.PublicKey().ToBytes(),
 			Vm:              vmConfig.Vm.PublicKey().ToBytes(),
 			VmMemA:          mergedMemoryBanks.A,
@@ -190,7 +190,7 @@ func MakeExternalWithdrawTransaction(
 			VmOmnibus:       &vmOmnibusPublicKeyBytes,
 			ExternalAddress: &externalAddressPublicKeyBytes,
 		},
-		&cvm.ExecInstructionArgs{
+		&vm.ExecInstructionArgs{
 			Opcode:     vixn.Opcode,
 			MemIndices: []uint16{nonceIndex, sourceIndex},
 			MemBanks:   mergedMemoryBanks.Indices,
@@ -229,20 +229,20 @@ func MakeInternalTransferWithAuthorityTransaction(
 		return solana.Transaction{}, err
 	}
 
-	vixn := cvm.NewTransferVirtualInstruction(&cvm.TransferVirtualInstructionArgs{
+	vixn := vm.NewTransferVirtualInstruction(&vm.TransferVirtualInstructionArgs{
 		Amount:    quarks,
-		Signature: cvm.Signature(virtualSignature),
+		Signature: vm.Signature(virtualSignature),
 	})
 
-	execInstruction := cvm.NewExecInstruction(
-		&cvm.ExecInstructionAccounts{
+	execInstruction := vm.NewExecInstruction(
+		&vm.ExecInstructionAccounts{
 			VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          vmConfig.Vm.PublicKey().ToBytes(),
 			VmMemA:      mergedMemoryBanks.A,
 			VmMemB:      mergedMemoryBanks.B,
 			VmMemC:      mergedMemoryBanks.C,
 		},
-		&cvm.ExecInstructionArgs{
+		&vm.ExecInstructionArgs{
 			Opcode:     vixn.Opcode,
 			MemIndices: []uint16{nonceIndex, sourceIndex, destinationIndex},
 			MemBanks:   mergedMemoryBanks.Indices,
@@ -287,13 +287,13 @@ func MakeExternalTransferWithAuthorityTransaction(
 
 	vmOmnibusPublicKeyBytes := ed25519.PublicKey(vmConfig.Omnibus.PublicKey().ToBytes())
 
-	vixn := cvm.NewExternalTransferVirtualInstruction(&cvm.TransferVirtualInstructionArgs{
+	vixn := vm.NewExternalTransferVirtualInstruction(&vm.TransferVirtualInstructionArgs{
 		Amount:    quarks,
-		Signature: cvm.Signature(virtualSignature),
+		Signature: vm.Signature(virtualSignature),
 	})
 
-	execInstruction := cvm.NewExecInstruction(
-		&cvm.ExecInstructionAccounts{
+	execInstruction := vm.NewExecInstruction(
+		&vm.ExecInstructionAccounts{
 			VmAuthority:     vmConfig.Authority.PublicKey().ToBytes(),
 			Vm:              vmConfig.Vm.PublicKey().ToBytes(),
 			VmMemA:          mergedMemoryBanks.A,
@@ -301,7 +301,7 @@ func MakeExternalTransferWithAuthorityTransaction(
 			VmOmnibus:       &vmOmnibusPublicKeyBytes,
 			ExternalAddress: &externalAddressPublicKeyBytes,
 		},
-		&cvm.ExecInstructionArgs{
+		&vm.ExecInstructionArgs{
 			Opcode:     vixn.Opcode,
 			MemIndices: []uint16{nonceIndex, sourceIndex},
 			MemBanks:   mergedMemoryBanks.Indices,

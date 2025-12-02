@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/pointer"
 )
 
@@ -391,10 +391,10 @@ func testBatchClaimAvailableByPurpose(t *testing.T, s nonce.Store) {
 			require.NoError(t, s.Save(ctx, record))
 
 			record = &nonce.Record{
-				Address:             fmt.Sprintf("nonce_cvm_%d", i),
+				Address:             fmt.Sprintf("nonce_vm_%d", i),
 				Authority:           "authority",
 				Blockhash:           "bh",
-				Environment:         nonce.EnvironmentCvm,
+				Environment:         nonce.EnvironmentVm,
 				EnvironmentInstance: "pubkey",
 				Purpose:             nonce.PurposeClientIntent,
 				State:               nonce.StateClaimed,

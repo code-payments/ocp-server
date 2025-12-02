@@ -206,7 +206,7 @@ func (p *runtime) handleUnknown(ctx context.Context, record *nonce.Record) error
 
 func (p *runtime) handleReleased(ctx context.Context, record *nonce.Record) error {
 	switch record.Environment {
-	case nonce.EnvironmentSolana, nonce.EnvironmentCvm:
+	case nonce.EnvironmentSolana, nonce.EnvironmentVm:
 	default:
 		return errors.Errorf("%s environment not supported for %s state", record.Environment.String(), nonce.StateReleased.String())
 	}
@@ -222,7 +222,7 @@ func (p *runtime) handleReleased(ctx context.Context, record *nonce.Record) erro
 		if err != nil {
 			return err
 		}
-	case nonce.EnvironmentCvm:
+	case nonce.EnvironmentVm:
 		fulfillmentRecord, err := p.data.GetFulfillmentByVirtualSignature(ctx, record.Signature)
 		if err != nil {
 			return err
@@ -247,8 +247,8 @@ func (p *runtime) handleReleased(ctx context.Context, record *nonce.Record) erro
 		if err != nil {
 			return err
 		}
-	case nonce.EnvironmentCvm:
-		nextBlockhash, err = p.getBlockhashFromCvmNonce(ctx, record, txn.Slot)
+	case nonce.EnvironmentVm:
+		nextBlockhash, err = p.getBlockhashFromVmNonce(ctx, record, txn.Slot)
 		if err != nil {
 			return err
 		}

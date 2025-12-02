@@ -14,7 +14,7 @@ type Environment uint8
 const (
 	EnvironmentUnknown Environment = iota
 	EnvironmentSolana              // Environment instance is the cluster name (ie. mainnet, devnet, testnet, etc)
-	EnvironmentCvm                 // Environment instance is the VM public key
+	EnvironmentVm                  // Environment instance is the VM public key
 )
 
 const (
@@ -174,8 +174,8 @@ func (e Environment) String() string {
 		return "unknown"
 	case EnvironmentSolana:
 		return "solana"
-	case EnvironmentCvm:
-		return "cvm"
+	case EnvironmentVm:
+		return "vm"
 	}
 	return "unknown"
 }
