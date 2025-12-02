@@ -245,9 +245,9 @@ func (p *runtime) getBlockhashFromSolanaNonce(ctx context.Context, record *nonce
 	return base58.Encode(data.Blockhash), nil
 }
 
-func (p *runtime) getBlockhashFromCvmNonce(ctx context.Context, record *nonce.Record, slot uint64) (string, error) {
-	if record.Environment != nonce.EnvironmentCvm {
-		return "", errors.Errorf("nonce environment is not %s", nonce.EnvironmentCvm.String())
+func (p *runtime) getBlockhashFromVmNonce(ctx context.Context, record *nonce.Record, slot uint64) (string, error) {
+	if record.Environment != nonce.EnvironmentVm {
+		return "", errors.Errorf("nonce environment is not %s", nonce.EnvironmentVm.String())
 	}
 
 	decodedVmAddress, err := base58.Decode(record.EnvironmentInstance)

@@ -64,7 +64,7 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		}(state)
 	}
 
-	// Setup workers to watch for nonce state changes on the CVM side
+	// Setup workers to watch for nonce state changes on the VM side
 	//
 	// todo: Dynamically detect VMs
 	for _, vm := range []string{
@@ -75,9 +75,9 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		} {
 			go func(vm string, state nonce.State) {
 
-				err := p.worker(ctx, nonce.EnvironmentCvm, vm, state, interval)
+				err := p.worker(ctx, nonce.EnvironmentVm, vm, state, interval)
 				if err != nil && err != context.Canceled {
-					p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentCvm, vm, state))
+					p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentVm, vm, state))
 				}
 
 			}(vm, state)

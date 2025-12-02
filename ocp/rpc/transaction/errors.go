@@ -15,7 +15,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
@@ -186,7 +186,7 @@ func toInvalidTxnSignatureErrorDetails(
 
 func toInvalidVirtualIxnSignatureErrorDetails(
 	actionId uint32,
-	virtualIxnHash cvm.CompactMessage,
+	virtualIxnHash vm.CompactMessage,
 	signature *commonpb.Signature,
 ) *transactionpb.ErrorDetails {
 	return &transactionpb.ErrorDetails{

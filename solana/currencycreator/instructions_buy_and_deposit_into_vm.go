@@ -4,7 +4,7 @@ import (
 	"crypto/ed25519"
 
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
@@ -143,7 +143,7 @@ func NewBuyAndDepositIntoVmInstruction(
 				IsSigner:   false,
 			},
 			{
-				PublicKey:  cvm.PROGRAM_ID,
+				PublicKey:  vm.PROGRAM_ID,
 				IsWritable: false,
 				IsSigner:   false,
 			},

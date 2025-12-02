@@ -23,12 +23,12 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
-	"github.com/code-payments/ocp-server/ocp/vm"
+	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/retry"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	"github.com/code-payments/ocp-server/solana/memo"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
@@ -100,12 +100,12 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		return errors.Wrap(err, "error getting timelock accounts")
 	}
 
-	err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, data, vmIndexerClient, mint, userAuthority, true)
+	err = vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, data, vmIndexerClient, mint, userAuthority, true)
 	if err != nil {
 		return errors.Wrap(err, "error ensuring vta is initialized")
 	}
 
-	memoryAccount, memoryIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, userAuthority)
+	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, userAuthority)
 	if err != nil {
 		return errors.Wrap(err, "error getting vta location in memory")
 	}
@@ -115,8 +115,8 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		memo.Instruction(codeVmDepositMemoValue),
 		compute_budget.SetComputeUnitPrice(1_000),
 		compute_budget.SetComputeUnitLimit(50_000),
-		cvm.NewDepositFromPdaInstruction(
-			&cvm.DepositFromPdaInstructionAccounts{
+		vm.NewDepositFromPdaInstruction(
+			&vm.DepositFromPdaInstructionAccounts{
 				VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
 				Vm:          vmConfig.Vm.PublicKey().ToBytes(),
 				VmMemory:    memoryAccount.PublicKey().ToBytes(),
@@ -125,7 +125,7 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 				DepositAta:  timelockAccounts.VmDepositAccounts.Ata.PublicKey().ToBytes(),
 				VmOmnibus:   vmConfig.Omnibus.PublicKey().ToBytes(),
 			},
-			&cvm.DepositFromPdaInstructionArgs{
+			&vm.DepositFromPdaInstructionArgs{
 				AccountIndex: memoryIndex,
 				Amount:       balance,
 				Bump:         timelockAccounts.VmDepositAccounts.PdaBump,

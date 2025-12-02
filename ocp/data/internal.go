@@ -14,8 +14,8 @@ import (
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	pg "github.com/code-payments/ocp-server/database/postgres"
 	"github.com/code-payments/ocp-server/database/query"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
+	"github.com/code-payments/ocp-server/solana/vm"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
@@ -24,8 +24,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
-	cvm_ram "github.com/code-payments/ocp-server/ocp/data/cvm/ram"
-	cvm_storage "github.com/code-payments/ocp-server/ocp/data/cvm/storage"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
@@ -36,13 +34,13 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
+	vm_ram "github.com/code-payments/ocp-server/ocp/data/vm/ram"
+	vm_storage "github.com/code-payments/ocp-server/ocp/data/vm/storage"
 
 	account_memory_client "github.com/code-payments/ocp-server/ocp/data/account/memory"
 	action_memory_client "github.com/code-payments/ocp-server/ocp/data/action/memory"
 	balance_memory_client "github.com/code-payments/ocp-server/ocp/data/balance/memory"
 	currency_memory_client "github.com/code-payments/ocp-server/ocp/data/currency/memory"
-	cvm_ram_memory_client "github.com/code-payments/ocp-server/ocp/data/cvm/ram/memory"
-	cvm_storage_memory_client "github.com/code-payments/ocp-server/ocp/data/cvm/storage/memory"
 	deposit_memory_client "github.com/code-payments/ocp-server/ocp/data/deposit/memory"
 	fulfillment_memory_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/memory"
 	intent_memory_client "github.com/code-payments/ocp-server/ocp/data/intent/memory"
@@ -53,13 +51,13 @@ import (
 	timelock_memory_client "github.com/code-payments/ocp-server/ocp/data/timelock/memory"
 	transaction_memory_client "github.com/code-payments/ocp-server/ocp/data/transaction/memory"
 	vault_memory_client "github.com/code-payments/ocp-server/ocp/data/vault/memory"
+	vm_ram_memory_client "github.com/code-payments/ocp-server/ocp/data/vm/ram/memory"
+	vm_storage_memory_client "github.com/code-payments/ocp-server/ocp/data/vm/storage/memory"
 
 	account_postgres_client "github.com/code-payments/ocp-server/ocp/data/account/postgres"
 	action_postgres_client "github.com/code-payments/ocp-server/ocp/data/action/postgres"
 	balance_postgres_client "github.com/code-payments/ocp-server/ocp/data/balance/postgres"
 	currency_postgres_client "github.com/code-payments/ocp-server/ocp/data/currency/postgres"
-	cvm_ram_postgres_client "github.com/code-payments/ocp-server/ocp/data/cvm/ram/postgres"
-	cvm_storage_postgres_client "github.com/code-payments/ocp-server/ocp/data/cvm/storage/postgres"
 	deposit_postgres_client "github.com/code-payments/ocp-server/ocp/data/deposit/postgres"
 	fulfillment_postgres_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/postgres"
 	intent_postgres_client "github.com/code-payments/ocp-server/ocp/data/intent/postgres"
@@ -70,6 +68,8 @@ import (
 	timelock_postgres_client "github.com/code-payments/ocp-server/ocp/data/timelock/postgres"
 	transaction_postgres_client "github.com/code-payments/ocp-server/ocp/data/transaction/postgres"
 	vault_postgres_client "github.com/code-payments/ocp-server/ocp/data/vault/postgres"
+	vm_ram_postgres_client "github.com/code-payments/ocp-server/ocp/data/vm/ram/postgres"
+	vm_storage_postgres_client "github.com/code-payments/ocp-server/ocp/data/vm/storage/postgres"
 )
 
 // Cache Constants
@@ -136,19 +136,6 @@ type DatabaseData interface {
 	GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error)
 	PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
 	GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
-
-	// CVM RAM
-	// --------------------------------------------------------------------------------
-	InitializeVmMemory(ctx context.Context, record *cvm_ram.Record) error
-	FreeVmMemoryByIndex(ctx context.Context, memoryAccount string, index uint16) error
-	FreeVmMemoryByAddress(ctx context.Context, address string) error
-	ReserveVmMemory(ctx context.Context, vm string, accountType cvm.VirtualAccountType, address string) (string, uint16, error)
-
-	// CVM Storage
-	// --------------------------------------------------------------------------------
-	InitializeVmStorage(ctx context.Context, record *cvm_storage.Record) error
-	FindAnyVmStorageWithAvailableCapacity(ctx context.Context, vm string, purpose cvm_storage.Purpose, minCapacity uint64) (*cvm_storage.Record, error)
-	ReserveVmStorage(ctx context.Context, vm string, purpose cvm_storage.Purpose, address string) (string, error)
 
 	// Deposits
 	// --------------------------------------------------------------------------------
@@ -251,6 +238,19 @@ type DatabaseData interface {
 	GetAllKeysByState(ctx context.Context, state vault.State, opts ...query.Option) ([]*vault.Record, error)
 	SaveKey(ctx context.Context, record *vault.Record) error
 
+	// VM RAM
+	// --------------------------------------------------------------------------------
+	InitializeVmMemory(ctx context.Context, record *vm_ram.Record) error
+	FreeVmMemoryByIndex(ctx context.Context, memoryAccount string, index uint16) error
+	FreeVmMemoryByAddress(ctx context.Context, address string) error
+	ReserveVmMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error)
+
+	// VM Storage
+	// --------------------------------------------------------------------------------
+	InitializeVmStorage(ctx context.Context, record *vm_storage.Record) error
+	FindAnyVmStorageWithAvailableCapacity(ctx context.Context, vm string, purpose vm_storage.Purpose, minCapacity uint64) (*vm_storage.Record, error)
+	ReserveVmStorage(ctx context.Context, vm string, purpose vm_storage.Purpose, address string) (string, error)
+
 	// ExecuteInTx executes fn with a single DB transaction that is scoped to the call.
 	// This enables more complex transactions that can span many calls across the provider.
 	//
@@ -265,8 +265,6 @@ type DatabaseProvider struct {
 	actions      action.Store
 	balance      balance.Store
 	currencies   currency.Store
-	cvmRam       cvm_ram.Store
-	cvmStorage   cvm_storage.Store
 	deposits     deposit.Store
 	fulfillments fulfillment.Store
 	intents      intent.Store
@@ -277,6 +275,8 @@ type DatabaseProvider struct {
 	timelocks    timelock.Store
 	transactions transaction.Store
 	vault        vault.Store
+	vmRam        vm_ram.Store
+	vmStorage    vm_storage.Store
 
 	exchangeCache cache.Cache
 	timelockCache cache.Cache
@@ -310,8 +310,6 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		actions:      action_postgres_client.New(db),
 		balance:      balance_postgres_client.New(db),
 		currencies:   currency_postgres_client.New(db),
-		cvmRam:       cvm_ram_postgres_client.New(db),
-		cvmStorage:   cvm_storage_postgres_client.New(db),
 		deposits:     deposit_postgres_client.New(db),
 		fulfillments: fulfillment_postgres_client.New(db),
 		intents:      intent_postgres_client.New(db),
@@ -322,6 +320,8 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		timelocks:    timelock_postgres_client.New(db),
 		transactions: transaction_postgres_client.New(db),
 		vault:        vault_postgres_client.New(db),
+		vmRam:        vm_ram_postgres_client.New(db),
+		vmStorage:    vm_storage_postgres_client.New(db),
 
 		exchangeCache: cache.NewCache(maxExchangeRateCacheBudget),
 		timelockCache: cache.NewCache(maxTimelockCacheBudget),
@@ -336,8 +336,6 @@ func NewTestDatabaseProvider() DatabaseData {
 		actions:      action_memory_client.New(),
 		balance:      balance_memory_client.New(),
 		currencies:   currency_memory_client.New(),
-		cvmRam:       cvm_ram_memory_client.New(),
-		cvmStorage:   cvm_storage_memory_client.New(),
 		deposits:     deposit_memory_client.New(),
 		fulfillments: fulfillment_memory_client.New(),
 		intents:      intent_memory_client.New(),
@@ -348,6 +346,8 @@ func NewTestDatabaseProvider() DatabaseData {
 		timelocks:    timelock_memory_client.New(),
 		transactions: transaction_memory_client.New(),
 		vault:        vault_memory_client.New(),
+		vmRam:        vm_ram_memory_client.New(),
+		vmStorage:    vm_storage_memory_client.New(),
 
 		exchangeCache: cache.NewCache(maxExchangeRateCacheBudget),
 		timelockCache: nil, // Shouldn't be used for tests
@@ -522,33 +522,6 @@ func (dp *DatabaseProvider) PutCurrencyReserve(ctx context.Context, record *curr
 }
 func (dp *DatabaseProvider) GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error) {
 	return dp.currencies.GetReserveAtTime(ctx, mint, t)
-}
-
-// CVM RAM
-// --------------------------------------------------------------------------------
-func (dp *DatabaseProvider) InitializeVmMemory(ctx context.Context, record *cvm_ram.Record) error {
-	return dp.cvmRam.InitializeMemory(ctx, record)
-}
-func (dp *DatabaseProvider) FreeVmMemoryByIndex(ctx context.Context, memoryAccount string, index uint16) error {
-	return dp.cvmRam.FreeMemoryByIndex(ctx, memoryAccount, index)
-}
-func (dp *DatabaseProvider) FreeVmMemoryByAddress(ctx context.Context, address string) error {
-	return dp.cvmRam.FreeMemoryByAddress(ctx, address)
-}
-func (dp *DatabaseProvider) ReserveVmMemory(ctx context.Context, vm string, accountType cvm.VirtualAccountType, address string) (string, uint16, error) {
-	return dp.cvmRam.ReserveMemory(ctx, vm, accountType, address)
-}
-
-// CVM Storage
-// --------------------------------------------------------------------------------
-func (dp *DatabaseProvider) InitializeVmStorage(ctx context.Context, record *cvm_storage.Record) error {
-	return dp.cvmStorage.InitializeStorage(ctx, record)
-}
-func (dp *DatabaseProvider) FindAnyVmStorageWithAvailableCapacity(ctx context.Context, vm string, purpose cvm_storage.Purpose, minCapacity uint64) (*cvm_storage.Record, error) {
-	return dp.cvmStorage.FindAnyWithAvailableCapacity(ctx, vm, purpose, minCapacity)
-}
-func (dp *DatabaseProvider) ReserveVmStorage(ctx context.Context, vm string, purpose cvm_storage.Purpose, address string) (string, error) {
-	return dp.cvmStorage.ReserveStorage(ctx, vm, purpose, address)
 }
 
 // Deposits
@@ -907,4 +880,31 @@ func (dp *DatabaseProvider) GetAllKeysByState(ctx context.Context, state vault.S
 }
 func (dp *DatabaseProvider) SaveKey(ctx context.Context, record *vault.Record) error {
 	return dp.vault.Save(ctx, record)
+}
+
+// VM RAM
+// --------------------------------------------------------------------------------
+func (dp *DatabaseProvider) InitializeVmMemory(ctx context.Context, record *vm_ram.Record) error {
+	return dp.vmRam.InitializeMemory(ctx, record)
+}
+func (dp *DatabaseProvider) FreeVmMemoryByIndex(ctx context.Context, memoryAccount string, index uint16) error {
+	return dp.vmRam.FreeMemoryByIndex(ctx, memoryAccount, index)
+}
+func (dp *DatabaseProvider) FreeVmMemoryByAddress(ctx context.Context, address string) error {
+	return dp.vmRam.FreeMemoryByAddress(ctx, address)
+}
+func (dp *DatabaseProvider) ReserveVmMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error) {
+	return dp.vmRam.ReserveMemory(ctx, vm, accountType, address)
+}
+
+// VM Storage
+// --------------------------------------------------------------------------------
+func (dp *DatabaseProvider) InitializeVmStorage(ctx context.Context, record *vm_storage.Record) error {
+	return dp.vmStorage.InitializeStorage(ctx, record)
+}
+func (dp *DatabaseProvider) FindAnyVmStorageWithAvailableCapacity(ctx context.Context, vm string, purpose vm_storage.Purpose, minCapacity uint64) (*vm_storage.Record, error) {
+	return dp.vmStorage.FindAnyWithAvailableCapacity(ctx, vm, purpose, minCapacity)
+}
+func (dp *DatabaseProvider) ReserveVmStorage(ctx context.Context, vm string, purpose vm_storage.Purpose, address string) (string, error) {
+	return dp.vmStorage.ReserveStorage(ctx, vm, purpose, address)
 }

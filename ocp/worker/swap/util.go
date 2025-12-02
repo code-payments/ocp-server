@@ -19,12 +19,12 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
-	"github.com/code-payments/ocp-server/ocp/vm"
+	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	"github.com/code-payments/ocp-server/solana/memo"
 	"github.com/code-payments/ocp-server/solana/system"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func (p *runtime) validateSwapState(record *swap.Record, states ...swap.State) error {
@@ -372,7 +372,7 @@ func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.
 		return nil, err
 	}
 
-	memoryAccount, memoryIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, p.vmIndexerClient, sourceVmConfig.Vm, owner)
+	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, p.vmIndexerClient, sourceVmConfig.Vm, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -383,8 +383,8 @@ func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.
 		compute_budget.SetComputeUnitLimit(200_000), // todo: optimize this
 		compute_budget.SetComputeUnitPrice(1_000),
 		memo.Instruction("cancel_swap_v0"),
-		cvm.NewCancelSwapInstruction(
-			&cvm.CancelSwapInstructionAccounts{
+		vm.NewCancelSwapInstruction(
+			&vm.CancelSwapInstructionAccounts{
 				VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 				Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 				VmMemory:    memoryAccount.PublicKey().ToBytes(),
@@ -393,14 +393,14 @@ func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.
 				SwapAta:     sourceOwnerVmSwapPdaAccounts.Ata.PublicKey().ToBytes(),
 				VmOmnibus:   sourceVmConfig.Omnibus.PublicKey().ToBytes(),
 			},
-			&cvm.CancelSwapInstructionArgs{
+			&vm.CancelSwapInstructionArgs{
 				AccountIndex: memoryIndex,
 				Amount:       record.Amount,
 				Bump:         sourceOwnerVmSwapPdaAccounts.PdaBump,
 			},
 		),
-		cvm.NewCloseSwapAccountIfEmptyInstruction(
-			&cvm.CloseSwapAccountIfEmptyInstructionAccounts{
+		vm.NewCloseSwapAccountIfEmptyInstruction(
+			&vm.CloseSwapAccountIfEmptyInstructionAccounts{
 				VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 				Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 				Swapper:     owner.PublicKey().ToBytes(),
@@ -408,7 +408,7 @@ func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.
 				SwapAta:     sourceOwnerVmSwapPdaAccounts.Ata.PublicKey().ToBytes(),
 				Destination: common.GetSubsidizer().PublicKey().ToBytes(),
 			},
-			&cvm.CloseSwapAccountIfEmptyInstructionArgs{
+			&vm.CloseSwapAccountIfEmptyInstructionArgs{
 				Bump: sourceOwnerVmSwapPdaAccounts.PdaBump,
 			},
 		),
