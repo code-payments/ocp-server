@@ -71,8 +71,6 @@ func (obj *MemoryAccount) Unmarshal(data []byte) error {
 			obj.AccountSize = uint16(GetVirtualAccountSizeInMemory(VirtualAccountTypeTimelock))
 		case MemoryLayoutNonce:
 			obj.AccountSize = uint16(GetVirtualAccountSizeInMemory(VirtualAccountTypeDurableNonce))
-		case MemoryLayoutRelay:
-			obj.AccountSize = uint16(GetVirtualAccountSizeInMemory(VirtualAccountTypeRelay))
 		default:
 			return errors.New("unsupported memory layout")
 		}

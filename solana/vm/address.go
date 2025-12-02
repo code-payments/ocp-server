@@ -19,10 +19,6 @@ var (
 	VmUnlockPdaPrefix       = []byte("vm_unlock_pda_account")
 	VmWithdrawReceiptPrefix = []byte("vm_withdraw_receipt_account")
 	VmDepositPdaPrefix      = []byte("vm_deposit_pda")
-	VmRelayPrefix           = []byte("vm_relay_account")
-	VmRelayProofPrefix      = []byte("vm_proof_account")
-	VmRelayVaultPrefix      = []byte("vm_relay_vault")
-	VmRelayCommitmentPrefix = []byte("relay_commitment")
 	VmSwapPdaPrefix         = []byte("vm_swap_pda")
 	VmTimelockStatePrefix   = []byte("timelock_state")
 	VmTimelockVaultPrefix   = []byte("timelock_vault")
@@ -85,12 +81,6 @@ func GetStorageAccountAddress(args *GetMemoryAccountAddressArgs) (ed25519.Public
 		[]byte(toFixedString(args.Name, MaxStorageAccountNameSize)),
 		args.Vm,
 	)
-}
-
-type GetRelayProofAddressArgs struct {
-	Relay      ed25519.PublicKey
-	MerkleRoot Hash
-	Commitment Hash
 }
 
 type GetVirtualTimelockAccountAddressArgs struct {

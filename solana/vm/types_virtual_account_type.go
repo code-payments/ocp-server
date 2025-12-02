@@ -16,8 +16,6 @@ func GetVirtualAccountTypeFromMemoryLayout(layout MemoryLayout) (VirtualAccountT
 		return VirtualAccountTypeDurableNonce, nil
 	case MemoryLayoutTimelock:
 		return VirtualAccountTypeTimelock, nil
-	case MemoryLayoutRelay:
-		return VirtualAccountTypeRelay, nil
 	default:
 		return 0, errors.New("memory layout doesn't have a defined virtual account type")
 	}
