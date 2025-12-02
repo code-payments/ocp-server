@@ -4,8 +4,6 @@ func GetVirtualAccountSize(accountType VirtualAccountType) uint32 {
 	switch accountType {
 	case VirtualAccountTypeDurableNonce:
 		return VirtualDurableNonceSize
-	case VirtualAccountTypeRelay:
-		return VirtualRelayAccountSize
 	case VirtualAccountTypeTimelock:
 		return VirtualTimelockAccountSize
 	default:
