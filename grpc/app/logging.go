@@ -12,7 +12,7 @@ func getLogCore(level zapcore.LevelEnabler) zapcore.Core {
 	return zapcore.NewCore(
 		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
 		zapcore.AddSync(os.Stdout),
-		zap.InfoLevel,
+		level,
 	)
 }
 
