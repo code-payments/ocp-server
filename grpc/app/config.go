@@ -15,6 +15,8 @@ type Config map[string]interface{}
 type BaseConfig struct {
 	AppName string `mapstructure:"app_name"`
 
+	LogLevel string `mapstructure:"log_level"`
+
 	ListenAddress         string `mapstructure:"listen_address"`
 	InsecureListenAddress string `mapstructure:"insecure_listen_address"`
 	DebugListenAddress    string `mapstructure:"debug_listen_address"`
@@ -57,6 +59,8 @@ type BaseConfig struct {
 }
 
 var defaultConfig = BaseConfig{
+	LogLevel: "info",
+
 	ListenAddress:         ":8085",
 	InsecureListenAddress: "localhost:8086",
 	DebugListenAddress:    ":8123",

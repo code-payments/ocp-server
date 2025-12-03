@@ -18,7 +18,8 @@ require (
 	github.com/jdgcs/ed25519 v0.0.0-20200408034030-96c10d46cdc3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mr-tron/base58 v1.2.0
-	github.com/newrelic/go-agent/v3 v3.20.1
+	github.com/newrelic/go-agent/v3 v3.40.1
+	github.com/newrelic/go-agent/v3/integrations/logcontext-v2/nrzap v1.2.4
 	github.com/newrelic/go-agent/v3/integrations/nrpgx v1.0.0
 	github.com/ory/dockertest/v3 v3.7.0
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
