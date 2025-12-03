@@ -5,11 +5,11 @@
 [![Tests](https://github.com/code-payments/ocp-server/actions/workflows/test.yml/badge.svg)](https://github.com/code-payments/ocp-server/actions/workflows/test.yml)
 [![GitHub License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat)](https://github.com/code-payments/ocp-server/blob/main/LICENSE.md)
 
-Open Code Protocol server monolith containing the gRPC/web services and workers that power a next-generation payments system. The project contains the first L2 solution on top of Solana, utilizing an intent-based system backed by the Open Code Protocol Sequencer to handle transactions.
+Open Code Protocol server monolith containing the gRPC/web services and workers that power a next-generation currency launchpad and payment systems. The project contains the first L2 solution on top of Solana, utilizing an intent-based system backed by a sequencer to handle transactions.
 
 ## What is Flipcash?
 
-[Flipcash](https://flipcash.com) is a mobile wallet app leveraging self-custodial blockchain technology to provide an instant, global, and private payments experience. We are currently working on a currency launchpad.
+[Flipcash](https://flipcash.com) is a self-custodial mobile wallet app leveraging the Open Code Protocol to provide a seamless multi-currency payments experience.
 
 ## Quick Start
 
