@@ -14,6 +14,7 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/newrelic/go-agent/v3/integrations/logcontext-v2/nrzap"
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
@@ -31,6 +32,8 @@ import (
 	"github.com/code-payments/ocp-server/osutil"
 )
 
+// todo: Better metrics provider abstraction so we're not directly tied to NR
+
 // App is a long lived application that services network requests.
 // It is expected that App's have gRPC services, but is not a hard requirement.
 //
@@ -41,10 +44,7 @@ type App interface {
 	// Init initializes the application in a blocking fashion. When Init returns, it
 	// is expected that the application is ready to start receiving requests (provided
 	// there are gRPC handlers installed).
-	//
-	// todo: I'm not very happy with passing the New Relic app here. It's a temporary
-	//       solution until we have something better in place.
-	Init(config Config, metricsProvider *newrelic.Application) error
+	Init(log *zap.Logger, metricsProvider *newrelic.Application, config Config) error
 
 	// RegisterWithGRPC provides a mechanism for the application to register gRPC services
 	// with the gRPC server.
@@ -73,8 +73,10 @@ func init() {
 	signal.Notify(osSigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 }
 
-func Run(log *zap.Logger, app App, options ...Option) error {
+func Run(app App, options ...Option) error {
 	flag.Parse()
+
+	log := zap.New(getLogCore(zap.InfoLevel))
 
 	// viper.ReadInConfig only returns ConfigFileNotFoundError if it has to search
 	// for a default config file because one hasn't been explicitly set. That is,
@@ -100,12 +102,8 @@ func Run(log *zap.Logger, app App, options ...Option) error {
 		os.Exit(1)
 	}
 
-	if len(config.AppName) == 0 {
-		log.With(zap.Error(err)).Error("must specify an application name")
-		os.Exit(1)
-	}
+	log = zap.New(getLogCore(getLogLevel(config.LogLevel)))
 
-	// todo: Better abstraction so we're not directly tied to NR
 	var metricsProvider *newrelic.Application
 	if len(config.NewRelicLicenseKey) > 0 {
 		nr, err := newrelic.NewApplication(
@@ -121,6 +119,18 @@ func Run(log *zap.Logger, app App, options ...Option) error {
 		}
 
 		metricsProvider = nr
+
+		nrLogCore, err := nrzap.WrapBackgroundCore(getLogCore(getLogLevel(config.LogLevel)), metricsProvider)
+		if err != nil {
+			log.With(zap.Error(err)).Error("error wrapping logs with new relic")
+			return err
+		}
+		log = zap.New(nrLogCore)
+	}
+
+	if len(config.AppName) == 0 {
+		log.With(zap.Error(err)).Error("must specify an application name")
+		os.Exit(1)
 	}
 
 	// We don't want to expose pprof/expvar publically, so we reset the default
@@ -253,7 +263,7 @@ func Run(log *zap.Logger, app App, options ...Option) error {
 		o(&opts)
 	}
 
-	if err := app.Init(config.AppConfig, metricsProvider); err != nil {
+	if err := app.Init(log, metricsProvider, config.AppConfig); err != nil {
 		log.With(zap.Error(err)).Error("failed to initialize application")
 		os.Exit(1)
 	}
