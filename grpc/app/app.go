@@ -123,7 +123,7 @@ func Run(app App, options ...Option) error {
 		nrLogCore, err := nrzap.WrapBackgroundCore(getLogCore(getLogLevel(config.LogLevel)), metricsProvider)
 		if err != nil {
 			log.With(zap.Error(err)).Error("error wrapping logs with new relic")
-			return err
+			os.Exit(1)
 		}
 		log = zap.New(nrLogCore)
 	}
