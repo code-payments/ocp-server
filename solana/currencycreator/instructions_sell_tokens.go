@@ -66,12 +66,12 @@ func NewSellTokensInstruction(
 			},
 			{
 				PublicKey:  accounts.TargetMint,
-				IsWritable: true,
+				IsWritable: false,
 				IsSigner:   false,
 			},
 			{
 				PublicKey:  accounts.BaseMint,
-				IsWritable: false,
+				IsWritable: true,
 				IsSigner:   false,
 			},
 			{
