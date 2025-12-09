@@ -9,14 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mr-tron/base58/base58"
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
-	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana"
 )
@@ -251,7 +250,7 @@ type LocalNoncePool struct {
 
 	data ocp_data.Provider
 
-	metricsProvider *newrelic.Application
+	metricsProvider metrics.Provider
 
 	env         nonce.Environment
 	envInstance string
@@ -272,7 +271,7 @@ type LocalNoncePool struct {
 func NewLocalNoncePool(
 	log *zap.Logger,
 	data ocp_data.Provider,
-	metricsProvider *newrelic.Application,
+	metricsProvider metrics.Provider,
 	env nonce.Environment,
 	envInstance string,
 	poolType nonce.Purpose,
@@ -579,6 +578,10 @@ func (np *LocalNoncePool) metricsPoller() {
 }
 
 func (np *LocalNoncePool) recordPoolSizeMetricEvent() {
+	if np.metricsProvider == nil {
+		return
+	}
+
 	np.mu.Lock()
 	if np.isClosed {
 		np.mu.Unlock()
@@ -591,7 +594,7 @@ func (np *LocalNoncePool) recordPoolSizeMetricEvent() {
 	kvs["current_nonce_pool_size"] = size
 	kvs["desired_nonce_pool_size"] = np.opts.desiredPoolSize
 
-	np.metricsProvider.RecordCustomEvent("LocalNoncePoolSizePollingCheck", kvs)
+	np.metricsProvider.RecordEvent("LocalNoncePoolSizePollingCheck", kvs)
 }
 
 func (np *LocalNoncePool) getBaseMetricKvs() map[string]interface{} {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/metrics"
@@ -24,10 +23,10 @@ func (p *runtime) generateNonceAccountsOnSolanaMainnet(runtimeCtx context.Contex
 		func() (err error) {
 			time.Sleep(time.Second)
 
-			nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("nonce_runtime__nonce_accounts")
-			defer m.End()
-			tracedCtx := newrelic.NewContext(runtimeCtx, m)
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("nonce_runtime__nonce_accounts")
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 			num_invalid, err := p.data.GetNonceCountByStateAndPurpose(tracedCtx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateInvalid, purpose)
 			if err != nil {

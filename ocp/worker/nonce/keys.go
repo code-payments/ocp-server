@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/database/query"
@@ -33,25 +32,23 @@ func (p *runtime) generateKey(ctx context.Context) (*vault.Record, error) {
 	return key, nil
 }
 
-func (p *runtime) generateKeys(ctx context.Context) error {
+func (p *runtime) generateKeys(runtimeCtx context.Context) error {
 	err := retry.Loop(
 		func() (err error) {
 			// Give the server some time to breath.
 			time.Sleep(time.Second * 15)
 
-			nr := ctx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("nonce_runtime__vault_keys")
-			defer func() {
-				m.End()
-				*m = newrelic.Transaction{}
-			}()
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("nonce_runtime__vault_keys")
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
-			res, err := p.data.GetKeyCountByState(ctx, vault.StateAvailable)
+			res, err := p.data.GetKeyCountByState(tracedCtx, vault.StateAvailable)
 			if err != nil {
 				return err
 			}
 
-			reserveSize := ((p.conf.onDemandTransactionNoncePoolSize.Get(ctx) + p.conf.clientSwapNoncePoolSize.Get(ctx)) * 2)
+			reserveSize := ((p.conf.onDemandTransactionNoncePoolSize.Get(tracedCtx) + p.conf.clientSwapNoncePoolSize.Get(tracedCtx)) * 2)
 
 			// If we have sufficient keys, don't generate any more.
 			if res >= reserveSize {
@@ -69,7 +66,7 @@ func (p *runtime) generateKeys(ctx context.Context) error {
 
 			// We don't have enough in the reserve, so we need to generate some.
 			for i := 0; i < int(missing); i++ {
-				key, err := p.generateKey(ctx)
+				key, err := p.generateKey(tracedCtx)
 				if err != nil {
 					p.log.With(zap.Error(err)).Warn("Failure generating key")
 					continue

@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -34,14 +33,14 @@ func (p *exchangeRateRuntime) Start(runtimeCtx context.Context, interval time.Du
 			func() error {
 				p.log.Debug("updating exchange rates")
 
-				nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-				m := nr.StartTransaction("currency_exchange_rate_runtime")
-				defer m.End()
-				tracedCtx := newrelic.NewContext(runtimeCtx, m)
+				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+				trace := provider.StartTrace("currency_exchange_rate_runtime")
+				defer trace.End()
+				tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 				err := p.GetCurrentExchangeRates(tracedCtx)
 				if err != nil {
-					m.NoticeError(err)
+					trace.OnError(err)
 					p.log.With(zap.Error(err)).Warn("failed to process current rate data")
 				}
 

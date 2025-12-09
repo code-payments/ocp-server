@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/mr-tron/base58"
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -77,10 +76,10 @@ func (p *runtime) programUpdateWorker(runtimeCtx context.Context, id int) {
 
 	for update := range p.programUpdatesChan {
 		func() {
-			nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("geyser_consumer_runtime__program_update_worker")
-			defer m.End()
-			tracedCtx := newrelic.NewContext(runtimeCtx, m)
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("geyser_consumer_runtime__program_update_worker")
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 			p.metricStatusLock.Lock()
 			p.programUpdateWorkerMetrics[id].active = true
@@ -120,7 +119,7 @@ func (p *runtime) programUpdateWorker(runtimeCtx context.Context, id int) {
 
 			err = handler.Handle(tracedCtx, update)
 			if err != nil {
-				m.NoticeError(err)
+				trace.OnError(err)
 				log.With(zap.Error(err)).Warn("failed to process program account update")
 			}
 

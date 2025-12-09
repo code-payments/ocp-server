@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/database/query"
@@ -46,10 +45,10 @@ func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state ti
 			batchStart := time.Now()
 
 			func() {
-				nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-				m := nr.StartTransaction("geyser_consumer_runtime__backup_timelock_state_worker")
-				defer m.End()
-				tracedCtx := newrelic.NewContext(runtimeCtx, m)
+				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+				trace := provider.StartTrace("geyser_consumer_runtime__backup_timelock_state_worker")
+				defer trace.End()
+				tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 				timelockRecords, err := p.data.GetAllTimelocksByState(
 					tracedCtx,
@@ -121,10 +120,10 @@ func (p *runtime) backupExternalDepositWorker(runtimeCtx context.Context, interv
 		select {
 		case <-time.After(interval):
 			func() {
-				nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-				m := nr.StartTransaction("geyser_consumer_runtime__backup_external_deposit_worker")
-				defer m.End()
-				tracedCtx := newrelic.NewContext(runtimeCtx, m)
+				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+				trace := provider.StartTrace("geyser_consumer_runtime__backup_external_deposit_worker")
+				defer trace.End()
+				tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 				accountInfoRecords, err := p.data.GetPrioritizedAccountInfosRequiringDepositSync(tracedCtx, 256)
 				if err == account.ErrAccountInfoNotFound {
