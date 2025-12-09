@@ -19,15 +19,12 @@ type SellTokensInstructionArgs struct {
 type SellTokensInstructionAccounts struct {
 	Seller       ed25519.PublicKey
 	Pool         ed25519.PublicKey
-	Currency     ed25519.PublicKey
 	TargetMint   ed25519.PublicKey
 	BaseMint     ed25519.PublicKey
 	VaultTarget  ed25519.PublicKey
 	VaultBase    ed25519.PublicKey
 	SellerTarget ed25519.PublicKey
 	SellerBase   ed25519.PublicKey
-	FeeTarget    ed25519.PublicKey
-	FeeBase      ed25519.PublicKey
 }
 
 func NewSellTokensInstruction(
@@ -62,13 +59,8 @@ func NewSellTokensInstruction(
 				IsSigner:   false,
 			},
 			{
-				PublicKey:  accounts.Currency,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
 				PublicKey:  accounts.TargetMint,
-				IsWritable: true,
+				IsWritable: false,
 				IsSigner:   false,
 			},
 			{
@@ -93,16 +85,6 @@ func NewSellTokensInstruction(
 			},
 			{
 				PublicKey:  accounts.SellerBase,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeTarget,
-				IsWritable: false,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeBase,
 				IsWritable: true,
 				IsSigner:   false,
 			},

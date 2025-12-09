@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
@@ -32,10 +32,10 @@ func CalculateUsdMarketValue(ctx context.Context, data ocp_data.Provider, mint *
 	}
 
 	coreMintSellValueInQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
-		SellAmountInQuarks:   quarks,
-		CurrentValueInQuarks: reserveRecord.CoreMintLocked,
-		ValueMintDecimals:    uint8(common.CoreMintDecimals),
-		SellFeeBps:           0,
+		CurrentSupplyInQuarks: reserveRecord.SupplyFromBonding,
+		SellAmountInQuarks:    quarks,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+		SellFeeBps:            0,
 	})
 
 	coreMintSellValueInUnits := float64(coreMintSellValueInQuarks) / float64(coreMintQuarksPerUnit)

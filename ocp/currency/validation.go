@@ -192,10 +192,10 @@ func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, log *zap.L
 
 		// How much core mint would be received for a sell against the currency creator program?
 		coreMintSellValueInQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
-			SellAmountInQuarks:   proto.Quarks,
-			CurrentValueInQuarks: reserveRecord.CoreMintLocked,
-			ValueMintDecimals:    uint8(common.CoreMintDecimals),
-			SellFeeBps:           0,
+			CurrentSupplyInQuarks: reserveRecord.SupplyFromBonding,
+			SellAmountInQuarks:    proto.Quarks,
+			ValueMintDecimals:     uint8(common.CoreMintDecimals),
+			SellFeeBps:            0,
 		})
 
 		// Given the sell value, does it align with the native amount in the target currency

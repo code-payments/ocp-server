@@ -19,15 +19,12 @@ type BuyTokensInstructionArgs struct {
 type BuyTokensInstructionAccounts struct {
 	Buyer       ed25519.PublicKey
 	Pool        ed25519.PublicKey
-	Currency    ed25519.PublicKey
 	TargetMint  ed25519.PublicKey
 	BaseMint    ed25519.PublicKey
 	VaultTarget ed25519.PublicKey
 	VaultBase   ed25519.PublicKey
 	BuyerTarget ed25519.PublicKey
 	BuyerBase   ed25519.PublicKey
-	FeeTarget   ed25519.PublicKey
-	FeeBase     ed25519.PublicKey
 }
 
 func NewBuyTokensInstruction(
@@ -58,17 +55,12 @@ func NewBuyTokensInstruction(
 			},
 			{
 				PublicKey:  accounts.Pool,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.Currency,
-				IsWritable: true,
+				IsWritable: false,
 				IsSigner:   false,
 			},
 			{
 				PublicKey:  accounts.TargetMint,
-				IsWritable: true,
+				IsWritable: false,
 				IsSigner:   false,
 			},
 			{
@@ -94,16 +86,6 @@ func NewBuyTokensInstruction(
 			{
 				PublicKey:  accounts.BuyerBase,
 				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeTarget,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
-				PublicKey:  accounts.FeeBase,
-				IsWritable: false,
 				IsSigner:   false,
 			},
 			{

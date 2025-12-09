@@ -47,10 +47,6 @@ type MetadataRecord struct {
 	VaultCore     string
 	VaultCoreBump uint8
 
-	FeesMint  string
-	BuyFeeBps uint16
-
-	FeesCore   string
 	SellFeeBps uint16
 
 	Alt string
@@ -128,14 +124,6 @@ func (m *MetadataRecord) Validate() error {
 		return errors.New("vault core bump is required")
 	}
 
-	if len(m.FeesMint) == 0 {
-		return errors.New("fees mint is required")
-	}
-
-	if m.BuyFeeBps != currencycreator.DefaultBuyFeeBps {
-		return errors.New("invalid buy fee bps")
-	}
-
 	if len(m.Name) == 0 {
 		return errors.New("fees core is required")
 	}
@@ -188,10 +176,6 @@ func (m *MetadataRecord) Clone() *MetadataRecord {
 		VaultCore:     m.VaultCore,
 		VaultCoreBump: m.VaultCoreBump,
 
-		FeesMint:  m.FeesMint,
-		BuyFeeBps: m.BuyFeeBps,
-
-		FeesCore:   m.FeesCore,
 		SellFeeBps: m.SellFeeBps,
 
 		Alt: m.Alt,
@@ -229,10 +213,6 @@ func (m *MetadataRecord) CopyTo(dst *MetadataRecord) {
 	dst.VaultCore = m.VaultCore
 	dst.VaultCoreBump = m.VaultCoreBump
 
-	dst.FeesMint = m.FeesMint
-	dst.BuyFeeBps = m.BuyFeeBps
-
-	dst.FeesCore = m.FeesCore
 	dst.SellFeeBps = m.SellFeeBps
 
 	dst.Alt = m.Alt
