@@ -150,7 +150,6 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 		&currencycreator.BuyAndDepositIntoVmInstructionAccounts{
 			Buyer:       h.temporaryHolder.PublicKey().ToBytes(),
 			Pool:        destinationCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
-			Currency:    destinationCurrencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
 			TargetMint:  h.mint.PublicKey().ToBytes(),
 			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
 			VaultTarget: destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
@@ -318,7 +317,6 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 		&currencycreator.SellAndDepositIntoVmInstructionAccounts{
 			Seller:       h.temporaryHolder.PublicKey().ToBytes(),
 			Pool:         sourceCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
-			Currency:     sourceCurrencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
 			TargetMint:   h.mint.PublicKey().ToBytes(),
 			BaseMint:     common.CoreMintAccount.PublicKey().ToBytes(),
 			VaultTarget:  sourceCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
@@ -512,7 +510,6 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		&currencycreator.SellTokensInstructionAccounts{
 			Seller:       h.temporaryHolder.PublicKey().ToBytes(),
 			Pool:         sourceCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
-			Currency:     sourceCurrencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
 			TargetMint:   h.fromMint.PublicKey().ToBytes(),
 			BaseMint:     common.CoreMintAccount.PublicKey().ToBytes(),
 			VaultTarget:  sourceCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
@@ -530,7 +527,6 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		&currencycreator.BuyAndDepositIntoVmInstructionAccounts{
 			Buyer:       h.temporaryHolder.PublicKey().ToBytes(),
 			Pool:        destinationCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
-			Currency:    destinationCurrencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
 			TargetMint:  h.toMint.PublicKey().ToBytes(),
 			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
 			VaultTarget: destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),

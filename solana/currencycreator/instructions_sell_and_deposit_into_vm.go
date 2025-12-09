@@ -22,7 +22,6 @@ type SellAndDepositIntoVmInstructionArgs struct {
 type SellAndDepositIntoVmInstructionAccounts struct {
 	Seller       ed25519.PublicKey
 	Pool         ed25519.PublicKey
-	Currency     ed25519.PublicKey
 	TargetMint   ed25519.PublicKey
 	BaseMint     ed25519.PublicKey
 	VaultTarget  ed25519.PublicKey
@@ -69,13 +68,8 @@ func NewSellAndDepositIntoVmInstruction(
 				IsSigner:   false,
 			},
 			{
-				PublicKey:  accounts.Currency,
-				IsWritable: true,
-				IsSigner:   false,
-			},
-			{
 				PublicKey:  accounts.TargetMint,
-				IsWritable: true,
+				IsWritable: false,
 				IsSigner:   false,
 			},
 			{

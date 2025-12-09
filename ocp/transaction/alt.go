@@ -41,7 +41,6 @@ func GetAltForMint(ctx context.Context, data ocp_data.Provider, mint *common.Acc
 			vmConfig.Vm.PublicKey().ToBytes(),
 			vmConfig.Omnibus.PublicKey().ToBytes(),
 			mint.PublicKey().ToBytes(),
-			currencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
 			currencyAccounts.LiquidityPool.PublicKey().ToBytes(),
 			currencyAccounts.VaultBase.PublicKey().ToBytes(),
 			currencyAccounts.VaultMint.PublicKey().ToBytes(),

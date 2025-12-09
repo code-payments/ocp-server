@@ -20,11 +20,12 @@ const (
 		32 + // base_mint
 		32 + // vault_target
 		32 + // vault_base
+		8 + // fees_accumulated
 		2 + // sell_fee
 		1 + // bump
 		1 + // vault_target_bump
 		1 + // vault_base_bump
-		1) // padding
+		3) // padding
 )
 
 var LiquidityPoolAccountDiscriminator = []byte{byte(AccountTypeLiquidityPool), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
@@ -36,6 +37,7 @@ type LiquidityPoolAccount struct {
 	BaseMint        ed25519.PublicKey
 	VaultTarget     ed25519.PublicKey
 	VaultBase       ed25519.PublicKey
+	FeesAccumulated uint64
 	SellFee         uint16
 	Bump            uint8
 	VaultTargetBump uint8
@@ -61,24 +63,26 @@ func (obj *LiquidityPoolAccount) Unmarshal(data []byte) error {
 	getKey(data, &obj.BaseMint, &offset)
 	getKey(data, &obj.VaultTarget, &offset)
 	getKey(data, &obj.VaultBase, &offset)
+	getUint64(data, &obj.FeesAccumulated, &offset)
 	getUint16(data, &obj.SellFee, &offset)
 	getUint8(data, &obj.Bump, &offset)
 	getUint8(data, &obj.VaultTargetBump, &offset)
 	getUint8(data, &obj.VaultBaseBump, &offset)
-	offset += 1 // padding
+	offset += 3 // padding
 
 	return nil
 }
 
 func (obj *LiquidityPoolAccount) String() string {
 	return fmt.Sprintf(
-		"LiquidityPool{authority=%s,currency=%s,target_mint=%s,base_mint=%s,vault_target=%s,vault_base=%s,sell_fee=%d,bump=%d,vault_target_bump=%d,vault_base_bump=%d}",
+		"LiquidityPool{authority=%s,currency=%s,target_mint=%s,base_mint=%s,vault_target=%s,vault_base=%s,fees_accumulated=%d,sell_fee=%d,bump=%d,vault_target_bump=%d,vault_base_bump=%d}",
 		base58.Encode(obj.Authority),
 		base58.Encode(obj.Currency),
 		base58.Encode(obj.TargetMint),
 		base58.Encode(obj.BaseMint),
 		base58.Encode(obj.VaultTarget),
 		base58.Encode(obj.VaultBase),
+		obj.FeesAccumulated,
 		obj.SellFee,
 		obj.Bump,
 		obj.VaultTargetBump,
