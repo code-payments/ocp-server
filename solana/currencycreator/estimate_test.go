@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEstimateCurrentPrice_CrossPlatformSanityCheck(t *testing.T) {
+func TestEstimateCurrentPrice_CrossPlatform(t *testing.T) {
 	fmt.Println(EstimateCurrentPrice(0).Text('f', DefaultCurveDecimals))
 	fmt.Println(EstimateCurrentPrice(12345678_1234567890).Text('f', DefaultCurveDecimals))
 	fmt.Println(EstimateCurrentPrice(DefaultMintMaxQuarkSupply).Text('f', DefaultCurveDecimals))
