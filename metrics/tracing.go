@@ -3,30 +3,28 @@ package metrics
 import (
 	"context"
 	"fmt"
-
-	"github.com/newrelic/go-agent/v3/newrelic"
 )
 
 // TraceMethodCall traces a method call with a given struct/package and method names
 func TraceMethodCall(ctx context.Context, structOrPackageName, methodName string) *MethodTracer {
-	txn := newrelic.FromContext(ctx)
-	if txn == nil {
+	trace := TraceFromContext(ctx)
+	if trace == nil {
 		return nil
 	}
 
-	seg := txn.StartSegment(fmt.Sprintf("%s %s", structOrPackageName, methodName))
+	span := trace.StartSpan(fmt.Sprintf("%s %s", structOrPackageName, methodName))
 
 	return &MethodTracer{
-		txn: txn,
-		seg: seg,
+		trace: trace,
+		span:  span,
 	}
 }
 
 // MethodTracer collects analytics for a given method call within an existing
 // trace.
 type MethodTracer struct {
-	txn *newrelic.Transaction
-	seg *newrelic.Segment
+	trace Trace
+	span  Span
 }
 
 // AddAttribute adds a key-value pair metadata to the method trace
@@ -35,7 +33,7 @@ func (t *MethodTracer) AddAttribute(key string, value interface{}) {
 		return
 	}
 
-	t.seg.AddAttribute(key, value)
+	t.span.AddAttribute(key, value)
 }
 
 // AddAttributes adds a set of key-value pair metadata to the method trace
@@ -45,7 +43,7 @@ func (t *MethodTracer) AddAttributes(attributes map[string]interface{}) {
 	}
 
 	for key, value := range attributes {
-		t.seg.AddAttribute(key, value)
+		t.span.AddAttribute(key, value)
 	}
 }
 
@@ -59,7 +57,7 @@ func (t *MethodTracer) OnError(err error) {
 		return
 	}
 
-	t.txn.NoticeError(err)
+	t.trace.OnError(err)
 }
 
 // End completes the trace for the method call.
@@ -68,5 +66,5 @@ func (t *MethodTracer) End() {
 		return
 	}
 
-	t.seg.End()
+	t.span.End()
 }

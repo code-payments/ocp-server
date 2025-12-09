@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -25,10 +24,10 @@ func (p *runtime) worker(runtimeCtx context.Context, state swap.State, interval 
 		func() (err error) {
 			time.Sleep(delay)
 
-			nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("swap_runtime__handle_" + state.String())
-			defer m.End()
-			tracedCtx := newrelic.NewContext(runtimeCtx, m)
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("swap_runtime__handle_" + state.String())
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 			items, err := p.data.GetAllSwapsByState(
 				tracedCtx,
@@ -50,7 +49,7 @@ func (p *runtime) worker(runtimeCtx context.Context, state swap.State, interval 
 
 					err := p.handle(tracedCtx, record)
 					if err != nil {
-						m.NoticeError(err)
+						trace.OnError(err)
 					}
 				}(item)
 			}

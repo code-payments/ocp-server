@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
+	noop_metrics "github.com/code-payments/ocp-server/metrics/noop"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
@@ -295,7 +296,7 @@ func newLocalNoncePoolTest(t *testing.T) *localNoncePoolTest {
 	pool, err := NewLocalNoncePool(
 		log,
 		data,
-		nil,
+		noop_metrics.NewProvider(),
 		nonce.EnvironmentSolana,
 		nonce.EnvironmentInstanceSolanaMainnet,
 		nonce.PurposeClientIntent,

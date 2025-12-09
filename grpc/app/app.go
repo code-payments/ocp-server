@@ -23,16 +23,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
+	health_grpc "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/grpc/headers"
-	"github.com/code-payments/ocp-server/grpc/metrics"
+	grpc_metrics "github.com/code-payments/ocp-server/grpc/metrics"
 	"github.com/code-payments/ocp-server/grpc/protobuf/validation"
+	"github.com/code-payments/ocp-server/metrics"
+	newrelic_metrics "github.com/code-payments/ocp-server/metrics/newrelic"
+	noop_metrics "github.com/code-payments/ocp-server/metrics/noop"
 	"github.com/code-payments/ocp-server/osutil"
 )
-
-// todo: Better metrics provider abstraction so we're not directly tied to NR
 
 // App is a long lived application that services network requests.
 // It is expected that App's have gRPC services, but is not a hard requirement.
@@ -44,7 +45,7 @@ type App interface {
 	// Init initializes the application in a blocking fashion. When Init returns, it
 	// is expected that the application is ready to start receiving requests (provided
 	// there are gRPC handlers installed).
-	Init(log *zap.Logger, metricsProvider *newrelic.Application, config Config) error
+	Init(log *zap.Logger, metricsProvider metrics.Provider, config Config) error
 
 	// RegisterWithGRPC provides a mechanism for the application to register gRPC services
 	// with the gRPC server.
@@ -104,7 +105,7 @@ func Run(app App, options ...Option) error {
 
 	log = zap.New(getLogCore(getLogLevel(config.LogLevel)))
 
-	var metricsProvider *newrelic.Application
+	var metricsProvider metrics.Provider
 	if len(config.NewRelicLicenseKey) > 0 {
 		nr, err := newrelic.NewApplication(
 			newrelic.ConfigFromEnvironment(),
@@ -118,14 +119,17 @@ func Run(app App, options ...Option) error {
 			os.Exit(1)
 		}
 
-		metricsProvider = nr
+		nrProvider := newrelic_metrics.NewProvider(nr)
+		metricsProvider = nrProvider
 
-		nrLogCore, err := nrzap.WrapBackgroundCore(getLogCore(getLogLevel(config.LogLevel)), metricsProvider)
+		nrLogCore, err := nrzap.WrapBackgroundCore(getLogCore(getLogLevel(config.LogLevel)), nrProvider.Application())
 		if err != nil {
 			log.With(zap.Error(err)).Error("error wrapping logs with new relic")
 			os.Exit(1)
 		}
 		log = zap.New(nrLogCore)
+	} else {
+		metricsProvider = noop_metrics.NewProvider()
 	}
 
 	if len(config.AppName) == 0 {
@@ -227,32 +231,20 @@ func Run(app App, options ...Option) error {
 		}
 	}
 
+	// Metrics interceptor should be near the top of the chain, so we can
+	// capture as many calls as possible. However, it does need to be after
+	// headers since it relies on certain header values being present.
 	defaultUnaryServerInterceptors := []grpc.UnaryServerInterceptor{
 		headers.UnaryServerInterceptor(),
+		grpc_metrics.UnaryServerInterceptor(metricsProvider),
 		validation.UnaryServerInterceptor(log),
 		client.MinVersionUnaryServerInterceptor(),
 	}
 	defaultStreamServerInterceptors := []grpc.StreamServerInterceptor{
 		headers.StreamServerInterceptor(),
+		grpc_metrics.StreamServerInterceptor(metricsProvider),
 		validation.StreamServerInterceptor(log),
 		client.MinVersionStreamServerInterceptor(),
-	}
-	if metricsProvider != nil {
-		// Metrics interceptor should be near the top of the chain, so we can
-		// capture as many calls as possible. However, it does need to be after
-		// headers since it relies on certain header values being present.
-		defaultUnaryServerInterceptors = []grpc.UnaryServerInterceptor{
-			headers.UnaryServerInterceptor(),
-			metrics.CustomNewRelicUnaryServerInterceptor(metricsProvider),
-			validation.UnaryServerInterceptor(log),
-			client.MinVersionUnaryServerInterceptor(),
-		}
-		defaultStreamServerInterceptors = []grpc.StreamServerInterceptor{
-			headers.StreamServerInterceptor(),
-			metrics.CustomNewRelicStreamServerInterceptor(metricsProvider),
-			validation.StreamServerInterceptor(log),
-			client.MinVersionStreamServerInterceptor(),
-		}
 	}
 
 	opts := opts{
@@ -280,8 +272,8 @@ func Run(app App, options ...Option) error {
 	app.RegisterWithGRPC(secureServ)
 	app.RegisterWithGRPC(insecureServ)
 
-	healthgrpc.RegisterHealthServer(secureServ, health.NewServer())
-	healthgrpc.RegisterHealthServer(insecureServ, health.NewServer())
+	health_grpc.RegisterHealthServer(secureServ, health.NewServer())
+	health_grpc.RegisterHealthServer(insecureServ, health.NewServer())
 
 	secureServShutdownCh := make(chan struct{})
 	inssecureServShutdownCh := make(chan struct{})

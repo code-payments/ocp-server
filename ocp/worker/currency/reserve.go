@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/metrics"
@@ -37,14 +36,14 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 			func() error {
 				p.log.Debug("updating exchange rates")
 
-				nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-				m := nr.StartTransaction("currency_reserve_runtime")
-				defer m.End()
-				tracedCtx := newrelic.NewContext(runtimeCtx, m)
+				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+				trace := provider.StartTrace("currency_reserve_runtime")
+				defer trace.End()
+				tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 				err := p.UpdateAllLaunchpadCurrencyReserves(tracedCtx)
 				if err != nil {
-					m.NoticeError(err)
+					trace.OnError(err)
 					p.log.With(zap.Error(err)).Warn("failed to process current reserve data")
 				}
 

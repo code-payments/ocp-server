@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mr-tron/base58"
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -31,10 +30,10 @@ func (p *runtime) worker(runtimeCtx context.Context, state fulfillment.State, in
 		func() (err error) {
 			time.Sleep(delay)
 
-			nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("sequencer_runtime__handle_" + state.String())
-			defer m.End()
-			tracedCtx := newrelic.NewContext(runtimeCtx, m)
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("sequencer_runtime__handle_" + state.String())
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 			// Get a batch of records in similar state (e.g. newly created, released, reserved, etc...)
 			items, err := p.data.GetAllFulfillmentsByState(
@@ -59,7 +58,7 @@ func (p *runtime) worker(runtimeCtx context.Context, state fulfillment.State, in
 
 					err := p.handle(tracedCtx, record)
 					if err != nil {
-						m.NoticeError(err)
+						trace.OnError(err)
 					}
 				}(item)
 			}

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/mr-tron/base58"
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"go.uber.org/zap"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
@@ -40,17 +39,17 @@ func (p *runtime) giftCardAutoReturnWorker(runtimeCtx context.Context, interval 
 		func() (err error) {
 			time.Sleep(delay)
 
-			nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("account_runtime__handle_gift_card_auto_return")
-			defer m.End()
-			tracedCtx := newrelic.NewContext(runtimeCtx, m)
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("account_runtime__handle_gift_card_auto_return")
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 			// todo: configurable batch size
 			records, err := p.data.GetPrioritizedAccountInfosRequiringAutoReturnCheck(tracedCtx, GiftCardExpiry, 32)
 			if err == account.ErrAccountInfoNotFound {
 				return nil
 			} else if err != nil {
-				m.NoticeError(err)
+				trace.OnError(err)
 				return err
 			}
 
@@ -63,7 +62,7 @@ func (p *runtime) giftCardAutoReturnWorker(runtimeCtx context.Context, interval 
 
 					err := p.maybeInitiateGiftCardAutoReturn(tracedCtx, record)
 					if err != nil {
-						m.NoticeError(err)
+						trace.OnError(err)
 					}
 				}(record)
 			}

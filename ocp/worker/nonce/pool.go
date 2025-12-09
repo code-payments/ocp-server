@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -31,10 +30,10 @@ func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, inst
 		func() (err error) {
 			time.Sleep(delay)
 
-			nr := runtimeCtx.Value(metrics.NewRelicContextKey).(*newrelic.Application)
-			m := nr.StartTransaction("nonce_runtime__handle_" + state.String())
-			defer m.End()
-			tracedCtx := newrelic.NewContext(runtimeCtx, m)
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("nonce_runtime__handle_" + state.String())
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
 			// Get a batch of nonce records in similar state (e.g. newly created, released, reserved, etc...)
 			items, err := p.data.GetAllNonceByState(
@@ -60,7 +59,7 @@ func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, inst
 
 					err := p.handle(tracedCtx, record)
 					if err != nil {
-						m.NoticeError(err)
+						trace.OnError(err)
 					}
 				}(item)
 			}

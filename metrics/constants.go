@@ -1,5 +1,6 @@
 package metrics
 
 const (
-	NewRelicContextKey = "newrelic_context"
+	// ProviderContextKey is the context key used to store the metrics Provider
+	ProviderContextKey = "metrics_provider_context"
 )
