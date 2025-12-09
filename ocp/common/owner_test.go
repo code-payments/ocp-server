@@ -49,7 +49,7 @@ func TestGetOwnerMetadata_User12Words(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, actual.Account.PublicKey().ToBase58(), owner.PublicKey().ToBase58())
 	assert.Equal(t, OwnerTypeUser12Words, actual.Type)
-	assert.Equal(t, OwnerManagementStateCodeAccount, actual.State)
+	assert.Equal(t, OwnerManagementStateOcpAccount, actual.State)
 
 	// Add swap account
 
@@ -68,7 +68,7 @@ func TestGetOwnerMetadata_User12Words(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, actual.Account.PublicKey().ToBase58(), owner.PublicKey().ToBase58())
 	assert.Equal(t, OwnerTypeUser12Words, actual.Type)
-	assert.Equal(t, OwnerManagementStateCodeAccount, actual.State)
+	assert.Equal(t, OwnerManagementStateOcpAccount, actual.State)
 
 	// Unlock a Timelock account
 
@@ -113,7 +113,7 @@ func TestGetOwnerMetadata_RemoteSendGiftCard(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, actual.Account.PublicKey().ToBase58(), owner.PublicKey().ToBase58())
 	assert.Equal(t, OwnerTypeRemoteSendGiftCard, actual.Type)
-	assert.Equal(t, OwnerManagementStateCodeAccount, actual.State)
+	assert.Equal(t, OwnerManagementStateOcpAccount, actual.State)
 }
 
 func TestGetLatestTokenAccountRecordsForOwner(t *testing.T) {

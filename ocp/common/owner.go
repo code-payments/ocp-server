@@ -28,7 +28,7 @@ type OwnerManagementState uint8
 
 const (
 	OwnerManagementStateUnknown OwnerManagementState = iota
-	OwnerManagementStateCodeAccount
+	OwnerManagementStateOcpAccount
 	OwnerManagementStateNotFound
 	OwnerManagementStateUnlocked
 )
@@ -110,7 +110,7 @@ func GetOwnerManagementState(ctx context.Context, data ocp_data.Provider, owner 
 		}
 	}
 
-	return OwnerManagementStateCodeAccount, nil
+	return OwnerManagementStateOcpAccount, nil
 }
 
 // GetLatestTokenAccountRecordsForOwner gets DB records for the latest set of
@@ -228,8 +228,8 @@ func (t OwnerManagementState) String() string {
 		return "not_found"
 	case OwnerManagementStateUnlocked:
 		return "unlocked"
-	case OwnerManagementStateCodeAccount:
-		return "code_account"
+	case OwnerManagementStateOcpAccount:
+		return "ocp_account"
 	}
 	return "unknown"
 }

@@ -63,7 +63,7 @@ func setup(t *testing.T) (env testEnv, cleanup func()) {
 	return env, cleanup
 }
 
-func TestIsCodeAccount_HappyPath(t *testing.T) {
+func TestIsOcpAccount_HappyPath(t *testing.T) {
 	env, cleanup := setup(t)
 	defer cleanup()
 
@@ -73,7 +73,7 @@ func TestIsCodeAccount_HappyPath(t *testing.T) {
 	ownerAccount := testutil.NewRandomAccount(t)
 	swapAuthorityAccount := testutil.NewRandomAccount(t)
 
-	req := &accountpb.IsCodeAccountRequest{
+	req := &accountpb.IsOcpAccountRequest{
 		Owner: ownerAccount.ToProto(),
 	}
 	reqBytes, err := proto.Marshal(req)
@@ -82,21 +82,21 @@ func TestIsCodeAccount_HappyPath(t *testing.T) {
 		Value: ed25519.Sign(ownerAccount.PrivateKey().ToBytes(), reqBytes),
 	}
 
-	resp, err := env.client.IsCodeAccount(env.ctx, req)
+	resp, err := env.client.IsOcpAccount(env.ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, accountpb.IsCodeAccountResponse_NOT_FOUND, resp.Result)
+	assert.Equal(t, accountpb.IsOcpAccountResponse_NOT_FOUND, resp.Result)
 
 	// Technically an invalid reality, but SubmitIntent guarantees all or no accounts
 	// are opened, which allows IsCodeAccount to do lazy checking.
 	setupAccountRecords(t, env, ownerAccount, ownerAccount, coreVmConfig, 0, commonpb.AccountType_PRIMARY)
 	setupAccountRecords(t, env, ownerAccount, swapAuthorityAccount, swapVmConfig, 0, commonpb.AccountType_SWAP)
 
-	resp, err = env.client.IsCodeAccount(env.ctx, req)
+	resp, err = env.client.IsOcpAccount(env.ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, accountpb.IsCodeAccountResponse_OK, resp.Result)
+	assert.Equal(t, accountpb.IsOcpAccountResponse_OK, resp.Result)
 }
 
-func TestIsCodeAccount_NotManagedByCode(t *testing.T) {
+func TestIsOcpAccount_NotManagedByCode(t *testing.T) {
 	for _, unmanagedState := range []timelock_token_v1.TimelockState{
 		timelock_token_v1.StateWaitingForTimeout,
 		timelock_token_v1.StateUnlocked,
@@ -108,7 +108,7 @@ func TestIsCodeAccount_NotManagedByCode(t *testing.T) {
 
 		ownerAccount := testutil.NewRandomAccount(t)
 
-		req := &accountpb.IsCodeAccountRequest{
+		req := &accountpb.IsOcpAccountRequest{
 			Owner: ownerAccount.ToProto(),
 		}
 		reqBytes, err := proto.Marshal(req)
@@ -117,24 +117,24 @@ func TestIsCodeAccount_NotManagedByCode(t *testing.T) {
 			Value: ed25519.Sign(ownerAccount.PrivateKey().ToBytes(), reqBytes),
 		}
 
-		resp, err := env.client.IsCodeAccount(env.ctx, req)
+		resp, err := env.client.IsOcpAccount(env.ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, accountpb.IsCodeAccountResponse_NOT_FOUND, resp.Result)
+		assert.Equal(t, accountpb.IsOcpAccountResponse_NOT_FOUND, resp.Result)
 
 		var allAccountRecords []*common.AccountRecords
 		allAccountRecords = append(allAccountRecords, setupAccountRecords(t, env, ownerAccount, ownerAccount, coreVmConfig, 0, commonpb.AccountType_PRIMARY))
 
-		resp, err = env.client.IsCodeAccount(env.ctx, req)
+		resp, err = env.client.IsOcpAccount(env.ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, accountpb.IsCodeAccountResponse_OK, resp.Result)
+		assert.Equal(t, accountpb.IsOcpAccountResponse_OK, resp.Result)
 
 		allAccountRecords[0].Timelock.VaultState = unmanagedState
 		allAccountRecords[0].Timelock.Block += 1
 		require.NoError(t, env.data.SaveTimelock(env.ctx, allAccountRecords[0].Timelock))
 
-		resp, err = env.client.IsCodeAccount(env.ctx, req)
+		resp, err = env.client.IsOcpAccount(env.ctx, req)
 		require.NoError(t, err)
-		assert.Equal(t, accountpb.IsCodeAccountResponse_UNLOCKED_TIMELOCK_ACCOUNT, resp.Result)
+		assert.Equal(t, accountpb.IsOcpAccountResponse_UNLOCKED_TIMELOCK_ACCOUNT, resp.Result)
 	}
 }
 
@@ -669,7 +669,7 @@ func TestUnauthenticatedRPC(t *testing.T) {
 	requestingOwnerAccount := testutil.NewRandomAccount(t)
 	maliciousAccount := testutil.NewRandomAccount(t)
 
-	isCodeAccountReq := &accountpb.IsCodeAccountRequest{
+	isCodeAccountReq := &accountpb.IsOcpAccountRequest{
 		Owner: ownerAccount.ToProto(),
 	}
 	reqBytes, err := proto.Marshal(isCodeAccountReq)
@@ -678,7 +678,7 @@ func TestUnauthenticatedRPC(t *testing.T) {
 		Value: ed25519.Sign(maliciousAccount.PrivateKey().ToBytes(), reqBytes),
 	}
 
-	_, err = env.client.IsCodeAccount(env.ctx, isCodeAccountReq)
+	_, err = env.client.IsOcpAccount(env.ctx, isCodeAccountReq)
 	testutil.AssertStatusErrorWithCode(t, err, codes.Unauthenticated)
 
 	getTokenAccountInfosReq := &accountpb.GetTokenAccountInfosRequest{

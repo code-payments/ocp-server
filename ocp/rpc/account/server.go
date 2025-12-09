@@ -51,8 +51,8 @@ func NewAccountServer(log *zap.Logger, data ocp_data.Provider) accountpb.Account
 	}
 }
 
-func (s *server) IsCodeAccount(ctx context.Context, req *accountpb.IsCodeAccountRequest) (*accountpb.IsCodeAccountResponse, error) {
-	log := s.log.With(zap.String("method", "IsCodeAccount"))
+func (s *server) IsOcpAccount(ctx context.Context, req *accountpb.IsOcpAccountRequest) (*accountpb.IsOcpAccountResponse, error) {
+	log := s.log.With(zap.String("method", "IsOcpAccount"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
@@ -70,8 +70,8 @@ func (s *server) IsCodeAccount(ctx context.Context, req *accountpb.IsCodeAccount
 
 	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
 	if err == common.ErrOwnerNotFound {
-		return &accountpb.IsCodeAccountResponse{
-			Result: accountpb.IsCodeAccountResponse_NOT_FOUND,
+		return &accountpb.IsOcpAccountResponse{
+			Result: accountpb.IsOcpAccountResponse_NOT_FOUND,
 		}, nil
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting owner management state")
@@ -79,25 +79,25 @@ func (s *server) IsCodeAccount(ctx context.Context, req *accountpb.IsCodeAccount
 	}
 
 	if ownerMetadata.Type != common.OwnerTypeUser12Words {
-		return &accountpb.IsCodeAccountResponse{
-			Result: accountpb.IsCodeAccountResponse_NOT_FOUND,
+		return &accountpb.IsOcpAccountResponse{
+			Result: accountpb.IsOcpAccountResponse_NOT_FOUND,
 		}, nil
 	}
 
-	var result accountpb.IsCodeAccountResponse_Result
+	var result accountpb.IsOcpAccountResponse_Result
 	switch ownerMetadata.State {
-	case common.OwnerManagementStateCodeAccount:
-		result = accountpb.IsCodeAccountResponse_OK
+	case common.OwnerManagementStateOcpAccount:
+		result = accountpb.IsOcpAccountResponse_OK
 	case common.OwnerManagementStateNotFound:
-		result = accountpb.IsCodeAccountResponse_NOT_FOUND
+		result = accountpb.IsOcpAccountResponse_NOT_FOUND
 	case common.OwnerManagementStateUnlocked:
-		result = accountpb.IsCodeAccountResponse_UNLOCKED_TIMELOCK_ACCOUNT
+		result = accountpb.IsOcpAccountResponse_UNLOCKED_TIMELOCK_ACCOUNT
 	case common.OwnerManagementStateUnknown:
 		log.Warn("unknown owner management state")
 		return nil, status.Error(codes.Internal, "")
 	}
 
-	return &accountpb.IsCodeAccountResponse{
+	return &accountpb.IsOcpAccountResponse{
 		Result: result,
 	}, nil
 }

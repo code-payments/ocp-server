@@ -92,8 +92,8 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 		log.With(zap.Error(err)).Warn("failure getting owner management state")
 		return handleStartSwapError(streamer, err)
 	}
-	if ownerManagemntState != common.OwnerManagementStateCodeAccount {
-		return handleStartSwapError(streamer, NewSwapDeniedError("not a code account"))
+	if ownerManagemntState != common.OwnerManagementStateOcpAccount {
+		return handleStartSwapError(streamer, NewSwapDeniedError("not an ocp account"))
 	}
 
 	allow, err := s.antispamGuard.AllowSwap(ctx, owner, fromMint, toMint)
