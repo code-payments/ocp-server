@@ -9,7 +9,7 @@ func EstimateCurrentPrice(currentSupplyInQuarks uint64) *big.Float {
 	scale := big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
 	unscaledCurrentSupply := big.NewFloat(float64(currentSupplyInQuarks)).SetPrec(defaultCurvePrec)
 	scaledCurrentSupply := new(big.Float).Quo(unscaledCurrentSupply, scale)
-	return DefaultExponentialCurve().SpotPriceAtSupply(scaledCurrentSupply)
+	return DefaultContinuousExponentialCurve().SpotPriceAtSupply(scaledCurrentSupply)
 }
 
 type EstimateValueExchangeArgs struct {
@@ -28,7 +28,7 @@ func EstimateValueExchange(args *EstimateValueExchangeArgs) uint64 {
 	scaledCurrentValue := new(big.Float).Quo(unscaledCurrentValue, scale)
 
 	scale = big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
-	scaledTokens := DefaultExponentialCurve().TokensForValueExchange(scaledCurrentValue, scaledValue)
+	scaledTokens := DefaultContinuousExponentialCurve().TokensForValueExchange(scaledCurrentValue, scaledValue)
 	unscaledTokens := new(big.Float).Mul(scaledTokens, scale)
 
 	quarks, _ := unscaledTokens.Int64()
@@ -51,10 +51,8 @@ func EstimateBuy(args *EstimateBuyArgs) uint64 {
 	scaledCurrentSupply := new(big.Float).Quo(unscaledCurrentSupply, scale)
 
 	scale = big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
-	scaledTokens := DefaultExponentialCurve().TokensBoughtForValue(scaledCurrentSupply, scaledBuyAmount)
+	scaledTokens := DefaultContinuousExponentialCurve().TokensBoughtForValue(scaledCurrentSupply, scaledBuyAmount)
 	unscaledTokens := new(big.Float).Mul(scaledTokens, scale)
-
-	scale = big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
 
 	tokens, _ := unscaledTokens.Int64()
 	return uint64(tokens)
@@ -77,7 +75,7 @@ func EstimateSell(args *EstimateSellArgs) (uint64, uint64) {
 	scaledCurrentValue := new(big.Float).Quo(unscaledCurrentValue, scale)
 
 	scale = big.NewFloat(math.Pow10(int(args.ValueMintDecimals))).SetPrec(defaultCurvePrec)
-	scaledValue := DefaultExponentialCurve().ValueFromSellingTokens(scaledCurrentValue, scaledSellAmount)
+	scaledValue := DefaultContinuousExponentialCurve().ValueFromSellingTokens(scaledCurrentValue, scaledSellAmount)
 	unscaledValue := new(big.Float).Mul(scaledValue, scale)
 
 	scale = big.NewFloat(math.Pow10(int(args.ValueMintDecimals))).SetPrec(defaultCurvePrec)

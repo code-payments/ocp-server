@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestCalculateCurveConstants(t *testing.T) {
-	curve := DefaultExponentialCurve()
+func TestCalculateContinuousCurveConstants(t *testing.T) {
+	curve := DefaultContinuousExponentialCurve()
 
 	// Check R'(0) with tolerance
 	spot0 := curve.SpotPriceAtSupply(big.NewFloat(0))
@@ -29,8 +29,8 @@ func TestCalculateCurveConstants(t *testing.T) {
 	}
 }
 
-func TestGenerateCurveTable(t *testing.T) {
-	curve := DefaultExponentialCurve()
+func TestGenerateContinuousCurveTable(t *testing.T) {
+	curve := DefaultContinuousExponentialCurve()
 
 	fmt.Println("|------|----------------|----------------------------------|----------------------------|")
 	fmt.Println("| %    | S              | R(S)                             | R'(S)                      |")

@@ -15,20 +15,20 @@ const (
 	defaultCurvePrec = 128
 )
 
-type ExponentialCurve struct {
+type ContinuousExponentialCurve struct {
 	a *big.Float
 	b *big.Float
 	c *big.Float
 }
 
-func (curve *ExponentialCurve) SpotPriceAtSupply(currentSupply *big.Float) *big.Float {
+func (curve *ContinuousExponentialCurve) SpotPriceAtSupply(currentSupply *big.Float) *big.Float {
 	cTimesS := new(big.Float).Mul(curve.c, currentSupply)
 	exp := expBig(cTimesS)
 	return new(big.Float).Mul(new(big.Float).Mul(curve.a, curve.b), exp)
 }
 
 // What is the cost to buy tokensToBuy given the currentSupply?
-func (curve *ExponentialCurve) CostToBuyTokens(currentSupply, tokensToBuy *big.Float) *big.Float {
+func (curve *ContinuousExponentialCurve) CostToBuyTokens(currentSupply, tokensToBuy *big.Float) *big.Float {
 	newSupply := new(big.Float).Add(currentSupply, tokensToBuy)
 	cs := new(big.Float).Mul(curve.c, currentSupply)
 	ns := new(big.Float).Mul(curve.c, newSupply)
@@ -40,7 +40,7 @@ func (curve *ExponentialCurve) CostToBuyTokens(currentSupply, tokensToBuy *big.F
 }
 
 // How much value is received when selling tokensToSell with currentValueLocked in the reserves?
-func (curve *ExponentialCurve) ValueFromSellingTokens(currentValue, tokensToSell *big.Float) *big.Float {
+func (curve *ContinuousExponentialCurve) ValueFromSellingTokens(currentValue, tokensToSell *big.Float) *big.Float {
 	abOverC := new(big.Float).Quo(new(big.Float).Mul(curve.a, curve.b), curve.c)
 	cvPlusAbOverC := new(big.Float).Add(currentValue, abOverC)
 	cTimesTokensToSell := new(big.Float).Mul(curve.c, tokensToSell)
@@ -50,7 +50,7 @@ func (curve *ExponentialCurve) ValueFromSellingTokens(currentValue, tokensToSell
 }
 
 // How many tokens will be bought for a value given the currentSupply?
-func (curve *ExponentialCurve) TokensBoughtForValue(currentSupply, value *big.Float) *big.Float {
+func (curve *ContinuousExponentialCurve) TokensBoughtForValue(currentSupply, value *big.Float) *big.Float {
 	abOverC := new(big.Float).Quo(new(big.Float).Mul(curve.a, curve.b), curve.c)
 	expCs := expBig(new(big.Float).Mul(curve.c, currentSupply))
 	term := new(big.Float).Add(new(big.Float).Quo(value, abOverC), expCs)
@@ -60,7 +60,7 @@ func (curve *ExponentialCurve) TokensBoughtForValue(currentSupply, value *big.Fl
 }
 
 // How many tokens should be exchanged for a value given the currentValue?
-func (curve *ExponentialCurve) TokensForValueExchange(currentValue, value *big.Float) *big.Float {
+func (curve *ContinuousExponentialCurve) TokensForValueExchange(currentValue, value *big.Float) *big.Float {
 	abOverC := new(big.Float).Quo(new(big.Float).Mul(curve.a, curve.b), curve.c)
 	newValue := new(big.Float).Sub(currentValue, value)
 	currentValueOverAbOverC := new(big.Float).Quo(currentValue, abOverC)
@@ -71,7 +71,7 @@ func (curve *ExponentialCurve) TokensForValueExchange(currentValue, value *big.F
 	return new(big.Float).Quo(diffLnTerms, curve.c)
 }
 
-func DefaultExponentialCurve() *ExponentialCurve {
+func DefaultContinuousExponentialCurve() *ContinuousExponentialCurve {
 	scale, ok := new(big.Float).SetPrec(defaultCurvePrec).SetString(DefaultCurveScaleString)
 	if !ok {
 		panic("Invalid scale string")
@@ -84,7 +84,7 @@ func DefaultExponentialCurve() *ExponentialCurve {
 	b := new(big.Float).Quo(new(big.Float).SetPrec(defaultCurvePrec).SetInt(bInt), scale)
 	c := new(big.Float).Copy(b)
 
-	return &ExponentialCurve{a: a, b: b, c: c}
+	return &ContinuousExponentialCurve{a: a, b: b, c: c}
 }
 
 func expBig(x *big.Float) *big.Float {
