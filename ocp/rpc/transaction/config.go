@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	envConfigPrefix = "TRANSACTION_V2_SERVICE_"
+	envConfigPrefix = "TRANSACTION_SERVICE_"
 
 	DisableSubmitIntentConfigEnvName = envConfigPrefix + "DISABLE_SUBMIT_INTENT"
 	defaultDisableSubmitIntent       = false

@@ -30,7 +30,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/pointer"
-	"github.com/code-payments/ocp-server/solana/cvm"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 type AirdropType uint8
@@ -271,7 +271,7 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 	//       have a proper client call SubmitIntent in a worker.
 
 	noncePool, err := transaction.SelectNoncePool(
-		nonce.EnvironmentCvm,
+		nonce.EnvironmentVm,
 		common.CoreMintVmAccount.PublicKey().ToBase58(),
 		nonce.PurposeClientIntent,
 		s.noncePools...,
@@ -289,12 +289,12 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 		selectedNonce.ReleaseIfNotReserved(ctx)
 	}()
 
-	vixnHash := cvm.GetCompactTransferMessage(&cvm.GetCompactTransferMessageArgs{
+	vixnHash := vm.GetCompactTransferMessage(&vm.GetCompactTransferMessageArgs{
 		Source:       s.airdropper.Vault.PublicKey().ToBytes(),
 		Destination:  destination.PublicKey().ToBytes(),
 		Amount:       quarkAmount,
 		NonceAddress: selectedNonce.Account.PublicKey().ToBytes(),
-		NonceValue:   cvm.Hash(selectedNonce.Blockhash),
+		NonceValue:   vm.Hash(selectedNonce.Blockhash),
 	})
 	virtualSig := ed25519.Sign(s.airdropper.VaultOwner.PrivateKey().ToBytes(), vixnHash[:])
 

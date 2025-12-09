@@ -18,15 +18,15 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 type newFulfillmentMetadata struct {
 	// Signature metadata
 
 	requiresClientSignature bool
-	expectedSigner          *common.Account     // Must be null if the requiresClientSignature is false
-	virtualIxnHash          *cvm.CompactMessage // Must be null if the requiresClientSignature is false
+	expectedSigner          *common.Account    // Must be null if the requiresClientSignature is false
+	virtualIxnHash          *vm.CompactMessage // Must be null if the requiresClientSignature is false
 
 	// Additional metadata to add to the action and fulfillment record, which relates
 	// specifically to the transaction or virtual instruction within the context of
@@ -315,12 +315,12 @@ func (h *NoPrivacyTransferActionHandler) GetFulfillmentMetadata(
 ) (*newFulfillmentMetadata, error) {
 	switch index {
 	case 0:
-		virtualIxnHash := cvm.GetCompactTransferMessage(&cvm.GetCompactTransferMessageArgs{
+		virtualIxnHash := vm.GetCompactTransferMessage(&vm.GetCompactTransferMessageArgs{
 			Source:       h.source.Vault.PublicKey().ToBytes(),
 			Destination:  h.destination.PublicKey().ToBytes(),
 			Amount:       h.amount,
 			NonceAddress: nonce.PublicKey().ToBytes(),
-			NonceValue:   cvm.Hash(bh),
+			NonceValue:   vm.Hash(bh),
 		})
 
 		return &newFulfillmentMetadata{
@@ -430,11 +430,11 @@ func (h *NoPrivacyWithdrawActionHandler) GetFulfillmentMetadata(
 ) (*newFulfillmentMetadata, error) {
 	switch index {
 	case 0:
-		virtualIxnHash := cvm.GetCompactWithdrawMessage(&cvm.GetCompactWithdrawMessageArgs{
+		virtualIxnHash := vm.GetCompactWithdrawMessage(&vm.GetCompactWithdrawMessageArgs{
 			Source:       h.source.Vault.PublicKey().ToBytes(),
 			Destination:  h.destination.PublicKey().ToBytes(),
 			NonceAddress: nonce.PublicKey().ToBytes(),
-			NonceValue:   cvm.Hash(bh),
+			NonceValue:   vm.Hash(bh),
 		})
 
 		var intentOrderingIndexOverride *uint64

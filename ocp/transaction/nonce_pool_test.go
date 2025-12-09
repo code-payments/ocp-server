@@ -46,7 +46,7 @@ func testLocalNoncePoolHappyPath(nt *localNoncePoolTest) {
 	nt.initializeNonces(nt.pool.opts.desiredPoolSize, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent)
 	nt.initializeNonces(nt.pool.opts.desiredPoolSize, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeOnDemandTransaction)
 	nt.initializeNonces(nt.pool.opts.desiredPoolSize, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaDevnet, nonce.PurposeClientIntent)
-	nt.initializeNonces(nt.pool.opts.desiredPoolSize, nonce.EnvironmentCvm, testutil.NewRandomAccount(nt.t).PublicKey().ToBase58(), nonce.PurposeClientIntent)
+	nt.initializeNonces(nt.pool.opts.desiredPoolSize, nonce.EnvironmentVm, testutil.NewRandomAccount(nt.t).PublicKey().ToBase58(), nonce.PurposeClientIntent)
 
 	ctx := context.Background()
 

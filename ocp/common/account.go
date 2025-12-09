@@ -16,9 +16,9 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 type Account struct {
@@ -239,7 +239,7 @@ func (a *Account) GetTimelockAccounts(vmConfig *VmConfig) (*TimelockAccounts, er
 		return nil, errors.Wrap(err, "error validating owner account")
 	}
 
-	stateAddress, stateBump, err := cvm.GetVirtualTimelockAccountAddress(&cvm.GetVirtualTimelockAccountAddressArgs{
+	stateAddress, stateBump, err := vm.GetVirtualTimelockAccountAddress(&vm.GetVirtualTimelockAccountAddressArgs{
 		Mint:         vmConfig.Mint.PublicKey().ToBytes(),
 		VmAuthority:  vmConfig.Authority.PublicKey().ToBytes(),
 		Owner:        a.PublicKey().ToBytes(),
@@ -249,14 +249,14 @@ func (a *Account) GetTimelockAccounts(vmConfig *VmConfig) (*TimelockAccounts, er
 		return nil, errors.Wrap(err, "error getting timelock state address")
 	}
 
-	vaultAddress, vaultBump, err := cvm.GetVirtualTimelockVaultAddress(&cvm.GetVirtualTimelockVaultAddressArgs{
+	vaultAddress, vaultBump, err := vm.GetVirtualTimelockVaultAddress(&vm.GetVirtualTimelockVaultAddressArgs{
 		VirtualTimelock: stateAddress,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting vault address")
 	}
 
-	unlockAddress, unlockBump, err := cvm.GetVmUnlockStateAccountAddress(&cvm.GetVmUnlockStateAccountAddressArgs{
+	unlockAddress, unlockBump, err := vm.GetVmUnlockStateAccountAddress(&vm.GetVmUnlockStateAccountAddressArgs{
 		VirtualAccountOwner: a.publicKey.ToBytes(),
 		VirtualAccount:      stateAddress,
 		Vm:                  vmConfig.Vm.PublicKey().ToBytes(),
@@ -311,7 +311,7 @@ func (a *Account) GetTimelockAccounts(vmConfig *VmConfig) (*TimelockAccounts, er
 }
 
 func (a *Account) GetVmDepositAccounts(vmConfig *VmConfig) (*VmDepositAccounts, error) {
-	depositPdaAddress, depositPdaBump, err := cvm.GetVmDepositAddress(&cvm.GetVmDepositAddressArgs{
+	depositPdaAddress, depositPdaBump, err := vm.GetVmDepositAddress(&vm.GetVmDepositAddressArgs{
 		Depositor: a.PublicKey().ToBytes(),
 		Vm:        vmConfig.Vm.PublicKey().ToBytes(),
 	})
@@ -348,7 +348,7 @@ func (a *Account) GetVmDepositAccounts(vmConfig *VmConfig) (*VmDepositAccounts, 
 }
 
 func (a *Account) GetVmSwapAccounts(vmConfig *VmConfig) (*VmSwapAccounts, error) {
-	swapPdaAddress, swapPdaBump, err := cvm.GetVmSwapAddress(&cvm.GetVmSwapAddressArgs{
+	swapPdaAddress, swapPdaBump, err := vm.GetVmSwapAddress(&vm.GetVmSwapAddressArgs{
 		Swapper: a.PublicKey().ToBytes(),
 		Vm:      vmConfig.Vm.PublicKey().ToBytes(),
 	})
@@ -488,14 +488,14 @@ func (a *TimelockAccounts) GetDBRecord(ctx context.Context, data ocp_data.Provid
 
 // GetInitializeInstruction gets a SystemTimelockInitInstruction instruction for a Timelock account
 func (a *TimelockAccounts) GetInitializeInstruction(vmAuthority, memory *Account, accountIndex uint16) (solana.Instruction, error) {
-	return cvm.NewInitTimelockInstruction(
-		&cvm.InitTimelockInstructionAccounts{
+	return vm.NewInitTimelockInstruction(
+		&vm.InitTimelockInstructionAccounts{
 			VmAuthority:         vmAuthority.PublicKey().ToBytes(),
 			Vm:                  a.Vm.PublicKey().ToBytes(),
 			VmMemory:            memory.PublicKey().ToBytes(),
 			VirtualAccountOwner: a.VaultOwner.PublicKey().ToBytes(),
 		},
-		&cvm.InitTimelockInstructionArgs{
+		&vm.InitTimelockInstructionArgs{
 			AccountIndex:        accountIndex,
 			VirtualTimelockBump: a.StateBump,
 			VirtualVaultBump:    a.VaultBump,

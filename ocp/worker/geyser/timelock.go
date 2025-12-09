@@ -8,8 +8,8 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func updateTimelockAccountRecord(ctx context.Context, data ocp_data.Provider, timelockRecord *timelock.Record) error {
@@ -35,7 +35,7 @@ func updateTimelockAccountRecord(ctx context.Context, data ocp_data.Provider, ti
 	return data.SaveTimelock(ctx, timelockRecord)
 }
 
-func getTimelockUnlockState(ctx context.Context, data ocp_data.Provider, timelockRecord *timelock.Record) (*cvm.UnlockStateAccount, uint64, error) {
+func getTimelockUnlockState(ctx context.Context, data ocp_data.Provider, timelockRecord *timelock.Record) (*vm.UnlockStateAccount, uint64, error) {
 	accountInfoRecord, err := data.GetAccountInfoByTokenAddress(ctx, timelockRecord.VaultAddress)
 	if err != nil {
 		return nil, 0, err
@@ -64,7 +64,7 @@ func getTimelockUnlockState(ctx context.Context, data ocp_data.Provider, timeloc
 	marshalled, slot, err := data.GetBlockchainAccountDataAfterBlock(ctx, timelockAccounts.Unlock.PublicKey().ToBase58(), timelockRecord.Block)
 	switch err {
 	case nil:
-		var unlockState cvm.UnlockStateAccount
+		var unlockState vm.UnlockStateAccount
 		if err = unlockState.Unmarshal(marshalled); err != nil {
 			return nil, 0, err
 		}

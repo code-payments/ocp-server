@@ -12,9 +12,9 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func TestAccountWithPublicKey(t *testing.T) {
@@ -107,7 +107,7 @@ func TestConvertToTimelockVault(t *testing.T) {
 
 	ownerAccount := newRandomTestAccount(t)
 
-	stateAddress, _, err := cvm.GetVirtualTimelockAccountAddress(&cvm.GetVirtualTimelockAccountAddressArgs{
+	stateAddress, _, err := vm.GetVirtualTimelockAccountAddress(&vm.GetVirtualTimelockAccountAddressArgs{
 		Mint:         vmConfig.Mint.PublicKey().ToBytes(),
 		VmAuthority:  vmConfig.Authority.PublicKey().ToBytes(),
 		Owner:        ownerAccount.PublicKey().ToBytes(),
@@ -115,7 +115,7 @@ func TestConvertToTimelockVault(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	expectedVaultAddress, _, err := cvm.GetVirtualTimelockVaultAddress(&cvm.GetVirtualTimelockVaultAddressArgs{
+	expectedVaultAddress, _, err := vm.GetVirtualTimelockVaultAddress(&vm.GetVirtualTimelockVaultAddressArgs{
 		VirtualTimelock: stateAddress,
 	})
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestGetTimelockAccounts(t *testing.T) {
 
 	ownerAccount := newRandomTestAccount(t)
 
-	expectedStateAddress, expectedStateBump, err := cvm.GetVirtualTimelockAccountAddress(&cvm.GetVirtualTimelockAccountAddressArgs{
+	expectedStateAddress, expectedStateBump, err := vm.GetVirtualTimelockAccountAddress(&vm.GetVirtualTimelockAccountAddressArgs{
 		Mint:         vmConfig.Mint.PublicKey().ToBytes(),
 		VmAuthority:  vmConfig.Authority.PublicKey().ToBytes(),
 		Owner:        ownerAccount.PublicKey().ToBytes(),
@@ -138,12 +138,12 @@ func TestGetTimelockAccounts(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	expectedVaultAddress, expectedVaultBump, err := cvm.GetVirtualTimelockVaultAddress(&cvm.GetVirtualTimelockVaultAddressArgs{
+	expectedVaultAddress, expectedVaultBump, err := vm.GetVirtualTimelockVaultAddress(&vm.GetVirtualTimelockVaultAddressArgs{
 		VirtualTimelock: expectedStateAddress,
 	})
 	require.NoError(t, err)
 
-	expectedUnlockAddress, expectedUnlockBump, err := cvm.GetVmUnlockStateAccountAddress(&cvm.GetVmUnlockStateAccountAddressArgs{
+	expectedUnlockAddress, expectedUnlockBump, err := vm.GetVmUnlockStateAccountAddress(&vm.GetVmUnlockStateAccountAddressArgs{
 		VirtualAccountOwner: ownerAccount.PublicKey().ToBytes(),
 		VirtualAccount:      expectedStateAddress,
 		Vm:                  vmConfig.Vm.PublicKey().ToBytes(),
@@ -168,7 +168,7 @@ func TestGetVmDepositAccounts(t *testing.T) {
 
 	ownerAccount := newRandomTestAccount(t)
 
-	expectedDepositPdaAddress, expectedDepositPdaBump, err := cvm.GetVmDepositAddress(&cvm.GetVmDepositAddressArgs{
+	expectedDepositPdaAddress, expectedDepositPdaBump, err := vm.GetVmDepositAddress(&vm.GetVmDepositAddressArgs{
 		Depositor: ownerAccount.PublicKey().ToBytes(),
 		Vm:        vmConfig.Vm.PublicKey().ToBytes(),
 	})
@@ -192,7 +192,7 @@ func TestGetVmSwapAccounts(t *testing.T) {
 
 	ownerAccount := newRandomTestAccount(t)
 
-	expectedSwapPdaAddress, expectedSwapPdaBump, err := cvm.GetVmSwapAddress(&cvm.GetVmSwapAddressArgs{
+	expectedSwapPdaAddress, expectedSwapPdaBump, err := vm.GetVmSwapAddress(&vm.GetVmSwapAddressArgs{
 		Swapper: ownerAccount.PublicKey().ToBytes(),
 		Vm:      vmConfig.Vm.PublicKey().ToBytes(),
 	})

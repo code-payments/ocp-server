@@ -13,15 +13,15 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/action"
-	"github.com/code-payments/ocp-server/ocp/data/cvm/storage"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
+	"github.com/code-payments/ocp-server/ocp/data/vm/storage"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
-	"github.com/code-payments/ocp-server/ocp/vm"
+	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	"github.com/code-payments/ocp-server/solana/token"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 type FulfillmentHandler interface {
@@ -172,7 +172,7 @@ func (h *InitializeLockedTimelockAccountFulfillmentHandler) MakeOnDemandTransact
 		return nil, nil, errors.New("unexpected timelock vault address")
 	}
 
-	memory, accountIndex, err := reserveVmMemory(ctx, h.data, vmConfig.Vm, cvm.VirtualAccountTypeTimelock, timelockAccounts.Vault)
+	memory, accountIndex, err := reserveVmMemory(ctx, h.data, vmConfig.Vm, vm.VirtualAccountTypeTimelock, timelockAccounts.Vault)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -365,12 +365,12 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 		return nil, nil, err
 	}
 
-	nonceMemory, nonceIndex, err := vm.GetVirtualDurableNonceAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
+	nonceMemory, nonceIndex, err := vm_util.GetVirtualDurableNonceAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sourceMemory, sourceIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
+	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -393,7 +393,7 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 			return nil, nil, err
 		}
 
-		destinationMemory, destinationIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
+		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -584,12 +584,12 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 		return nil, nil, err
 	}
 
-	nonceMemory, nonceIndex, err := vm.GetVirtualDurableNonceAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
+	nonceMemory, nonceIndex, err := vm_util.GetVirtualDurableNonceAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, virtualNonce)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sourceMemory, sourceIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
+	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -612,7 +612,7 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 			return nil, nil, err
 		}
 
-		destinationMemory, destinationIndex, err := vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
+		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -774,7 +774,7 @@ func (h *CloseEmptyTimelockAccountFulfillmentHandler) MakeOnDemandTransaction(ct
 		return nil, nil, err
 	}
 
-	virtualAccountState, memory, index, err := vm.GetVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, timelockOwner)
+	virtualAccountState, memory, index, err := vm_util.GetVirtualTimelockAccountStateInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, timelockOwner)
 	if err != nil {
 		return nil, nil, err
 	}

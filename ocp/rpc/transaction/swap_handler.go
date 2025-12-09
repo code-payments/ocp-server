@@ -7,14 +7,14 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/ocp/vm"
+	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
-	"github.com/code-payments/ocp-server/solana/cvm"
 	"github.com/code-payments/ocp-server/solana/memo"
 	"github.com/code-payments/ocp-server/solana/system"
 	"github.com/code-payments/ocp-server/solana/token"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 // todo: Move transaction-related stuff to the transaction utility package
@@ -103,7 +103,7 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.buyer)
+	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.buyer)
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +131,8 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 		return nil, err
 	}
 
-	transferFromSourceVmSwapAtaIxn := cvm.NewTransferForSwapInstruction(
-		&cvm.TransferForSwapInstructionAccounts{
+	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
+		&vm.TransferForSwapInstructionAccounts{
 			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 			Swapper:     h.buyer.PublicKey().ToBytes(),
@@ -140,7 +140,7 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
 			Destination: temporaryCoreMintAta.PublicKey().ToBytes(),
 		},
-		&cvm.TransferForSwapInstructionArgs{
+		&vm.TransferForSwapInstructionArgs{
 			Amount: h.amount,
 			Bump:   sourceTimelockAccounts.VmSwapAccounts.PdaBump,
 		},
@@ -175,8 +175,8 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 		h.temporaryHolder.PublicKey().ToBytes(),
 	)
 
-	closeSourceVmSwapAccountIfEmptyIxn := cvm.NewCloseSwapAccountIfEmptyInstruction(
-		&cvm.CloseSwapAccountIfEmptyInstructionAccounts{
+	closeSourceVmSwapAccountIfEmptyIxn := vm.NewCloseSwapAccountIfEmptyInstruction(
+		&vm.CloseSwapAccountIfEmptyInstructionAccounts{
 			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 			Swapper:     h.buyer.PublicKey().ToBytes(),
@@ -184,7 +184,7 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
 			Destination: common.GetSubsidizer().PublicKey().ToBytes(),
 		},
-		&cvm.CloseSwapAccountIfEmptyInstructionArgs{
+		&vm.CloseSwapAccountIfEmptyInstructionArgs{
 			Bump: sourceTimelockAccounts.VmSwapAccounts.PdaBump,
 		},
 	)
@@ -280,7 +280,7 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.seller)
+	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.seller)
 	if err != nil {
 		return nil, err
 	}
@@ -298,8 +298,8 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 		return nil, err
 	}
 
-	transferFromSourceVmSwapAtaIxn := cvm.NewTransferForSwapInstruction(
-		&cvm.TransferForSwapInstructionAccounts{
+	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
+		&vm.TransferForSwapInstructionAccounts{
 			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 			Swapper:     h.seller.PublicKey().ToBytes(),
@@ -307,7 +307,7 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
 			Destination: temporarySourceCurrencyAta.PublicKey().ToBytes(),
 		},
-		&cvm.TransferForSwapInstructionArgs{
+		&vm.TransferForSwapInstructionArgs{
 			Amount: h.amount,
 			Bump:   sourceTimelockAccounts.VmSwapAccounts.PdaBump,
 		},
@@ -342,8 +342,8 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 		h.temporaryHolder.PublicKey().ToBytes(),
 	)
 
-	closeSourceVmSwapAccountIfEmptyIxn := cvm.NewCloseSwapAccountIfEmptyInstruction(
-		&cvm.CloseSwapAccountIfEmptyInstructionAccounts{
+	closeSourceVmSwapAccountIfEmptyIxn := vm.NewCloseSwapAccountIfEmptyInstruction(
+		&vm.CloseSwapAccountIfEmptyInstructionAccounts{
 			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 			Swapper:     h.seller.PublicKey().ToBytes(),
@@ -351,7 +351,7 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
 			Destination: common.GetSubsidizer().PublicKey().ToBytes(),
 		},
-		&cvm.CloseSwapAccountIfEmptyInstructionArgs{
+		&vm.CloseSwapAccountIfEmptyInstructionArgs{
 			Bump: sourceTimelockAccounts.VmSwapAccounts.PdaBump,
 		},
 	)
@@ -450,7 +450,7 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = vm.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.swapper)
+	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.swapper)
 	if err != nil {
 		return nil, err
 	}
@@ -491,8 +491,8 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		return nil, err
 	}
 
-	transferFromSourceVmSwapAtaIxn := cvm.NewTransferForSwapInstruction(
-		&cvm.TransferForSwapInstructionAccounts{
+	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
+		&vm.TransferForSwapInstructionAccounts{
 			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 			Swapper:     h.swapper.PublicKey().ToBytes(),
@@ -500,7 +500,7 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
 			Destination: temporarySourceCurrencyAta.PublicKey().ToBytes(),
 		},
-		&cvm.TransferForSwapInstructionArgs{
+		&vm.TransferForSwapInstructionArgs{
 			Amount: h.amount,
 			Bump:   sourceTimelockAccounts.VmSwapAccounts.PdaBump,
 		},
@@ -558,8 +558,8 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		h.temporaryHolder.PublicKey().ToBytes(),
 	)
 
-	closeSourceVmSwapAccountIfEmptyIxn := cvm.NewCloseSwapAccountIfEmptyInstruction(
-		&cvm.CloseSwapAccountIfEmptyInstructionAccounts{
+	closeSourceVmSwapAccountIfEmptyIxn := vm.NewCloseSwapAccountIfEmptyInstruction(
+		&vm.CloseSwapAccountIfEmptyInstructionAccounts{
 			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
 			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
 			Swapper:     h.swapper.PublicKey().ToBytes(),
@@ -567,7 +567,7 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
 			Destination: common.GetSubsidizer().PublicKey().ToBytes(),
 		},
-		&cvm.CloseSwapAccountIfEmptyInstructionArgs{
+		&vm.CloseSwapAccountIfEmptyInstructionArgs{
 			Bump: sourceTimelockAccounts.VmSwapAccounts.PdaBump,
 		},
 	)
