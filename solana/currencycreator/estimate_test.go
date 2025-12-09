@@ -42,7 +42,7 @@ func TestEstimateSell_CrossPlatform(t *testing.T) {
 
 func TestEstimates_ExtremeValues(t *testing.T) {
 	price := EstimateCurrentPrice(22_000_000_0000000000) // 22mm tokens
-	require.Equal(t, "999999.999988634528021217", price.Text('f', 18))
+	require.Equal(t, "999999.999988634528021217", price.Text('f', DefaultCurveDecimals))
 
 	received := EstimateBuy(&EstimateBuyArgs{
 		BuyAmountInQuarks:     2_000_000_000_000_000_000, // $2T
