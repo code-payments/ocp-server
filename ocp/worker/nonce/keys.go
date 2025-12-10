@@ -3,6 +3,7 @@ package nonce
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -11,6 +12,10 @@ import (
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
 	"github.com/code-payments/ocp-server/retry"
+)
+
+var (
+	globalKeyLock sync.Mutex
 )
 
 func (p *runtime) generateKey(ctx context.Context) (*vault.Record, error) {
@@ -83,7 +88,8 @@ func (p *runtime) generateKeys(runtimeCtx context.Context) error {
 }
 
 func (p *runtime) reserveExistingKey(ctx context.Context) (*vault.Record, error) {
-	// todo: add distributed locking here.
+	globalKeyLock.Lock()
+	defer globalKeyLock.Unlock()
 
 	keys, err := p.data.GetAllKeysByState(ctx, vault.StateAvailable,
 		query.WithLimit(1),
