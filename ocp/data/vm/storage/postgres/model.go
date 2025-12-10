@@ -21,8 +21,8 @@ type accountModel struct {
 
 	Vm string `db:"vm"`
 
-	Name              string `db:"name"`
-	Address           string `db:"address"`
+	Address string `db:"address"`
+
 	Levels            uint8  `db:"levels"`
 	AvailableCapacity uint64 `db:"available_capacity"`
 	Purpose           uint8  `db:"purpose"`
@@ -49,8 +49,8 @@ func toAccountModel(obj *storage.Record) (*accountModel, error) {
 	return &accountModel{
 		Vm: obj.Vm,
 
-		Name:              obj.Name,
-		Address:           obj.Address,
+		Address: obj.Address,
+
 		Levels:            obj.Levels,
 		AvailableCapacity: obj.AvailableCapacity,
 		Purpose:           uint8(obj.Purpose),
@@ -65,8 +65,8 @@ func fromAccountModel(obj *accountModel) *storage.Record {
 
 		Vm: obj.Vm,
 
-		Name:              obj.Name,
-		Address:           obj.Address,
+		Address: obj.Address,
+
 		Levels:            obj.Levels,
 		AvailableCapacity: obj.AvailableCapacity,
 		Purpose:           storage.Purpose(obj.Purpose),
@@ -78,9 +78,9 @@ func fromAccountModel(obj *accountModel) *storage.Record {
 func (m *accountModel) dbInitialize(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		query := `INSERT INTO ` + accountTableName + `
-				(vm, name, address, levels, available_capacity, purpose, created_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
-				RETURNING id, vm, name, address, levels, available_capacity, purpose, created_at`
+				(vm, address, levels, available_capacity, purpose, created_at)
+				VALUES ($1, $2, $3, $4, $5, $6)
+				RETURNING id, vm, address, levels, available_capacity, purpose, created_at`
 
 		if m.CreatedAt.IsZero() {
 			m.CreatedAt = time.Now()
@@ -90,7 +90,6 @@ func (m *accountModel) dbInitialize(ctx context.Context, db *sqlx.DB) error {
 			ctx,
 			query,
 			m.Vm,
-			m.Name,
 			m.Address,
 			m.Levels,
 			m.AvailableCapacity,
@@ -106,7 +105,7 @@ func dbFindAnyWithAvailableCapacity(ctx context.Context, db *sqlx.DB, vm string,
 	res := &accountModel{}
 
 	query := `SELECT
-		id, vm, name, address, levels, available_capacity, purpose, created_at
+		id, vm, address, levels, available_capacity, purpose, created_at
 		FROM ` + accountTableName + `
 		WHERE vm = $1 AND purpose = $2 AND available_capacity >= $3
 		LIMIT 1`
@@ -149,7 +148,7 @@ func dbReserveStorage(ctx context.Context, db *sqlx.DB, vm string, purpose stora
 		query2 := `UPDATE ` + accountTableName + `
 			SET available_capacity = available_capacity - 1
 			WHERE vm = $1 AND purpose = $2 and available_capacity > 0
-			RETURNING id, vm, name, address, levels, available_capacity, purpose, created_at`
+			RETURNING id, vm, address, levels, available_capacity, purpose, created_at`
 
 		err = tx.QueryRowxContext(
 			ctx,

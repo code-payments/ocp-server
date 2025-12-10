@@ -150,24 +150,17 @@ type DatabaseData interface {
 	GetFulfillmentById(ctx context.Context, id uint64) (*fulfillment.Record, error)
 	GetFulfillmentBySignature(ctx context.Context, signature string) (*fulfillment.Record, error)
 	GetFulfillmentByVirtualSignature(ctx context.Context, signature string) (*fulfillment.Record, error)
-	GetFulfillmentCount(ctx context.Context) (uint64, error)
 	GetFulfillmentCountByState(ctx context.Context, state fulfillment.State) (uint64, error)
-	GetFulfillmentCountByStateGroupedByType(ctx context.Context, state fulfillment.State) (map[fulfillment.Type]uint64, error)
 	GetFulfillmentCountForMetrics(ctx context.Context, state fulfillment.State) (map[fulfillment.Type]uint64, error)
 	GetFulfillmentCountByStateAndAddress(ctx context.Context, state fulfillment.State, address string) (uint64, error)
-	GetFulfillmentCountByTypeStateAndAddress(ctx context.Context, fulfillmentType fulfillment.Type, state fulfillment.State, address string) (uint64, error)
-	GetFulfillmentCountByTypeStateAndAddressAsSource(ctx context.Context, fulfillmentType fulfillment.Type, state fulfillment.State, address string) (uint64, error)
 	GetFulfillmentCountByIntentAndState(ctx context.Context, intent string, state fulfillment.State) (uint64, error)
 	GetFulfillmentCountByIntent(ctx context.Context, intent string) (uint64, error)
-	GetFulfillmentCountByTypeActionAndState(ctx context.Context, intentId string, actionId uint32, fulfillmentType fulfillment.Type, state fulfillment.State) (uint64, error)
 	GetPendingFulfillmentCountByType(ctx context.Context) (map[fulfillment.Type]uint64, error)
 	GetAllFulfillmentsByState(ctx context.Context, state fulfillment.State, includeDisabledActiveScheduling bool, opts ...query.Option) ([]*fulfillment.Record, error)
 	GetAllFulfillmentsByIntent(ctx context.Context, intent string, opts ...query.Option) ([]*fulfillment.Record, error)
 	GetAllFulfillmentsByAction(ctx context.Context, intentId string, actionId uint32) ([]*fulfillment.Record, error)
-	GetAllFulfillmentsByTypeAndAction(ctx context.Context, fulfillmentType fulfillment.Type, intentId string, actionId uint32) ([]*fulfillment.Record, error)
 	GetFirstSchedulableFulfillmentByAddressAsSource(ctx context.Context, address string) (*fulfillment.Record, error)
 	GetFirstSchedulableFulfillmentByAddressAsDestination(ctx context.Context, address string) (*fulfillment.Record, error)
-	GetFirstSchedulableFulfillmentByType(ctx context.Context, fulfillmentType fulfillment.Type) (*fulfillment.Record, error)
 	GetNextSchedulableFulfillmentByAddress(ctx context.Context, address string, intentOrderingIndex uint64, actionOrderingIndex, fulfillmentOrderingIndex uint32) (*fulfillment.Record, error)
 	PutAllFulfillments(ctx context.Context, records ...*fulfillment.Record) error
 	UpdateFulfillment(ctx context.Context, record *fulfillment.Record) error
@@ -176,7 +169,6 @@ type DatabaseData interface {
 	// --------------------------------------------------------------------------------
 	SaveIntent(ctx context.Context, record *intent.Record) error
 	GetIntent(ctx context.Context, intentID string) (*intent.Record, error)
-	GetIntentBySignature(ctx context.Context, signature string) (*intent.Record, error)
 	GetAllIntentsByOwner(ctx context.Context, owner string, opts ...query.Option) ([]*intent.Record, error)
 	GetOriginalGiftCardIssuedIntent(ctx context.Context, giftCardVault string) (*intent.Record, error)
 	GetGiftCardClaimedIntent(ctx context.Context, giftCardVault string) (*intent.Record, error)
@@ -553,14 +545,8 @@ func (dp *DatabaseProvider) GetFulfillmentBySignature(ctx context.Context, signa
 func (dp *DatabaseProvider) GetFulfillmentByVirtualSignature(ctx context.Context, signature string) (*fulfillment.Record, error) {
 	return dp.fulfillments.GetByVirtualSignature(ctx, signature)
 }
-func (dp *DatabaseProvider) GetFulfillmentCount(ctx context.Context) (uint64, error) {
-	return dp.fulfillments.Count(ctx)
-}
 func (dp *DatabaseProvider) GetFulfillmentCountByState(ctx context.Context, state fulfillment.State) (uint64, error) {
 	return dp.fulfillments.CountByState(ctx, state)
-}
-func (dp *DatabaseProvider) GetFulfillmentCountByStateGroupedByType(ctx context.Context, state fulfillment.State) (map[fulfillment.Type]uint64, error) {
-	return dp.fulfillments.CountByStateGroupedByType(ctx, state)
 }
 func (dp *DatabaseProvider) GetFulfillmentCountForMetrics(ctx context.Context, state fulfillment.State) (map[fulfillment.Type]uint64, error) {
 	return dp.fulfillments.CountForMetrics(ctx, state)
@@ -568,20 +554,11 @@ func (dp *DatabaseProvider) GetFulfillmentCountForMetrics(ctx context.Context, s
 func (dp *DatabaseProvider) GetFulfillmentCountByStateAndAddress(ctx context.Context, state fulfillment.State, address string) (uint64, error) {
 	return dp.fulfillments.CountByStateAndAddress(ctx, state, address)
 }
-func (dp *DatabaseProvider) GetFulfillmentCountByTypeStateAndAddress(ctx context.Context, fulfillmentType fulfillment.Type, state fulfillment.State, address string) (uint64, error) {
-	return dp.fulfillments.CountByTypeStateAndAddress(ctx, fulfillmentType, state, address)
-}
-func (dp *DatabaseProvider) GetFulfillmentCountByTypeStateAndAddressAsSource(ctx context.Context, fulfillmentType fulfillment.Type, state fulfillment.State, address string) (uint64, error) {
-	return dp.fulfillments.CountByTypeStateAndAddressAsSource(ctx, fulfillmentType, state, address)
-}
 func (dp *DatabaseProvider) GetFulfillmentCountByIntentAndState(ctx context.Context, intent string, state fulfillment.State) (uint64, error) {
 	return dp.fulfillments.CountByIntentAndState(ctx, intent, state)
 }
 func (dp *DatabaseProvider) GetFulfillmentCountByIntent(ctx context.Context, intent string) (uint64, error) {
 	return dp.fulfillments.CountByIntent(ctx, intent)
-}
-func (dp *DatabaseProvider) GetFulfillmentCountByTypeActionAndState(ctx context.Context, intentId string, actionId uint32, fulfillmentType fulfillment.Type, state fulfillment.State) (uint64, error) {
-	return dp.fulfillments.CountByTypeActionAndState(ctx, intentId, actionId, fulfillmentType, state)
 }
 func (dp *DatabaseProvider) GetPendingFulfillmentCountByType(ctx context.Context) (map[fulfillment.Type]uint64, error) {
 	return dp.fulfillments.CountPendingByType(ctx)
@@ -605,17 +582,11 @@ func (dp *DatabaseProvider) GetAllFulfillmentsByIntent(ctx context.Context, inte
 func (dp *DatabaseProvider) GetAllFulfillmentsByAction(ctx context.Context, intentId string, actionId uint32) ([]*fulfillment.Record, error) {
 	return dp.fulfillments.GetAllByAction(ctx, intentId, actionId)
 }
-func (dp *DatabaseProvider) GetAllFulfillmentsByTypeAndAction(ctx context.Context, fulfillmentType fulfillment.Type, intentId string, actionId uint32) ([]*fulfillment.Record, error) {
-	return dp.fulfillments.GetAllByTypeAndAction(ctx, fulfillmentType, intentId, actionId)
-}
 func (dp *DatabaseProvider) GetFirstSchedulableFulfillmentByAddressAsSource(ctx context.Context, address string) (*fulfillment.Record, error) {
 	return dp.fulfillments.GetFirstSchedulableByAddressAsSource(ctx, address)
 }
 func (dp *DatabaseProvider) GetFirstSchedulableFulfillmentByAddressAsDestination(ctx context.Context, address string) (*fulfillment.Record, error) {
 	return dp.fulfillments.GetFirstSchedulableByAddressAsDestination(ctx, address)
-}
-func (dp *DatabaseProvider) GetFirstSchedulableFulfillmentByType(ctx context.Context, fulfillmentType fulfillment.Type) (*fulfillment.Record, error) {
-	return dp.fulfillments.GetFirstSchedulableByType(ctx, fulfillmentType)
 }
 func (dp *DatabaseProvider) GetNextSchedulableFulfillmentByAddress(ctx context.Context, address string, intentOrderingIndex uint64, actionOrderingIndex, fulfillmentOrderingIndex uint32) (*fulfillment.Record, error) {
 	return dp.fulfillments.GetNextSchedulableByAddress(ctx, address, intentOrderingIndex, actionOrderingIndex, fulfillmentOrderingIndex)
@@ -631,16 +602,6 @@ func (dp *DatabaseProvider) UpdateFulfillment(ctx context.Context, record *fulfi
 // --------------------------------------------------------------------------------
 func (dp *DatabaseProvider) GetIntent(ctx context.Context, intentID string) (*intent.Record, error) {
 	return dp.intents.Get(ctx, intentID)
-}
-func (dp *DatabaseProvider) GetIntentBySignature(ctx context.Context, signature string) (*intent.Record, error) {
-	fulfillmentRecord, err := dp.fulfillments.GetBySignature(ctx, signature)
-	if err == fulfillment.ErrFulfillmentNotFound {
-		return nil, intent.ErrIntentNotFound
-	} else if err != nil {
-		return nil, err
-	}
-
-	return dp.intents.Get(ctx, fulfillmentRecord.Intent)
 }
 func (dp *DatabaseProvider) GetAllIntentsByOwner(ctx context.Context, owner string, opts ...query.Option) ([]*intent.Record, error) {
 	req, err := query.DefaultPaginationHandler(opts...)

@@ -151,18 +151,6 @@ func fromFulfillmentModel(obj *fulfillmentModel) *fulfillment.Record {
 	}
 }
 
-func dbGetCount(ctx context.Context, db *sqlx.DB) (uint64, error) {
-	var res uint64
-
-	query := `SELECT COUNT(*) FROM ` + fulfillmentTableName
-	err := db.GetContext(ctx, &res, query)
-	if err != nil {
-		return 0, err
-	}
-
-	return res, nil
-}
-
 func dbGetCountByState(ctx context.Context, db *sqlx.DB, state fulfillment.State) (uint64, error) {
 	var res uint64
 
@@ -172,29 +160,6 @@ func dbGetCountByState(ctx context.Context, db *sqlx.DB, state fulfillment.State
 		return 0, err
 	}
 
-	return res, nil
-}
-
-func dbGetCountByStateGroupedByType(ctx context.Context, db *sqlx.DB, state fulfillment.State) (map[fulfillment.Type]uint64, error) {
-	type countedType struct {
-		Type  fulfillment.Type `db:"fulfillment_type"`
-		Count uint64           `db:"count"`
-	}
-
-	var countedTypes []countedType
-	query := `SELECT fulfillment_type, COUNT(*) as count FROM ` + fulfillmentTableName + `
-		WHERE state = $1
-		GROUP BY fulfillment_type
-	`
-	err := db.SelectContext(ctx, &countedTypes, query, state)
-	if err != nil {
-		return nil, err
-	}
-
-	res := make(map[fulfillment.Type]uint64)
-	for _, countedType := range countedTypes {
-		res[countedType.Type] = countedType.Count
-	}
 	return res, nil
 }
 
@@ -213,7 +178,7 @@ func dbGetCountForMetrics(ctx context.Context, db *sqlx.DB, state fulfillment.St
 
 	var countedTypes []countedType
 	query := `SELECT fulfillment_type, COUNT(*) as count FROM ` + fulfillmentTableName + `
-		WHERE fulfillment_type != $1 AND state = $2
+		WHERE state = $1 AND fulfillment_type != $2 
 		GROUP BY fulfillment_type
 	`
 	err := db.SelectContext(ctx, &countedTypes, query, exclusion, state)
@@ -240,30 +205,6 @@ func dbGetCountByStateAndAddress(ctx context.Context, db *sqlx.DB, state fulfill
 	return res, nil
 }
 
-func dbGetCountByTypeStateAndAddress(ctx context.Context, db *sqlx.DB, fulfillmentType fulfillment.Type, state fulfillment.State, address string) (uint64, error) {
-	var res uint64
-
-	query := `SELECT COUNT(*) FROM ` + fulfillmentTableName + ` WHERE  ((source = $1 OR destination = $1) AND state = $2 AND fulfillment_type = $3)`
-	err := db.GetContext(ctx, &res, query, address, state, fulfillmentType)
-	if err != nil {
-		return 0, err
-	}
-
-	return res, nil
-}
-
-func dbGetCountByTypeStateAndAddressAsSource(ctx context.Context, db *sqlx.DB, fulfillmentType fulfillment.Type, state fulfillment.State, address string) (uint64, error) {
-	var res uint64
-
-	query := `SELECT COUNT(*) FROM ` + fulfillmentTableName + ` WHERE  (source = $1 AND state = $2 AND fulfillment_type = $3)`
-	err := db.GetContext(ctx, &res, query, address, state, fulfillmentType)
-	if err != nil {
-		return 0, err
-	}
-
-	return res, nil
-}
-
 func dbGetCountByIntentAndState(ctx context.Context, db *sqlx.DB, intent string, state fulfillment.State) (uint64, error) {
 	var res uint64
 
@@ -281,19 +222,6 @@ func dbGetCountByIntent(ctx context.Context, db *sqlx.DB, intent string) (uint64
 
 	query := `SELECT COUNT(*) FROM ` + fulfillmentTableName + ` WHERE intent = $1`
 	err := db.GetContext(ctx, &res, query, intent)
-	if err != nil {
-		return 0, err
-	}
-
-	return res, nil
-}
-
-func dbGetCountByTypeActionAndState(ctx context.Context, db *sqlx.DB, intentId string, actionId uint32, fulfillmentType fulfillment.Type, state fulfillment.State) (uint64, error) {
-	var res uint64
-
-	query := `SELECT COUNT(*) FROM ` + fulfillmentTableName + `
-		WHERE intent = $1 AND action_id = $2 AND fulfillment_type = $3 AND state = $4`
-	err := db.GetContext(ctx, &res, query, intentId, actionId, fulfillmentType, state)
 	if err != nil {
 		return 0, err
 	}
@@ -578,26 +506,6 @@ func dbGetAllByAction(ctx context.Context, db *sqlx.DB, intentId string, actionI
 	return res, nil
 }
 
-func dbGetAllByTypeAndAction(ctx context.Context, db *sqlx.DB, fulfillmentType fulfillment.Type, intentId string, actionId uint32) ([]*fulfillmentModel, error) {
-	res := []*fulfillmentModel{}
-
-	query := `SELECT id, intent, intent_type, action_id, action_type, fulfillment_type, data, signature, nonce, blockhash, virtual_signature, virtual_nonce, virtual_blockhash, source, destination, intent_ordering_index, action_ordering_index, fulfillment_ordering_index, disable_active_scheduling, state, version, created_at
-		FROM ` + fulfillmentTableName + `
-		WHERE intent = $1 AND action_id = $2 AND fulfillment_type = $3
-	`
-
-	err := db.SelectContext(ctx, &res, query, intentId, actionId, fulfillmentType)
-	if err != nil {
-		return nil, pgutil.CheckNoRows(err, fulfillment.ErrFulfillmentNotFound)
-	}
-
-	if len(res) == 0 {
-		return nil, fulfillment.ErrFulfillmentNotFound
-	}
-
-	return res, nil
-}
-
 func dbGetFirstSchedulableByAddressAsSource(ctx context.Context, db *sqlx.DB, address string) (*fulfillmentModel, error) {
 	res := &fulfillmentModel{}
 
@@ -624,22 +532,6 @@ func dbGetFirstSchedulableByAddressAsDestination(ctx context.Context, db *sqlx.D
 		LIMIT 1`
 
 	err := db.GetContext(ctx, res, query, address, fulfillment.StateUnknown, fulfillment.StatePending)
-	if err != nil {
-		return nil, pgutil.CheckNoRows(err, fulfillment.ErrFulfillmentNotFound)
-	}
-	return res, nil
-}
-
-func dbGetFirstSchedulableByType(ctx context.Context, db *sqlx.DB, fulfillmentType fulfillment.Type) (*fulfillmentModel, error) {
-	res := &fulfillmentModel{}
-
-	query := `SELECT id, intent, intent_type, action_id, action_type, fulfillment_type, data, signature, nonce, blockhash, virtual_signature, virtual_nonce, virtual_blockhash, source, destination, intent_ordering_index, action_ordering_index, fulfillment_ordering_index, disable_active_scheduling, state, version, created_at
-		FROM ` + fulfillmentTableName + `
-		WHERE (fulfillment_type = $1 AND (state = $2 OR state = $3))
-		ORDER BY intent_ordering_index ASC, action_ordering_index ASC, fulfillment_ordering_index ASC
-		LIMIT 1`
-
-	err := db.GetContext(ctx, res, query, fulfillmentType, fulfillment.StateUnknown, fulfillment.StatePending)
 	if err != nil {
 		return nil, pgutil.CheckNoRows(err, fulfillment.ErrFulfillmentNotFound)
 	}

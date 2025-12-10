@@ -18,8 +18,8 @@ type Record struct {
 
 	Vm string
 
-	Name              string
-	Address           string
+	Address string
+
 	Levels            uint8
 	AvailableCapacity uint64
 	Purpose           Purpose
@@ -34,10 +34,6 @@ func (r *Record) Validate() error {
 
 	if len(r.Address) == 0 {
 		return errors.New("address is required")
-	}
-
-	if len(r.Name) == 0 {
-		return errors.New("name is required")
 	}
 
 	if r.Levels == 0 {
@@ -61,7 +57,6 @@ func (r *Record) Clone() Record {
 
 		Vm: r.Vm,
 
-		Name:              r.Name,
 		Address:           r.Address,
 		Levels:            r.Levels,
 		AvailableCapacity: r.AvailableCapacity,
@@ -76,7 +71,6 @@ func (r *Record) CopyTo(dst *Record) {
 
 	dst.Vm = r.Vm
 
-	dst.Name = r.Name
 	dst.Address = r.Address
 	dst.Levels = r.Levels
 	dst.AvailableCapacity = r.AvailableCapacity

@@ -27,7 +27,6 @@ func testHappyPath(t *testing.T, s storage.Store) {
 
 		record := &storage.Record{
 			Vm:                "vm1",
-			Name:              "name1",
 			Address:           "storageaccount1",
 			Levels:            4,
 			AvailableCapacity: storage.GetMaxCapacity(4) - 1,
@@ -83,7 +82,6 @@ func testHappyPath(t *testing.T, s storage.Store) {
 
 func assertEquivalentRecords(t *testing.T, obj1, obj2 *storage.Record) {
 	assert.Equal(t, obj1.Vm, obj2.Vm)
-	assert.Equal(t, obj1.Name, obj2.Name)
 	assert.Equal(t, obj1.Address, obj2.Address)
 	assert.Equal(t, obj1.Levels, obj2.Levels)
 	assert.Equal(t, obj1.AvailableCapacity, obj2.AvailableCapacity)

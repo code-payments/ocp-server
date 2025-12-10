@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
-	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/pointer"
 )
 
@@ -26,7 +26,6 @@ func RunTests(t *testing.T, s fulfillment.Store, teardown func()) {
 		testGetAllByState,
 		testGetAllByIntent,
 		testGetAllByAction,
-		testGetAllByTypeAndAction,
 		testGetCount,
 		testSchedulingQueries,
 		testSubsidizerQueries,
@@ -659,48 +658,6 @@ func testGetAllByAction(t *testing.T, s fulfillment.Store) {
 	})
 }
 
-func testGetAllByTypeAndAction(t *testing.T, s fulfillment.Store) {
-	t.Run("testGetAllByTypeAndAction", func(t *testing.T) {
-		ctx := context.Background()
-
-		expected := []*fulfillment.Record{
-			{Signature: pointer.String("t1"), Intent: "i1", ActionId: 0, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t2"), Intent: "i1", ActionId: 0, FulfillmentType: fulfillment.NoPrivacyWithdraw},
-			{Signature: pointer.String("t3"), Intent: "i1", ActionId: 1, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t4"), Intent: "i1", ActionId: 2, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
-			{Signature: pointer.String("t5"), Intent: "i1", ActionId: 2, FulfillmentType: fulfillment.NoPrivacyTransferWithAuthority},
-		}
-
-		// Fill in required fields that have no relevancy to this test
-		for i, record := range expected {
-			record.IntentType = intent.SendPublicPayment
-			record.ActionType = action.NoPrivacyTransfer
-			record.Data = []byte(fmt.Sprintf("d%d", i+1))
-			record.Nonce = pointer.String(fmt.Sprintf("n%d", i+1))
-			record.Blockhash = pointer.String(fmt.Sprintf("bh%d", i+1))
-			record.Source = "test_source"
-			record.Destination = pointer.String("test_destination")
-		}
-
-		err := s.PutAll(ctx, expected...)
-		require.NoError(t, err)
-
-		actual, err := s.GetAllByTypeAndAction(ctx, fulfillment.NoPrivacyTransferWithAuthority, "i1", 0)
-		require.NoError(t, err)
-		require.Len(t, actual, 1)
-		assert.Equal(t, "t1", *actual[0].Signature)
-
-		actual, err = s.GetAllByTypeAndAction(ctx, fulfillment.NoPrivacyTransferWithAuthority, "i1", 2)
-		require.NoError(t, err)
-		require.Len(t, actual, 2)
-		assert.Equal(t, "t4", *actual[0].Signature)
-		assert.Equal(t, "t5", *actual[1].Signature)
-
-		_, err = s.GetAllByTypeAndAction(ctx, fulfillment.NoPrivacyWithdraw, "i1", 2)
-		assert.Equal(t, fulfillment.ErrFulfillmentNotFound, err)
-	})
-}
-
 func testGetCount(t *testing.T, s fulfillment.Store) {
 	t.Run("testGetCount", func(t *testing.T) {
 		ctx := context.Background()
@@ -725,13 +682,8 @@ func testGetCount(t *testing.T, s fulfillment.Store) {
 			record.Blockhash = pointer.String(fmt.Sprintf("bh%d", i+1))
 		}
 
-		for index, item := range expected {
-			count, err := s.Count(ctx)
-			require.NoError(t, err)
-			assert.EqualValues(t, index, count)
-
-			err = s.PutAll(ctx, item)
-			require.NoError(t, err)
+		for _, item := range expected {
+			require.NoError(t, s.PutAll(ctx, item))
 		}
 
 		count, err := s.CountByState(ctx, fulfillment.StateConfirmed)
@@ -759,34 +711,6 @@ func testGetCount(t *testing.T, s fulfillment.Store) {
 		assert.EqualValues(t, 1, count)
 
 		count, err = s.CountByStateAndAddress(ctx, fulfillment.StateUnknown, "unknown")
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, count)
-
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
-		require.NoError(t, err)
-		assert.EqualValues(t, 1, count)
-
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "destination")
-		require.NoError(t, err)
-		assert.EqualValues(t, 3, count)
-
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StatePending, "s2")
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, count)
-
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyWithdraw, fulfillment.StateUnknown, "s2")
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, count)
-
-		count, err = s.CountByTypeStateAndAddress(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "unknown")
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, count)
-
-		count, err = s.CountByTypeStateAndAddressAsSource(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "s2")
-		require.NoError(t, err)
-		assert.EqualValues(t, 1, count)
-
-		count, err = s.CountByTypeStateAndAddressAsSource(ctx, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown, "destination")
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, count)
 
@@ -821,31 +745,6 @@ func testGetCount(t *testing.T, s fulfillment.Store) {
 		count, err = s.CountByIntent(ctx, "i0")
 		require.NoError(t, err)
 		assert.EqualValues(t, 3, count)
-
-		count, err = s.CountByTypeActionAndState(ctx, "i0", 0, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown)
-		require.NoError(t, err)
-		assert.EqualValues(t, 2, count)
-
-		count, err = s.CountByTypeActionAndState(ctx, "i0", 1, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateUnknown)
-		require.NoError(t, err)
-		assert.EqualValues(t, 1, count)
-
-		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StateRevoked)
-		require.NoError(t, err)
-		assert.EqualValues(t, 2, count)
-
-		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.NoPrivacyWithdraw, fulfillment.StateRevoked)
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, count)
-
-		count, err = s.CountByTypeActionAndState(ctx, "i2", 0, fulfillment.NoPrivacyTransferWithAuthority, fulfillment.StatePending)
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, count)
-
-		countByType, err := s.CountByStateGroupedByType(ctx, fulfillment.StateUnknown)
-		require.NoError(t, err)
-		assert.Len(t, countByType, 1)
-		assert.EqualValues(t, 3, countByType[fulfillment.NoPrivacyTransferWithAuthority])
 	})
 }
 
@@ -927,14 +826,6 @@ func testSchedulingQueries(t *testing.T, s fulfillment.Store) {
 		actual, err = s.GetFirstSchedulableByAddressAsDestination(ctx, account2)
 		require.NoError(t, err)
 		assert.Equal(t, "t000", *actual.Signature)
-
-		actual, err = s.GetFirstSchedulableByType(ctx, fulfillment.NoPrivacyTransferWithAuthority)
-		require.NoError(t, err)
-		assert.Equal(t, "t000", *actual.Signature)
-
-		actual, err = s.GetFirstSchedulableByType(ctx, fulfillment.NoPrivacyWithdraw)
-		require.NoError(t, err)
-		assert.Equal(t, "t100", *actual.Signature)
 
 		for i, record := range records {
 			for _, account := range []string{account1, account2} {

@@ -29,8 +29,8 @@ const (
 
 			vm TEXT NOT NULL,
 
-			name TEXT NOT NULL,
 			address TEXT NOT NULL,
+
 			levels INTEGER NOT NULL,
 			available_capacity BIGINT NOT NULL CHECK(available_capacity >= 0),
 			purpose INTEGER NOT NULL,
