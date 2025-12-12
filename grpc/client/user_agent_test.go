@@ -13,10 +13,10 @@ import (
 
 func TestGetUserAgent_HappyPath(t *testing.T) {
 	for _, headerValue := range []string{
-		"Code/iOS/11.22.33",
-		"Code/Android/11.22.33",
+		"OpenCodeProtocol/iOS/11.22.33",
 		"OpenCodeProtocol/Android/11.22.33",
-		"Mozilla/5.0 Code/iOS/11.22.33 Mobile Safari/533.1",
+		"OpenCodeProtocol/Android/11.22.33",
+		"Mozilla/5.0 OpenCodeProtocol/iOS/11.22.33 Mobile Safari/533.1",
 	} {
 		ctx := context.Background()
 		ctx, err := headers.ContextWithHeaders(ctx)
@@ -44,14 +44,14 @@ func TestGetUserAgent_ParseError(t *testing.T) {
 		"Mozilla/5.0 Mobile Safari/533.1",
 
 		// Unsupported device type
-		"Code/Windows/1.2.3",
+		"OpenCodeProtocol/Windows/1.2.3",
 
 		// Version components missing
-		"Code/iOS/.2.3",
-		"Code/iOS/..3",
-		"Code/iOS/..",
-		"Code/iOS/",
-		"Code/iOS",
+		"OpenCodeProtocol/iOS/.2.3",
+		"OpenCodeProtocol/iOS/..3",
+		"OpenCodeProtocol/iOS/..",
+		"OpenCodeProtocol/iOS/",
+		"OpenCodeProtocol/iOS",
 	} {
 		ctx := context.Background()
 		ctx, err := headers.ContextWithHeaders(ctx)

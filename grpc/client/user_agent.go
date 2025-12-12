@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	userAgentPattern = fmt.Sprintf("(Code|OpenCodeProtocol)/(iOS|Android)/%s", versionPattern)
+	userAgentPattern = fmt.Sprintf("OpenCodeProtocol/(iOS|Android)/%s", versionPattern)
 	userAgentRegex   = regexp.MustCompile(userAgentPattern)
 )
 
