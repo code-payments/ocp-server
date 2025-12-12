@@ -7,11 +7,11 @@ import (
 // todo: Update config once USDF is created
 
 const (
-	Mint          = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+	Mint          = "USDFmFa553nkGNSvFn2gXCnpPuWLkgre2aHmPMDyaWi"
 	QuarksPerUsdf = 1000000
 	Decimals      = 6
 )
 
 var (
-	TokenMint = ed25519.PublicKey{198, 250, 122, 243, 190, 219, 173, 58, 61, 101, 243, 106, 171, 201, 116, 49, 177, 187, 228, 194, 210, 246, 224, 228, 124, 166, 2, 3, 69, 47, 93, 97}
+	TokenMint = ed25519.PublicKey{7, 7, 48, 54, 200, 135, 41, 84, 87, 240, 35, 129, 5, 62, 49, 49, 241, 253, 42, 157, 138, 222, 175, 252, 65, 146, 180, 12, 103, 218, 59, 22}
 )

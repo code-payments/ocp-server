@@ -9,6 +9,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/usdc"
 	"github.com/code-payments/ocp-server/usdf"
 )
 
@@ -46,7 +47,7 @@ func IsCoreMint(mint *Account) bool {
 
 func IsCoreMintUsdStableCoin() bool {
 	switch CoreMintAccount.PublicKey().ToBase58() {
-	case usdf.Mint:
+	case usdf.Mint, usdc.Mint:
 		return true
 	default:
 		return false

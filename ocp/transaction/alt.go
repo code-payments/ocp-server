@@ -10,6 +10,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/system"
+	"github.com/code-payments/ocp-server/usdc"
 )
 
 // GetAltForMint gets an address lookup table to operate in a versioned
@@ -47,6 +48,7 @@ func GetAltForMint(ctx context.Context, data ocp_data.Provider, mint *common.Acc
 			common.CoreMintAccount.PublicKey().ToBytes(),
 			system.RentSysVar,
 			system.RecentBlockhashesSysVar,
+			usdc.TokenMint,
 		},
 	}, nil
 }

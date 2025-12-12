@@ -5,12 +5,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/code-payments/ocp-server/ocp/config"
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/currency/coingecko"
 	"github.com/code-payments/ocp-server/currency/fixer"
 	"github.com/code-payments/ocp-server/metrics"
+	"github.com/code-payments/ocp-server/ocp/config"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/usdc"
 	"github.com/code-payments/ocp-server/usdf"
 )
 
@@ -50,7 +51,7 @@ func (dp *WebProvider) GetCurrentExchangeRatesFromExternalProviders(ctx context.
 	var err error
 
 	switch config.CoreMintPublicKeyString {
-	case usdf.Mint:
+	case usdc.Mint, usdf.Mint:
 		coinGeckoRates[string(currency_lib.USD)] = 1.0
 	default:
 		coinGeckoData, err := dp.coinGecko.GetCurrentRates(ctx, string(config.CoreMintSymbol))
@@ -83,7 +84,7 @@ func (dp *WebProvider) GetPastExchangeRatesFromExternalProviders(ctx context.Con
 	ts := t
 	var err error
 	switch config.CoreMintPublicKeyString {
-	case usdf.Mint:
+	case usdc.Mint, usdf.Mint:
 		coinGeckoRates[string(currency_lib.USD)] = 1.0
 	default:
 		coinGeckoData, err := dp.coinGecko.GetCurrentRates(ctx, string(config.CoreMintSymbol))
@@ -116,7 +117,7 @@ func computeAllExchangeRates(coreMintRates map[string]float64, usdRates map[stri
 		return nil, errors.New("usd rate missing")
 	}
 	switch config.CoreMintPublicKeyString {
-	case usdf.Mint:
+	case usdc.Mint, usdf.Mint:
 		coreMintToUsd = 1.0
 	}
 
