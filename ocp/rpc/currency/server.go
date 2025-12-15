@@ -99,6 +99,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				ImageUrl:    config.CoreMintImageUrl,
 				VmMetadata: &currencypb.VmMetadata{
 					Vm:                 vmConfig.Vm.ToProto(),
+					Omnibus:            vmConfig.Omnibus.ToProto(),
 					Authority:          vmConfig.Authority.ToProto(),
 					LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
 				},
@@ -165,6 +166,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				ImageUrl:    metadataRecord.ImageUrl,
 				VmMetadata: &currencypb.VmMetadata{
 					Vm:                 vmConfig.Vm.ToProto(),
+					Omnibus:            vmConfig.Omnibus.ToProto(),
 					Authority:          vmConfig.Authority.ToProto(),
 					LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
 				},
