@@ -61,7 +61,7 @@ func NewInitializePoolInstruction(
 			},
 			{
 				PublicKey:  accounts.Currency,
-				IsWritable: true,
+				IsWritable: false,
 				IsSigner:   false,
 			},
 			{
