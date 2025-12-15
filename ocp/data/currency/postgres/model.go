@@ -170,7 +170,6 @@ type reserveModel struct {
 	ForTimestamp      time.Time     `db:"for_timestamp"`
 	Mint              string        `db:"mint"`
 	SupplyFromBonding uint64        `db:"supply_from_bonding"`
-	CoreMintLocked    uint64        `db:"core_mint_locked"`
 }
 
 func toReserveModel(obj *currency.ReserveRecord) (*reserveModel, error) {
@@ -184,7 +183,6 @@ func toReserveModel(obj *currency.ReserveRecord) (*reserveModel, error) {
 		ForTimestamp:      obj.Time.UTC(),
 		Mint:              obj.Mint,
 		SupplyFromBonding: obj.SupplyFromBonding,
-		CoreMintLocked:    obj.CoreMintLocked,
 	}, nil
 }
 
@@ -194,7 +192,6 @@ func fromReserveModel(obj *reserveModel) *currency.ReserveRecord {
 		Time:              obj.ForTimestamp.UTC(),
 		Mint:              obj.Mint,
 		SupplyFromBonding: obj.SupplyFromBonding,
-		CoreMintLocked:    obj.CoreMintLocked,
 	}
 }
 
@@ -280,14 +277,13 @@ func (m *reserveModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+reserveTableName+`
-			(for_date, for_timestamp, mint, supply_from_bonding, core_mint_locked)
-			VALUES ($1, $2, $3, $4, $5)
-			RETURNING id, for_date, for_timestamp, mint, supply_from_bonding, core_mint_locked`,
+			(for_date, for_timestamp, mint, supply_from_bonding)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id, for_date, for_timestamp, mint, supply_from_bonding`,
 			m.ForDate,
 			m.ForTimestamp,
 			m.Mint,
 			m.SupplyFromBonding,
-			m.CoreMintLocked,
 		).StructScan(m)
 
 		return pgutil.CheckUniqueViolation(err, currency.ErrExists)

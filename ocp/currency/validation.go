@@ -209,7 +209,6 @@ func validateCurrencyLaunchpadClientExchangeData(ctx context.Context, log *zap.L
 		log := log.With(
 			zap.String("core_mint_sell_value", coreMintSellValueInUnits.Text('f', 10)),
 			zap.String("potential_native_amount", potentialNativeAmount.Text('f', 10)),
-			zap.Uint64("found_core_mint_locked", reserveRecord.CoreMintLocked),
 			zap.String("found_usd_rate", usdRate.Text('f', 10)),
 			zap.String("found_other_rate", otherRate.Text('f', 10)),
 		)

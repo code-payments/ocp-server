@@ -178,7 +178,6 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 					MintVault:         mintVaultAccount.ToProto(),
 					CoreMintVault:     coreMintVaultAccount.ToProto(),
 					SupplyFromBonding: reserveRecord.SupplyFromBonding,
-					CoreMintLocked:    reserveRecord.CoreMintLocked,
 					SellFeeBps:        uint32(metadataRecord.SellFeeBps),
 				},
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),

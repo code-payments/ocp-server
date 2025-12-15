@@ -74,7 +74,6 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 	err1 := func() error {
 		jeffyMintAccount, _ := common.NewAccountFromPublicKeyString("todo")
 		jeffyVaultAccount, _ := common.NewAccountFromPublicKeyString("todo")
-		coreMintVaultAccount, _ := common.NewAccountFromPublicKeyString("todo")
 
 		var tokenAccount token.Account
 		ai, err := p.data.GetBlockchainAccountInfo(ctx, jeffyVaultAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
@@ -84,17 +83,9 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 		tokenAccount.Unmarshal(ai.Data)
 		jeffyVaultBalance := tokenAccount.Amount
 
-		ai, err = p.data.GetBlockchainAccountInfo(ctx, coreMintVaultAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
-		if err != nil {
-			return err
-		}
-		tokenAccount.Unmarshal(ai.Data)
-		coreMintVaultBalance := tokenAccount.Amount
-
 		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
 			Mint:              jeffyMintAccount.PublicKey().ToBase58(),
 			SupplyFromBonding: currencycreator.DefaultMintMaxQuarkSupply - jeffyVaultBalance,
-			CoreMintLocked:    coreMintVaultBalance,
 			Time:              time.Now(),
 		})
 	}()
