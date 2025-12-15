@@ -72,7 +72,6 @@ const (
 		for_timestamp TIMESTAMP WITH TIME ZONE NOT NULL, 
 		mint TEXT NOT NULL, 
 		supply_from_bonding BIGINT NOT NULL,
-		core_mint_locked BIGINT NOT NULL,
 
 		CONSTRAINT ocp__core_currencyreserve__uniq__timestamp__and__mint UNIQUE (for_timestamp, mint)
 	);

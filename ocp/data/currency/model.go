@@ -225,7 +225,6 @@ type ReserveRecord struct {
 	Id                uint64
 	Mint              string
 	SupplyFromBonding uint64
-	CoreMintLocked    uint64
 	Time              time.Time
 }
 
@@ -246,7 +245,6 @@ func (m *ReserveRecord) Clone() *ReserveRecord {
 		Id:                m.Id,
 		Mint:              m.Mint,
 		SupplyFromBonding: m.SupplyFromBonding,
-		CoreMintLocked:    m.CoreMintLocked,
 		Time:              m.Time,
 	}
 }
@@ -255,6 +253,5 @@ func (m *ReserveRecord) CopyTo(dst *ReserveRecord) {
 	dst.Id = m.Id
 	dst.Mint = m.Mint
 	dst.SupplyFromBonding = m.SupplyFromBonding
-	dst.CoreMintLocked = m.CoreMintLocked
 	dst.Time = m.Time
 }

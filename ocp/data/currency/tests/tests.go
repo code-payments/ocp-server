@@ -173,7 +173,6 @@ func testReserveRoundTrip(t *testing.T, s currency.Store) {
 	expected := &currency.ReserveRecord{
 		Mint:              "mint",
 		SupplyFromBonding: 1,
-		CoreMintLocked:    2,
 		Time:              now,
 	}
 	require.NoError(t, s.PutReserveRecord(context.Background(), expected))
@@ -184,14 +183,12 @@ func testReserveRoundTrip(t *testing.T, s currency.Store) {
 	require.NoError(t, err)
 	assert.Equal(t, now.Unix(), actual.Time.Unix())
 	assert.Equal(t, actual.SupplyFromBonding, expected.SupplyFromBonding)
-	assert.Equal(t, actual.CoreMintLocked, expected.CoreMintLocked)
 
 	actual, err = s.GetReserveAtTime(context.Background(), "mint", time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
 	require.NoError(t, err)
 
 	assert.Equal(t, now.Unix(), actual.Time.Unix())
 	assert.Equal(t, actual.SupplyFromBonding, expected.SupplyFromBonding)
-	assert.Equal(t, actual.CoreMintLocked, expected.CoreMintLocked)
 
 	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
 	actual, err = s.GetReserveAtTime(context.Background(), "mint", tomorrow)
