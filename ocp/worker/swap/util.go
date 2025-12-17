@@ -380,7 +380,7 @@ func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.
 	txn := solana.NewLegacyTransaction(
 		common.GetSubsidizer().PublicKey().ToBytes(),
 		system.AdvanceNonce(nonce.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(200_000), // todo: optimize this
+		compute_budget.SetComputeUnitLimit(50_000),
 		compute_budget.SetComputeUnitPrice(1_000),
 		memo.Instruction("cancel_swap_v0"),
 		vm.NewCancelSwapInstruction(
