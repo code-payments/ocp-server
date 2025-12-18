@@ -26,6 +26,7 @@ type FundingSource uint8
 const (
 	FundingSourceUnknown = iota
 	FundingSourceSubmitIntent
+	FundingSourceExternalWallet
 )
 
 type Record struct {
