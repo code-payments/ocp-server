@@ -228,13 +228,16 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		return err
 	}
 
-	currencyName := common.CoreMintName
-	if !common.IsCoreMint(toMint) {
-		currencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, toMint.PublicKey().ToBase58())
-		if err != nil {
-			return nil
-		}
-		currencyName = currencyMetadataRecord.Name
+	isBuy := !common.IsCoreMint(toMint)
+
+	targetMint := toMint
+	if !isBuy {
+		targetMint = fromMint
+	}
+
+	targetCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, targetMint.PublicKey().ToBase58())
+	if err != nil {
+		return nil
 	}
 
 	fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
@@ -243,10 +246,11 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 	}
 
 	valueReceived := fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
-	if !common.IsCoreMint(fromMint) {
+	if !isBuy {
 		valueReceived = 0.99 * valueReceived
 	}
-	return p.integration.OnSwapFinalized(ctx, owner, fromMint, toMint, currencyName, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, valueReceived)
+
+	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetCurrencyMetadataRecord.Name, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, valueReceived)
 }
 
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {
