@@ -291,7 +291,7 @@ func handleSubmitIntentStructuredError(streamer transactionpb.Transaction_Submit
 	return streamer.Send(errResp)
 }
 
-func handleStartSwapError(streamer transactionpb.Transaction_StartSwapServer, err error) error {
+func handleStatefulSwapError(streamer transactionpb.Transaction_StatefulSwapServer, err error) error {
 	// gRPC status errors are passed through as is
 	if _, ok := status.FromError(err); ok {
 		return err
@@ -300,24 +300,24 @@ func handleStartSwapError(streamer transactionpb.Transaction_StartSwapServer, er
 	// Case 1: Errors that map to a Code error response
 	switch err.(type) {
 	case SwapValidationError:
-		return handleStartSwapStructuredError(
+		return handleStatefulSwapStructuredError(
 			streamer,
-			transactionpb.StartSwapResponse_Error_INVALID_SWAP,
+			transactionpb.StatefulSwapResponse_Error_INVALID_SWAP,
 			toReasonStringErrorDetails(err),
 		)
 	case SwapDeniedError:
-		return handleStartSwapStructuredError(
+		return handleStatefulSwapStructuredError(
 			streamer,
-			transactionpb.StartSwapResponse_Error_DENIED,
+			transactionpb.StatefulSwapResponse_Error_DENIED,
 			toDeniedErrorDetails(err),
 		)
 	}
 
 	switch err {
 	case ErrInvalidSignature:
-		return handleStartSwapStructuredError(
+		return handleStatefulSwapStructuredError(
 			streamer,
-			transactionpb.StartSwapResponse_Error_SIGNATURE_ERROR,
+			transactionpb.StatefulSwapResponse_Error_SIGNATURE_ERROR,
 			toReasonStringErrorDetails(err),
 		)
 	case ErrNotImplemented:
@@ -336,65 +336,10 @@ func handleStartSwapError(streamer transactionpb.Transaction_StartSwapServer, er
 	return status.Error(codes.Internal, "rpc server failure")
 }
 
-func handleStartSwapStructuredError(streamer transactionpb.Transaction_StartSwapServer, code transactionpb.StartSwapResponse_Error_Code, errorDetails ...*transactionpb.ErrorDetails) error {
-	errResp := &transactionpb.StartSwapResponse{
-		Response: &transactionpb.StartSwapResponse_Error_{
-			Error: &transactionpb.StartSwapResponse_Error{
-				Code:         code,
-				ErrorDetails: errorDetails,
-			},
-		},
-	}
-	return streamer.Send(errResp)
-}
-
-func handleSwapError(streamer transactionpb.Transaction_SwapServer, err error) error {
-	// gRPC status errors are passed through as is
-	if _, ok := status.FromError(err); ok {
-		return err
-	}
-
-	// Case 1: Errors that map to a Code error response
-	switch err.(type) {
-	case SwapValidationError:
-		return handleSwapStructuredError(
-			streamer,
-			transactionpb.SwapResponse_Error_INVALID_SWAP,
-			toReasonStringErrorDetails(err),
-		)
-	case SwapDeniedError:
-		return handleSwapStructuredError(
-			streamer,
-			transactionpb.SwapResponse_Error_DENIED,
-			toDeniedErrorDetails(err),
-		)
-	}
-
-	switch err {
-	case ErrInvalidSignature:
-		return handleSwapStructuredError(
-			streamer,
-			transactionpb.SwapResponse_Error_SIGNATURE_ERROR,
-			toReasonStringErrorDetails(err),
-		)
-	case ErrNotImplemented:
-		return status.Error(codes.Unimplemented, err.Error())
-	}
-
-	// Case 2: Errors that map to gRPC status errors
-	switch err {
-	case ErrTimedOutReceivingRequest, context.DeadlineExceeded:
-		return status.Error(codes.DeadlineExceeded, err.Error())
-	case context.Canceled:
-		return status.Error(codes.Canceled, err.Error())
-	}
-	return status.Error(codes.Internal, "rpc server failure")
-}
-
-func handleSwapStructuredError(streamer transactionpb.Transaction_SwapServer, code transactionpb.SwapResponse_Error_Code, errorDetails ...*transactionpb.ErrorDetails) error {
-	errResp := &transactionpb.SwapResponse{
-		Response: &transactionpb.SwapResponse_Error_{
-			Error: &transactionpb.SwapResponse_Error{
+func handleStatefulSwapStructuredError(streamer transactionpb.Transaction_StatefulSwapServer, code transactionpb.StatefulSwapResponse_Error_Code, errorDetails ...*transactionpb.ErrorDetails) error {
+	errResp := &transactionpb.StatefulSwapResponse{
+		Response: &transactionpb.StatefulSwapResponse_Error_{
+			Error: &transactionpb.StatefulSwapResponse_Error{
 				Code:         code,
 				ErrorDetails: errorDetails,
 			},

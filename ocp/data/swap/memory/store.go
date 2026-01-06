@@ -6,9 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/database/query"
-	"github.com/code-payments/ocp-server/pointer"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
 type ById []*swap.Record
@@ -43,7 +42,6 @@ func (s *store) Save(_ context.Context, data *swap.Record) error {
 
 		data.Version++
 
-		item.TransactionSignature = pointer.StringCopy(data.TransactionSignature)
 		item.TransactionBlob = data.TransactionBlob
 		item.State = data.State
 		item.Version = data.Version

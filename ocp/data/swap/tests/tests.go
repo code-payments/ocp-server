@@ -9,9 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/database/query"
-	"github.com/code-payments/ocp-server/pointer"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
 func RunTests(t *testing.T, s swap.Store, teardown func()) {
@@ -58,7 +57,7 @@ func testRoundTrip(t *testing.T, s swap.Store) {
 
 			ProofSignature: "test_proof_signature",
 
-			TransactionSignature: pointer.String("test_transaction_signature"),
+			TransactionSignature: "test_transaction_signature",
 			TransactionBlob:      []byte("test_transaction_blob"),
 
 			State: swap.StateFinalized,
@@ -107,7 +106,7 @@ func testUpdateHappyPath(t *testing.T, s swap.Store) {
 
 			ProofSignature: "test_proof_signature",
 
-			TransactionSignature: nil,
+			TransactionSignature: "test_transaction_signature",
 			TransactionBlob:      nil,
 
 			State: swap.StateCreated,
@@ -119,7 +118,6 @@ func testUpdateHappyPath(t *testing.T, s swap.Store) {
 		assert.EqualValues(t, 1, expected.Id)
 		assert.EqualValues(t, 1, expected.Version)
 
-		expected.TransactionSignature = pointer.String("test_transaction_signature")
 		expected.TransactionBlob = []byte("transaction_blob")
 		expected.State = swap.StateFinalized
 
@@ -155,7 +153,7 @@ func testUpdateStaleRecord(t *testing.T, s swap.Store) {
 
 			ProofSignature: "test_proof_signature",
 
-			TransactionSignature: pointer.String("test_transaction_signature"),
+			TransactionSignature: "test_transaction_signature",
 			TransactionBlob:      []byte("test_transaction_blob"),
 
 			State: swap.StateFinalized,
@@ -169,7 +167,6 @@ func testUpdateStaleRecord(t *testing.T, s swap.Store) {
 
 		stale := expected.Clone()
 		expected.State = swap.StateUnknown
-		expected.TransactionSignature = nil
 		expected.TransactionBlob = nil
 		stale.Version -= 1
 
@@ -214,7 +211,7 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 
 				ProofSignature: fmt.Sprintf("test_proof_signature_%d", i),
 
-				TransactionSignature: pointer.String(fmt.Sprintf("test_transaction_signature_%d", i)),
+				TransactionSignature: fmt.Sprintf("test_transaction_signature_%d", i),
 				TransactionBlob:      []byte(fmt.Sprintf("test_transaction_blob_%d", i)),
 
 				State: swap.State(i % int(swap.StateCancelled+1)),
@@ -281,7 +278,7 @@ func testGetAllByState(t *testing.T, s swap.Store) {
 
 				ProofSignature: fmt.Sprintf("test_proof_signature_%d", i),
 
-				TransactionSignature: pointer.String(fmt.Sprintf("test_transaction_signature_%d", i)),
+				TransactionSignature: fmt.Sprintf("test_transaction_signature_%d", i),
 				TransactionBlob:      []byte(fmt.Sprintf("test_transaction_blob_%d", i)),
 
 				State: state,

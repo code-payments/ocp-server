@@ -19,12 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
-	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
-	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
-	"github.com/code-payments/ocp-server/solana/memo"
-	"github.com/code-payments/ocp-server/solana/system"
-	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func (p *runtime) validateSwapState(record *swap.Record, states ...swap.State) error {
@@ -41,6 +36,16 @@ func (p *runtime) markSwapFunded(ctx context.Context, record *swap.Record) error
 	}
 
 	record.State = swap.StateFunded
+	return p.data.SaveSwap(ctx, record)
+}
+
+func (p *runtime) markSwapSubmitting(ctx context.Context, record *swap.Record) error {
+	err := p.validateSwapState(record, swap.StateFunded)
+	if err != nil {
+		return err
+	}
+
+	record.State = swap.StateSubmitting
 	return p.data.SaveSwap(ctx, record)
 }
 
@@ -80,30 +85,9 @@ func (p *runtime) markSwapFailed(ctx context.Context, record *swap.Record) error
 	})
 }
 
-func (p *runtime) markSwapCancelling(ctx context.Context, record *swap.Record, txn *solana.Transaction) error {
-	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateFunded)
-		if err != nil {
-			return err
-		}
-
-		txnSignature := base58.Encode(txn.Signature())
-
-		err = transaction_util.UpdateNonceSignature(ctx, p.data, record.Nonce, record.ProofSignature, txnSignature)
-		if err != nil {
-			return err
-		}
-
-		record.TransactionSignature = &txnSignature
-		record.TransactionBlob = txn.Marshal()
-		record.State = swap.StateCancelling
-		return p.data.SaveSwap(ctx, record)
-	})
-}
-
 func (p *runtime) markSwapCancelled(ctx context.Context, record *swap.Record) error {
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding, swap.StateCancelling)
+		err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding)
 		if err != nil {
 			return err
 		}
@@ -111,11 +95,6 @@ func (p *runtime) markSwapCancelled(ctx context.Context, record *swap.Record) er
 		switch record.State {
 		case swap.StateCreated, swap.StateFunding:
 			err = p.markNonceAvailableDueToCancelledSwap(ctx, record)
-			if err != nil {
-				return err
-			}
-		case swap.StateCancelling:
-			err = p.markNonceReleasedDueToSubmittedTransaction(ctx, record)
 			if err != nil {
 				return err
 			}
@@ -139,7 +118,7 @@ func (p *runtime) submitTransaction(ctx context.Context, record *swap.Record) er
 		return errors.Wrap(err, "error unmarshalling transaction")
 	}
 
-	if base58.Encode(txn.Signature()) != *record.TransactionSignature {
+	if base58.Encode(txn.Signature()) != record.TransactionSignature {
 		return errors.New("unexpected transaction signature")
 	}
 
@@ -171,7 +150,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 		return 0, err
 	}
 
-	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, *record.TransactionSignature)
+	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, record.TransactionSignature)
 	if err != nil {
 		return 0, err
 	}
@@ -192,7 +171,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 	err = p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 		// For transaction history
 		intentRecord := &intent.Record{
-			IntentId:   getSwapDepositIntentID(*record.TransactionSignature, ownerDestinationTimelockVault),
+			IntentId:   getSwapDepositIntentID(record.TransactionSignature, ownerDestinationTimelockVault),
 			IntentType: intent.ExternalDeposit,
 
 			MintAccount: toMint.PublicKey().ToBase58(),
@@ -215,7 +194,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 
 		// For tracking in cached balances
 		externalDepositRecord := &deposit.Record{
-			Signature:      *record.TransactionSignature,
+			Signature:      record.TransactionSignature,
 			Destination:    ownerDestinationTimelockVault.PublicKey().ToBase58(),
 			Amount:         uint64(deltaQuarksIntoOmnibus),
 			UsdMarketValue: usdMarketValue,
@@ -231,85 +210,6 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 		return 0, err
 	}
 	return uint64(deltaQuarksIntoOmnibus), nil
-}
-
-func (p *runtime) updateBalancesForCancelledSwap(ctx context.Context, record *swap.Record) error {
-	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
-	if err != nil {
-		return err
-	}
-
-	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
-	if err != nil {
-		return err
-	}
-
-	soureVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
-	if err != nil {
-		return err
-	}
-
-	ownerSourceTimelockVault, err := owner.ToTimelockVault(soureVmConfig)
-	if err != nil {
-		return err
-	}
-
-	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, *record.TransactionSignature)
-	if err != nil {
-		return err
-	}
-
-	deltaQuarksIntoOmnibus, err := transaction_util.GetDeltaQuarksFromTokenBalances(soureVmConfig.Omnibus, tokenBalances)
-	if err != nil {
-		return err
-	}
-	if deltaQuarksIntoOmnibus <= 0 {
-		return errors.New("delta quarks into destination vm omnibus is not positive")
-	}
-
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, p.data, fromMint, uint64(deltaQuarksIntoOmnibus), time.Now())
-	if err != nil {
-		return err
-	}
-
-	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		// For transaction history
-		intentRecord := &intent.Record{
-			IntentId:   getSwapDepositIntentID(*record.TransactionSignature, ownerSourceTimelockVault),
-			IntentType: intent.ExternalDeposit,
-
-			MintAccount: fromMint.PublicKey().ToBase58(),
-
-			InitiatorOwnerAccount: owner.PublicKey().ToBase58(),
-
-			ExternalDepositMetadata: &intent.ExternalDepositMetadata{
-				DestinationTokenAccount: ownerSourceTimelockVault.PublicKey().ToBase58(),
-				Quantity:                uint64(deltaQuarksIntoOmnibus),
-				UsdMarketValue:          usdMarketValue,
-			},
-
-			State:     intent.StateConfirmed,
-			CreatedAt: time.Now(),
-		}
-		err = p.data.SaveIntent(ctx, intentRecord)
-		if err != nil {
-			return err
-		}
-
-		// For tracking in cached balances
-		externalDepositRecord := &deposit.Record{
-			Signature:      *record.TransactionSignature,
-			Destination:    ownerSourceTimelockVault.PublicKey().ToBase58(),
-			Amount:         uint64(deltaQuarksIntoOmnibus),
-			UsdMarketValue: usdMarketValue,
-
-			Slot:              tokenBalances.Slot,
-			ConfirmationState: transaction.ConfirmationFinalized,
-
-			CreatedAt: time.Now(),
-		}
-		return p.data.SaveExternalDeposit(ctx, externalDepositRecord)
-	})
 }
 
 func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Record) error {
@@ -349,93 +249,6 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 	return p.integration.OnSwapFinalized(ctx, owner, toMint, currencyName, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, amountReceived)
 }
 
-// todo: put this in transaction utility package
-func (p *runtime) makeCancellationTransaction(ctx context.Context, record *swap.Record) (*solana.Transaction, error) {
-	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
-	if err != nil {
-		return nil, err
-	}
-
-	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce, err := common.NewAccountFromPublicKeyString(record.Nonce)
-	if err != nil {
-		return nil, err
-	}
-
-	decodedBlockhash, err := base58.Decode(record.Blockhash)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceOwnerVmSwapPdaAccounts, err := owner.GetVmSwapAccounts(sourceVmConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, p.vmIndexerClient, sourceVmConfig.Vm, owner)
-	if err != nil {
-		return nil, err
-	}
-
-	txn := solana.NewLegacyTransaction(
-		common.GetSubsidizer().PublicKey().ToBytes(),
-		system.AdvanceNonce(nonce.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(50_000),
-		compute_budget.SetComputeUnitPrice(1_000),
-		memo.Instruction("cancel_swap_v0"),
-		vm.NewCancelSwapInstruction(
-			&vm.CancelSwapInstructionAccounts{
-				VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
-				Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
-				VmMemory:    memoryAccount.PublicKey().ToBytes(),
-				Swapper:     owner.PublicKey().ToBytes(),
-				SwapPda:     sourceOwnerVmSwapPdaAccounts.Pda.PublicKey().ToBytes(),
-				SwapAta:     sourceOwnerVmSwapPdaAccounts.Ata.PublicKey().ToBytes(),
-				VmOmnibus:   sourceVmConfig.Omnibus.PublicKey().ToBytes(),
-			},
-			&vm.CancelSwapInstructionArgs{
-				AccountIndex: memoryIndex,
-				Amount:       record.Amount,
-				Bump:         sourceOwnerVmSwapPdaAccounts.PdaBump,
-			},
-		),
-		vm.NewCloseSwapAccountIfEmptyInstruction(
-			&vm.CloseSwapAccountIfEmptyInstructionAccounts{
-				VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
-				Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
-				Swapper:     owner.PublicKey().ToBytes(),
-				SwapPda:     sourceOwnerVmSwapPdaAccounts.Pda.PublicKey().ToBytes(),
-				SwapAta:     sourceOwnerVmSwapPdaAccounts.Ata.PublicKey().ToBytes(),
-				Destination: common.GetSubsidizer().PublicKey().ToBytes(),
-			},
-			&vm.CloseSwapAccountIfEmptyInstructionArgs{
-				Bump: sourceOwnerVmSwapPdaAccounts.PdaBump,
-			},
-		),
-	)
-
-	txn.SetBlockhash(solana.Blockhash(decodedBlockhash))
-
-	err = txn.Sign(
-		common.GetSubsidizer().PrivateKey().ToBytes(),
-		sourceVmConfig.Authority.PrivateKey().ToBytes(),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &txn, nil
-}
-
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {
 	err := p.validateSwapState(record, swap.StateSubmitting, swap.StateCancelling)
 	if err != nil {
@@ -447,7 +260,7 @@ func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context
 		return err
 	}
 
-	if *record.TransactionSignature != nonceRecord.Signature {
+	if record.TransactionSignature != nonceRecord.Signature {
 		return errors.New("unexpected nonce signature")
 	}
 
@@ -474,7 +287,7 @@ func (p *runtime) markNonceAvailableDueToCancelledSwap(ctx context.Context, reco
 		return err
 	}
 
-	if record.ProofSignature != nonceRecord.Signature {
+	if record.TransactionSignature != nonceRecord.Signature {
 		return errors.New("unexpected nonce signature")
 	}
 
@@ -491,9 +304,51 @@ func (p *runtime) markNonceAvailableDueToCancelledSwap(ctx context.Context, reco
 	return p.data.SaveNonce(ctx, nonceRecord)
 }
 
-func (p *runtime) validateExternalWalletFundingTransaction(ctx context.Context, record *swap.Record) (bool, error) {
+func (p *runtime) validateIntentFunding(ctx context.Context, record *swap.Record) (bool, error) {
+	if record.FundingSource != swap.FundingSourceSubmitIntent {
+		return false, errors.New("invalid funding source")
+	}
+
+	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+	if err != nil {
+		return false, errors.Wrap(err, "error parsing owner")
+	}
+
+	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
+	if err != nil {
+		return false, errors.Wrap(err, "error parsing from mint")
+	}
+
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting vm config for source mint")
+	}
+
+	swapAta, err := owner.ToVmSwapAta(sourceVmConfig)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting swap ata")
+	}
+
+	intentRecord, err := p.data.GetIntent(ctx, record.FundingId)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting intent")
+	}
+
+	if intentRecord.IntentType != intent.SendPublicPayment {
+		return false, nil
+	}
+	if intentRecord.SendPublicPaymentMetadata.Quantity < record.Amount {
+		return false, nil
+	}
+	if intentRecord.SendPublicPaymentMetadata.DestinationTokenAccount != swapAta.PublicKey().ToBase58() {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (p *runtime) validateExternalWalletFunding(ctx context.Context, record *swap.Record) (bool, error) {
 	if record.FundingSource != swap.FundingSourceExternalWallet {
-		return false, errors.New("invalid funding source`")
+		return false, errors.New("invalid funding source")
 	}
 
 	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
@@ -526,10 +381,9 @@ func (p *runtime) validateExternalWalletFundingTransaction(ctx context.Context, 
 		return false, errors.Wrap(err, "error getting delta quarks from token balances")
 	}
 
-	if deltaQuarks != int64(record.Amount) {
+	if deltaQuarks < int64(record.Amount) {
 		return false, nil
 	}
-
 	return true, nil
 }
 

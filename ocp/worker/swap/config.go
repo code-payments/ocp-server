@@ -14,19 +14,15 @@ const (
 	defaultFulfillmentBatchSize = 100
 
 	ClientTimeoutToFundConfigEnvName = envConfigPrefix + "CLIENT_TIMEOUT_TO_FUND"
-	defaultClientTimeoutToFund       = 3 * time.Minute
-
-	ClientTimeoutToSwapConfigEnvName = envConfigPrefix + "CLIENT_TIMEOUT_TO_SWAP"
-	defaultClientTimeoutToSwap       = 5 * time.Minute
+	defaultClientTimeoutToFund       = 30 * time.Second
 
 	ExternalWalletFinalizationTimeoutConfigEnvName = envConfigPrefix + "EXTERNAL_WALLET_FINALIZATION_TIMEOUT"
-	defaultExternalWalletFinalizationTimeout       = 90 * time.Second
+	defaultExternalWalletFinalizationTimeout       = 30 * time.Second
 )
 
 type conf struct {
 	batchSize                         config.Uint64
 	clientTimeoutToFund               config.Duration
-	clientTimeoutToSwap               config.Duration
 	externalWalletFinalizationTimeout config.Duration
 }
 
@@ -39,7 +35,6 @@ func WithEnvConfigs() ConfigProvider {
 		return &conf{
 			batchSize:                         env.NewUint64Config(BatchSizeConfigEnvName, defaultFulfillmentBatchSize),
 			clientTimeoutToFund:               env.NewDurationConfig(ClientTimeoutToFundConfigEnvName, defaultClientTimeoutToFund),
-			clientTimeoutToSwap:               env.NewDurationConfig(ClientTimeoutToSwapConfigEnvName, defaultClientTimeoutToSwap),
 			externalWalletFinalizationTimeout: env.NewDurationConfig(ExternalWalletFinalizationTimeoutConfigEnvName, defaultExternalWalletFinalizationTimeout),
 		}
 	}
