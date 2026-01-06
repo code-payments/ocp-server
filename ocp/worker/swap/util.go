@@ -242,11 +242,11 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		return err
 	}
 
-	amountReceived := fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
+	valueReceived := fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
 	if !common.IsCoreMint(fromMint) {
-		amountReceived = 0.99 * amountReceived
+		valueReceived = 0.99 * valueReceived
 	}
-	return p.integration.OnSwapFinalized(ctx, owner, toMint, currencyName, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, amountReceived)
+	return p.integration.OnSwapFinalized(ctx, owner, fromMint, toMint, currencyName, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, valueReceived)
 }
 
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {
