@@ -318,6 +318,11 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		return err
 	}
 
+	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+	if err != nil {
+		return err
+	}
+
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return err
@@ -337,7 +342,11 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		return err
 	}
 
-	return p.integration.OnSwapFinalized(ctx, owner, toMint, currencyName, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount)
+	amountReceived := fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
+	if !common.IsCoreMint(fromMint) {
+		amountReceived = 0.99 * amountReceived
+	}
+	return p.integration.OnSwapFinalized(ctx, owner, toMint, currencyName, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, amountReceived)
 }
 
 // todo: put this in transaction utility package
