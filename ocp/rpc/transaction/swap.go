@@ -76,12 +76,19 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 		log.With(zap.Error(err)).Warn("invalid source mint account")
 		return handleStartSwapError(streamer, err)
 	}
+	log = log.With(zap.String("from_mint", fromMint.PublicKey().ToBase58()))
 
 	toMint, err := common.NewAccountFromProto(startCurrencyCreatorSwapReq.ToMint)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("invalid destination mint account")
 		return handleStartSwapError(streamer, err)
 	}
+	log = log.With(zap.String("to_mint", toMint.PublicKey().ToBase58()))
+
+	log = log.With(
+		zap.String("funding_source", startCurrencyCreatorSwapReq.FundingSource.String()),
+		zap.String("funding_id", startCurrencyCreatorSwapReq.FundingId),
+	)
 
 	//
 	// Section: Antispam
@@ -96,7 +103,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 		return handleStartSwapError(streamer, NewSwapDeniedError("not an ocp account"))
 	}
 
-	allow, err := s.antispamGuard.AllowSwap(ctx, owner, fromMint, toMint)
+	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(startCurrencyCreatorSwapReq.FundingSource), owner, fromMint, toMint)
 	if err != nil {
 		return handleStartSwapError(streamer, err)
 	} else if !allow {
@@ -111,7 +118,15 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	if err == nil {
 		return handleStartSwapError(streamer, NewSwapDeniedError("attempt to reuse swap id"))
 	} else if err != swap.ErrNotFound {
-		log.With(zap.Error(err)).Warn("failure checking for existing swap record")
+		log.With(zap.Error(err)).Warn("failure checking for existing swap record by id")
+		return handleStartSwapError(streamer, err)
+	}
+
+	_, err = s.data.GetSwapByFundingId(ctx, startCurrencyCreatorSwapReq.FundingId)
+	if err == nil {
+		return handleStartSwapError(streamer, NewSwapDeniedError("attempt to reuse swap funding id"))
+	} else if err != swap.ErrNotFound {
+		log.With(zap.Error(err)).Warn("failure checking for existing swap record by funding id")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -141,7 +156,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 
 	ownerSourceTimelockVault, err := owner.ToTimelockVault(sourceVmConfig)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner destination timelock vault")
+		log.With(zap.Error(err)).Warn("failure getting owner source timelock vault")
 		return handleStartSwapError(streamer, err)
 	}
 
@@ -151,15 +166,6 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting source timelock record")
 		return handleStartSwapError(streamer, err)
-	}
-
-	balance, err := balance.CalculateFromCache(ctx, s.data, ownerSourceTimelockVault)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner source timelock vault balance")
-		return handleStartSwapError(streamer, err)
-	}
-	if balance < startCurrencyCreatorSwapReq.Amount {
-		return handleStartSwapError(streamer, NewSwapValidationError("insufficient balance"))
 	}
 
 	ownerDestinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
@@ -176,12 +182,47 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 		return handleStartSwapError(streamer, err)
 	}
 
-	_, err = s.data.GetIntent(ctx, startCurrencyCreatorSwapReq.FundingId)
-	if err == nil {
-		return handleStartSwapError(streamer, NewSwapValidationError("funding intent already exists"))
-	} else if err != intent.ErrIntentNotFound {
-		log.With(zap.Error(err)).Warn("failure getting funding intent record")
-		return handleStartSwapError(streamer, err)
+	switch startCurrencyCreatorSwapReq.FundingSource {
+	case transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT:
+		decodedFundingId, err := base58.Decode(startCurrencyCreatorSwapReq.FundingId)
+		if err != nil || len(decodedFundingId) != ed25519.PublicKeySize {
+			log.With(zap.Error(err)).Warn("invalid funding id")
+			return handleStartSwapError(streamer, NewSwapValidationError("funding id is not a public key"))
+		}
+
+		_, err = s.data.GetIntent(ctx, startCurrencyCreatorSwapReq.FundingId)
+		if err == nil {
+			return handleStartSwapError(streamer, NewSwapValidationError("funding intent already exists"))
+		} else if err != intent.ErrIntentNotFound {
+			log.With(zap.Error(err)).Warn("failure getting funding intent record")
+			return handleStartSwapError(streamer, err)
+		}
+
+		balance, err := balance.CalculateFromCache(ctx, s.data, ownerSourceTimelockVault)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting owner source timelock vault balance")
+			return handleStartSwapError(streamer, err)
+		}
+		if balance < startCurrencyCreatorSwapReq.Amount {
+			return handleStartSwapError(streamer, NewSwapValidationError("insufficient balance"))
+		}
+	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
+		decodedFundingId, err := base58.Decode(startCurrencyCreatorSwapReq.FundingId)
+		if err != nil || len(decodedFundingId) != ed25519.SignatureSize {
+			log.With(zap.Error(err)).Warn("invalid funding id")
+			return handleStartSwapError(streamer, NewSwapValidationError("funding id is not a signature"))
+		}
+
+		_, err = s.data.GetTransaction(ctx, startCurrencyCreatorSwapReq.FundingId)
+		if err == nil {
+			// Current flows expect that client will call StartSwap before submitting the transaction
+			return handleStartSwapError(streamer, NewSwapValidationError("funding transaction already exists"))
+		} else if err != solana.ErrSignatureNotFound {
+			log.With(zap.Error(err)).Warn("failure getting funding transaction")
+			return handleStartSwapError(streamer, err)
+		}
+	default:
+		return handleStartSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", startCurrencyCreatorSwapReq.FundingSource))
 	}
 
 	//
@@ -256,6 +297,16 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 	// Section: Swap state DB commit
 	//
 
+	var initialState swap.State
+	switch startCurrencyCreatorSwapReq.FundingSource {
+	case transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT:
+		initialState = swap.StateCreated
+	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
+		initialState = swap.StateFunding
+	default:
+		return handleStartSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", startCurrencyCreatorSwapReq.FundingSource))
+	}
+
 	record := &swap.Record{
 		SwapId:               swapId,
 		Owner:                owner.PublicKey().ToBase58(),
@@ -269,7 +320,7 @@ func (s *transactionServer) StartSwap(streamer transactionpb.Transaction_StartSw
 		ProofSignature:       base58.Encode(submitSignatureReq.Signature.Value),
 		TransactionSignature: nil,
 		TransactionBlob:      nil,
-		State:                swap.StateCreated,
+		State:                initialState,
 		CreatedAt:            time.Now(),
 	}
 

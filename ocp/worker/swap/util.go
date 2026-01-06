@@ -103,13 +103,13 @@ func (p *runtime) markSwapCancelling(ctx context.Context, record *swap.Record, t
 
 func (p *runtime) markSwapCancelled(ctx context.Context, record *swap.Record) error {
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateCreated, swap.StateCancelling)
+		err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding, swap.StateCancelling)
 		if err != nil {
 			return err
 		}
 
 		switch record.State {
-		case swap.StateCreated:
+		case swap.StateCreated, swap.StateFunding:
 			err = p.markNonceAvailableDueToCancelledSwap(ctx, record)
 			if err != nil {
 				return err
@@ -480,6 +480,48 @@ func (p *runtime) markNonceAvailableDueToCancelledSwap(ctx context.Context, reco
 	nonceRecord.State = nonce.StateAvailable
 	nonceRecord.Signature = ""
 	return p.data.SaveNonce(ctx, nonceRecord)
+}
+
+func (p *runtime) validateExternalWalletFundingTransaction(ctx context.Context, record *swap.Record) (bool, error) {
+	if record.FundingSource != swap.FundingSourceExternalWallet {
+		return false, errors.New("invalid funding source`")
+	}
+
+	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+	if err != nil {
+		return false, errors.Wrap(err, "error parsing owner")
+	}
+
+	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
+	if err != nil {
+		return false, errors.Wrap(err, "error parsing from mint")
+	}
+
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting vm config for source mint")
+	}
+
+	swapAta, err := owner.ToVmSwapAta(sourceVmConfig)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting swap ata")
+	}
+
+	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, record.FundingId)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting token balances")
+	}
+
+	deltaQuarks, err := transaction_util.GetDeltaQuarksFromTokenBalances(swapAta, tokenBalances)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting delta quarks from token balances")
+	}
+
+	if deltaQuarks != int64(record.Amount) {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func getSwapDepositIntentID(signature string, destination *common.Account) string {

@@ -6,6 +6,7 @@ import (
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
 // Integration is an antispam guard integration that apps can implement to check
@@ -21,7 +22,7 @@ type Integration interface {
 
 	AllowDistribution(ctx context.Context, owner *common.Account, isPublic bool) (bool, string, error)
 
-	AllowSwap(ctx context.Context, owner, fromMint, toMint *common.Account) (bool, string, error)
+	AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account) (bool, string, error)
 }
 
 type allowEverythingIntegration struct {
@@ -52,6 +53,6 @@ func (i *allowEverythingIntegration) AllowDistribution(ctx context.Context, owne
 	return true, "", nil
 }
 
-func (i *allowEverythingIntegration) AllowSwap(ctx context.Context, owner, fromMint, toMint *common.Account) (bool, string, error) {
+func (i *allowEverythingIntegration) AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account) (bool, string, error) {
 	return true, "", nil
 }

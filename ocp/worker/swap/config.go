@@ -18,12 +18,16 @@ const (
 
 	ClientTimeoutToSwapConfigEnvName = envConfigPrefix + "CLIENT_TIMEOUT_TO_SWAP"
 	defaultClientTimeoutToSwap       = 5 * time.Minute
+
+	ExternalWalletFinalizationTimeoutConfigEnvName = envConfigPrefix + "EXTERNAL_WALLET_FINALIZATION_TIMEOUT"
+	defaultExternalWalletFinalizationTimeout       = 90 * time.Second
 )
 
 type conf struct {
-	batchSize           config.Uint64
-	clientTimeoutToFund config.Duration
-	clientTimeoutToSwap config.Duration
+	batchSize                         config.Uint64
+	clientTimeoutToFund               config.Duration
+	clientTimeoutToSwap               config.Duration
+	externalWalletFinalizationTimeout config.Duration
 }
 
 // ConfigProvider defines how config values are pulled
@@ -33,9 +37,10 @@ type ConfigProvider func() *conf
 func WithEnvConfigs() ConfigProvider {
 	return func() *conf {
 		return &conf{
-			batchSize:           env.NewUint64Config(BatchSizeConfigEnvName, defaultFulfillmentBatchSize),
-			clientTimeoutToFund: env.NewDurationConfig(ClientTimeoutToFundConfigEnvName, defaultClientTimeoutToFund),
-			clientTimeoutToSwap: env.NewDurationConfig(ClientTimeoutToSwapConfigEnvName, defaultClientTimeoutToSwap),
+			batchSize:                         env.NewUint64Config(BatchSizeConfigEnvName, defaultFulfillmentBatchSize),
+			clientTimeoutToFund:               env.NewDurationConfig(ClientTimeoutToFundConfigEnvName, defaultClientTimeoutToFund),
+			clientTimeoutToSwap:               env.NewDurationConfig(ClientTimeoutToSwapConfigEnvName, defaultClientTimeoutToSwap),
+			externalWalletFinalizationTimeout: env.NewDurationConfig(ExternalWalletFinalizationTimeoutConfigEnvName, defaultExternalWalletFinalizationTimeout),
 		}
 	}
 }
