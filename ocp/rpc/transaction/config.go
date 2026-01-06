@@ -19,13 +19,13 @@ const (
 	defaultDisableSwaps       = false
 
 	SubmitIntentTimeoutConfigEnvName = envConfigPrefix + "SUBMIT_INTENT_TIMEOUT"
-	defaultSubmitIntentTimeout       = 5 * time.Second
+	defaultSubmitIntentTimeout       = 15 * time.Second
 
 	SwapTimeoutConfigEnvName = envConfigPrefix + "SWAP_TIMEOUT"
-	defaultSwapTimeout       = 120 * time.Second
+	defaultSwapTimeout       = time.Minute
 
 	ClientReceiveTimeoutConfigEnvName = envConfigPrefix + "CLIENT_RECEIVE_TIMEOUT"
-	defaultClientReceiveTimeout       = time.Second
+	defaultClientReceiveTimeout       = 2 * time.Second
 
 	FeeCollectorOwnerPublicKeyConfigEnvName = envConfigPrefix + "FEE_COLLECTOR_OWNER_PUBLIC_KEY"
 	defaultFeeCollectorPublicKey            = "invalid" // Ensure something valid is set

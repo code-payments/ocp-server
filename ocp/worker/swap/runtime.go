@@ -39,7 +39,6 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		swap.StateFunding,
 		swap.StateFunded,
 		swap.StateSubmitting,
-		swap.StateCancelling,
 	} {
 		go func(state swap.State) {
 

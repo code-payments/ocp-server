@@ -87,8 +87,6 @@ func (p *runtime) handle(ctx context.Context, record *swap.Record) error {
 		err = p.handleStateFunded(ctx, record)
 	case swap.StateSubmitting:
 		err = p.handleStateSubmitting(ctx, record)
-	case swap.StateCancelling:
-		err = p.handleStateCancelling(ctx, record)
 	}
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure processing swap")
@@ -128,7 +126,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 		case intent.StateConfirmed:
 			return p.markSwapFunded(ctx, record)
 		case intent.StateFailed:
-			// todo: Should never happen, but maybe cancel the swap?
+			// todo: Recovery flow to put back source funds into the source VM
 			return errors.New("funding intent failed")
 		default:
 			return nil
@@ -145,16 +143,6 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 			if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
 				return p.markSwapCancelled(ctx, record)
 			}
-
-			// Validate the funding transaction deposited exactly the expected amount
-			// into the user's swap ATA
-			valid, err := p.validateExternalWalletFundingTransaction(ctx, record)
-			if err != nil {
-				return errors.Wrap(err, "error validating external wallet funding transaction")
-			} else if !valid {
-				return p.markSwapCancelled(ctx, record)
-			}
-
 			return p.markSwapFunded(ctx, record)
 		}
 
@@ -166,7 +154,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 
 		return nil
 	default:
-		return errors.New("unknown funding source")
+		return errors.New("unsupported funding source")
 	}
 }
 
@@ -175,34 +163,28 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 		return err
 	}
 
-	// Determine the starting point for the timeout based on the funding source
-	var fundedAt time.Time
+	var isValid bool
+	var err error
 	switch record.FundingSource {
 	case swap.FundingSourceSubmitIntent:
-		intentRecord, err := p.data.GetIntent(ctx, record.FundingId)
+		isValid, err = p.validateIntentFunding(ctx, record)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "error validating intent funding")
 		}
-		fundedAt = intentRecord.CreatedAt
 	case swap.FundingSourceExternalWallet:
-		fundedAt = record.CreatedAt
-	default:
-		return errors.New("unknown funding source")
-	}
-
-	// Cancel the swap if the client hasn't signed the swap transaction within a
-	// reasonable amount of time. The funds for the swap will be deposited back
-	// into the source VM.
-	if time.Since(fundedAt) > p.conf.clientTimeoutToSwap.Get(ctx) {
-		txn, err := p.makeCancellationTransaction(ctx, record)
+		isValid, err = p.validateExternalWalletFunding(ctx, record)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "error validating external wallet funding")
 		}
-
-		return p.markSwapCancelling(ctx, record, txn)
+	default:
+		return errors.New("unsupported funding source")
 	}
 
-	return nil
+	if !isValid {
+		// todo: Return funds if the amount was wrong
+		return p.markSwapCancelled(ctx, record)
+	}
+	return p.markSwapSubmitting(ctx, record)
 }
 
 func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record) error {
@@ -212,7 +194,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 
 	// Monitor for a finalized swap transaction
 
-	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, *record.TransactionSignature, solana.CommitmentFinalized)
+	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature, solana.CommitmentFinalized)
 	if err != nil && err != solana.ErrSignatureNotFound {
 		return errors.Wrap(err, "error getting finalized transaction")
 	}
@@ -237,37 +219,6 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 			go p.notifySwapFinalized(ctx, record)
 
 			return nil
-		}
-	}
-
-	// Otherwise, continually retry submitting the transaction
-
-	return p.submitTransaction(ctx, record)
-}
-
-func (p *runtime) handleStateCancelling(ctx context.Context, record *swap.Record) error {
-	if err := p.validateSwapState(record, swap.StateCancelling); err != nil {
-		return err
-	}
-
-	// Monitor for a finalized cancellation transaction
-
-	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, *record.TransactionSignature, solana.CommitmentFinalized)
-	if err != nil && err != solana.ErrSignatureNotFound {
-		return errors.Wrap(err, "error getting finalized transaction")
-	}
-
-	if finalizedTxn != nil {
-		if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
-			// todo: Try again?
-			return p.markSwapCancelled(ctx, record)
-		} else {
-			err = p.updateBalancesForCancelledSwap(ctx, record)
-			if err != nil {
-				return errors.Wrap(err, "error updating balances")
-			}
-
-			return p.markSwapCancelled(ctx, record)
 		}
 	}
 

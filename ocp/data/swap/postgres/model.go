@@ -7,10 +7,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/code-payments/ocp-server/ocp/data/swap"
 	pgutil "github.com/code-payments/ocp-server/database/postgres"
 	q "github.com/code-payments/ocp-server/database/query"
-	"github.com/code-payments/ocp-server/pointer"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
 const (
@@ -18,22 +17,22 @@ const (
 )
 
 type model struct {
-	Id                   sql.NullInt64  `db:"id"`
-	SwapId               string         `db:"swap_id"`
-	Owner                string         `db:"owner"`
-	FromMint             string         `db:"from_mint"`
-	ToMint               string         `db:"to_mint"`
-	Amount               uint64         `db:"amount"`
-	FundingId            string         `db:"funding_id"`
-	FundingSource        uint8          `db:"funding_source"`
-	Nonce                string         `db:"nonce"`
-	Blockhash            string         `db:"blockhash"`
-	ProofSignature       string         `db:"proof_signature"`
-	TransactionSignature sql.NullString `db:"transaction_signature"`
-	TransactionBlob      []byte         `db:"transaction_blob"`
-	State                uint8          `db:"state"`
-	Version              uint64         `db:"version"`
-	CreatedAt            time.Time      `db:"created_at"`
+	Id                   sql.NullInt64 `db:"id"`
+	SwapId               string        `db:"swap_id"`
+	Owner                string        `db:"owner"`
+	FromMint             string        `db:"from_mint"`
+	ToMint               string        `db:"to_mint"`
+	Amount               uint64        `db:"amount"`
+	FundingId            string        `db:"funding_id"`
+	FundingSource        uint8         `db:"funding_source"`
+	Nonce                string        `db:"nonce"`
+	Blockhash            string        `db:"blockhash"`
+	ProofSignature       string        `db:"proof_signature"`
+	TransactionSignature string        `db:"transaction_signature"`
+	TransactionBlob      []byte        `db:"transaction_blob"`
+	State                uint8         `db:"state"`
+	Version              uint64        `db:"version"`
+	CreatedAt            time.Time     `db:"created_at"`
 }
 
 func toModel(obj *swap.Record) (*model, error) {
@@ -57,7 +56,7 @@ func toModel(obj *swap.Record) (*model, error) {
 		Nonce:                obj.Nonce,
 		Blockhash:            obj.Blockhash,
 		ProofSignature:       obj.ProofSignature,
-		TransactionSignature: sql.NullString{String: *pointer.StringOrDefault(obj.TransactionSignature, ""), Valid: obj.TransactionSignature != nil},
+		TransactionSignature: obj.TransactionSignature,
 		TransactionBlob:      obj.TransactionBlob,
 		State:                uint8(obj.State),
 		Version:              obj.Version,
@@ -78,7 +77,7 @@ func fromModel(m *model) *swap.Record {
 		Nonce:                m.Nonce,
 		Blockhash:            m.Blockhash,
 		ProofSignature:       m.ProofSignature,
-		TransactionSignature: pointer.StringIfValid(m.TransactionSignature.Valid, m.TransactionSignature.String),
+		TransactionSignature: m.TransactionSignature,
 		TransactionBlob:      m.TransactionBlob,
 		State:                swap.State(m.State),
 		Version:              m.Version,
@@ -94,7 +93,7 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 
 			ON CONFLICT (swap_id)
 			DO UPDATE
-				SET transaction_signature = $11, transaction_blob = $12, state = $13, version = ` + tableName + `.version + 1
+				SET transaction_blob = $12, state = $13, version = ` + tableName + `.version + 1
 				WHERE ` + tableName + `.swap_id = $1 AND ` + tableName + `.version = $14
 
 			RETURNING

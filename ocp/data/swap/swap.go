@@ -3,8 +3,6 @@ package swap
 import (
 	"errors"
 	"time"
-
-	"github.com/code-payments/ocp-server/pointer"
 )
 
 type State uint8
@@ -48,7 +46,7 @@ type Record struct {
 
 	ProofSignature string
 
-	TransactionSignature *string
+	TransactionSignature string
 	TransactionBlob      []byte
 
 	State State
@@ -78,7 +76,7 @@ func (r *Record) Clone() Record {
 
 		ProofSignature: r.ProofSignature,
 
-		TransactionSignature: pointer.StringCopy(r.TransactionSignature),
+		TransactionSignature: r.TransactionSignature,
 		TransactionBlob:      r.TransactionBlob,
 
 		State: r.State,
@@ -108,7 +106,7 @@ func (r *Record) CopyTo(dst *Record) {
 
 	dst.ProofSignature = r.ProofSignature
 
-	dst.TransactionSignature = pointer.StringCopy(r.TransactionSignature)
+	dst.TransactionSignature = r.TransactionSignature
 	dst.TransactionBlob = r.TransactionBlob
 
 	dst.State = r.State
@@ -159,12 +157,8 @@ func (r *Record) Validate() error {
 		return errors.New("proof signature is required")
 	}
 
-	if r.TransactionSignature != nil && len(*r.TransactionSignature) == 0 {
+	if len(r.TransactionSignature) == 0 {
 		return errors.New("transaction signature is empty")
-	}
-
-	if len(r.TransactionBlob) != 0 && r.TransactionSignature == nil {
-		return errors.New("transaction signature is missing")
 	}
 
 	return nil
