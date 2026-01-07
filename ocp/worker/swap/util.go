@@ -246,7 +246,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 	}
 
 	valueReceived := fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
-	if !isBuy {
+	if !common.IsCoreMint(fromMint) {
 		valueReceived = 0.99 * valueReceived
 	}
 
