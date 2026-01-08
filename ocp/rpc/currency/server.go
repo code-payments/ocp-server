@@ -13,12 +13,15 @@ import (
 
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 
+	currency_lib "github.com/code-payments/ocp-server/currency"
+	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 )
 
@@ -203,4 +206,172 @@ func (s *currencyServer) LoadExchangeRatesLatest(ctx context.Context) (*currency
 		return nil, errors.Wrap(err, "failed to get latest price record")
 	}
 	return latest, nil
+}
+
+func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currencypb.GetHistoricalMintDataRequest) (*currencypb.GetHistoricalMintDataResponse, error) {
+	log := s.log.With(zap.String("method", "GetHistoricalMintData"))
+	log = client.InjectLoggingMetadata(ctx, log)
+
+	mintAccount, err := common.NewAccountFromProto(req.Address)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid mint address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	log = log.With(
+		zap.String("mint", mintAccount.PublicKey().ToBase58()),
+		zap.String("range", req.GetPredefinedRange().String()),
+	)
+
+	// Only support currency creator mints, not the core mint
+	if common.IsCoreMint(mintAccount) {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_NOT_FOUND,
+		}, nil
+	}
+
+	// Verify the mint exists as a currency creator mint
+	_, err = s.data.GetCurrencyMetadata(ctx, mintAccount.PublicKey().ToBase58())
+	if err == currency.ErrNotFound {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_NOT_FOUND,
+		}, nil
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failed to load currency metadata")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	// Determine the time range and interval based on the predefined range
+	startTime, endTime, interval := getTimeRangeForPredefinedRange(req.GetPredefinedRange())
+
+	// Get currency code
+	currencyCode := currency_lib.Code(strings.ToLower(req.CurrencyCode))
+	if currencyCode == "" {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_NOT_FOUND,
+		}, nil
+	}
+
+	// Get reserve history for the mint within the time range
+	reserveHistory, err := s.data.GetCurrencyReserveHistory(
+		ctx,
+		mintAccount.PublicKey().ToBase58(),
+		query.WithStartTime(startTime),
+		query.WithEndTime(endTime),
+		query.WithInterval(interval),
+		query.WithDirection(query.Ascending),
+	)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to load currency reserve history")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	if len(reserveHistory) == 0 {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
+		}, nil
+	}
+
+	// Get exchange rate history for the same time range
+	exchangeRateHistory, err := s.data.GetExchangeRateHistory(
+		ctx,
+		currencyCode,
+		query.WithStartTime(startTime),
+		query.WithEndTime(endTime),
+		query.WithInterval(interval),
+		query.WithDirection(query.Ascending),
+	)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to load exchange rate history")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	if len(exchangeRateHistory) == 0 {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
+		}, nil
+	}
+
+	// Build historical data points with market cap
+	data := make([]*currencypb.HistoricalMintData, 0, len(reserveHistory))
+	for _, reserve := range reserveHistory {
+		// Find the closest exchange rate for this time point
+		exchangeRate, ok := findClosestExchangeRate(reserve.Time, exchangeRateHistory)
+		if !ok {
+			continue
+		}
+
+		data = append(data, &currencypb.HistoricalMintData{
+			Timestamp: timestamppb.New(reserve.Time),
+			MarketCap: calculateMarketCap(reserve.SupplyFromBonding, exchangeRate),
+		})
+	}
+
+	if len(data) == 0 {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
+		}, nil
+	}
+
+	return &currencypb.GetHistoricalMintDataResponse{
+		Result: currencypb.GetHistoricalMintDataResponse_OK,
+		Data:   data,
+	}, nil
+}
+
+// findClosestExchangeRate finds the exchange rate closest to the given time.
+func findClosestExchangeRate(t time.Time, history []*currency.ExchangeRateRecord) (float64, bool) {
+	// Find the closest preceding exchange rate
+	var closestRate float64
+	var found bool
+	for _, record := range history {
+		if record.Time.After(t) {
+			break
+		}
+		closestRate = record.Rate
+		found = true
+	}
+
+	return closestRate, found
+}
+
+// calculateMarketCap calculates the market cap for a currency creator mint.
+// Market cap = price per token × circulating supply.
+func calculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 {
+	// Calculate the spot price per token using the bonding curve
+	// This returns the price in core mint tokens per currency creator token
+	spotPrice := currencycreator.EstimateCurrentPrice(supplyFromBonding)
+	spotPriceFloat, _ := spotPrice.Float64()
+
+	// Convert spot price to the requested currency
+	// spotPriceFloat is in core mint tokens, exchangeRate is currency per core mint token
+	pricePerToken := spotPriceFloat * exchangeRate
+
+	// Calculate circulating supply in token units (not quarks)
+	circulatingSupply := float64(supplyFromBonding) / float64(currencycreator.DefaultMintQuarksPerUnit)
+
+	// Market cap = price per token × circulating supply
+	return pricePerToken * circulatingSupply
+}
+
+// getTimeRangeForPredefinedRange returns the start time and appropriate interval
+// for the given predefined range.
+func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange) (time.Time, time.Time, query.Interval) {
+	now := time.Now()
+
+	switch predefinedRange {
+	case currencypb.GetHistoricalMintDataRequest_LAST_DAY:
+		return now.Add(-24 * time.Hour), now, query.IntervalMinute
+	case currencypb.GetHistoricalMintDataRequest_LAST_WEEK:
+		return now.Add(-7 * 24 * time.Hour), now, query.IntervalHour
+	case currencypb.GetHistoricalMintDataRequest_LAST_MONTH:
+		return now.Add(-30 * 24 * time.Hour), now, query.IntervalHour
+	case currencypb.GetHistoricalMintDataRequest_LAST_YEAR:
+		return now.Add(-365 * 24 * time.Hour), now, query.IntervalDay
+	case currencypb.GetHistoricalMintDataRequest_ALL_TIME:
+		fallthrough
+	default:
+		// For all time, go back 100 years with daily intervals
+		return now.Add(-100 * 365 * 24 * time.Hour), now, query.IntervalDay
+	}
 }
