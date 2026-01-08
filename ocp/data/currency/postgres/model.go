@@ -361,3 +361,20 @@ func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t 
 	)
 	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
 }
+
+func dbGetAllReservesForRange(ctx context.Context, db *sqlx.DB, mint string, interval q.Interval, start time.Time, end time.Time, ordering q.Ordering) ([]*reserveModel, error) {
+	res := []*reserveModel{}
+	err := db.SelectContext(ctx, &res,
+		makeTimeBasedRangeQuery(reserveTableName, "mint = $1 AND for_timestamp >= $2 AND for_timestamp <= $3", ordering, interval),
+		mint, start.UTC(), end.UTC(),
+	)
+
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)
+	}
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	return res, nil
+}

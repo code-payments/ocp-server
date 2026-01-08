@@ -58,4 +58,13 @@ type Store interface {
 	//
 	// ErrNotFound is returned if no reserve data was found for the provided Timestamp.
 	GetReserveAtTime(ctx context.Context, mint string, t time.Time) (*ReserveRecord, error)
+
+	// GetReservesInRange gets the reserve records for a range of time given a currency
+	// creator mint and interval. The start and end timestamps are provided along with
+	// the interval.
+	//
+	// ErrNotFound is returned if the mint or the reserves for the mint cannot be found
+	// ErrInvalidRange is returned if the range is not valid
+	// ErrInvalidInterval is returned if the interval is not valid
+	GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*ReserveRecord, error)
 }

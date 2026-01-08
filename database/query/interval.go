@@ -8,6 +8,8 @@ type Interval uint8
 
 const (
 	IntervalRaw Interval = iota
+	IntervalSecond
+	IntervalMinute
 	IntervalHour
 	IntervalDay
 	IntervalWeek
@@ -16,6 +18,8 @@ const (
 
 var AllIntervals = []Interval{
 	IntervalRaw,
+	IntervalSecond,
+	IntervalMinute,
 	IntervalHour,
 	IntervalDay,
 	IntervalWeek,
@@ -26,6 +30,10 @@ func ToInterval(val string) (Interval, error) {
 	switch val {
 	case "raw":
 		return IntervalRaw, nil
+	case "second":
+		return IntervalSecond, nil
+	case "minute":
+		return IntervalMinute, nil
 	case "hour":
 		return IntervalHour, nil
 	case "day":
@@ -43,6 +51,10 @@ func FromInterval(val Interval) (string, error) {
 	switch val {
 	case IntervalRaw:
 		return "raw", nil
+	case IntervalSecond:
+		return "second", nil
+	case IntervalMinute:
+		return "minute", nil
 	case IntervalHour:
 		return "hour", nil
 	case IntervalDay:
