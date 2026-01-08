@@ -357,7 +357,7 @@ func calculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 
 // getTimeRangeForPredefinedRange returns the start time and appropriate interval
 // for the given predefined range.
 func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange) (time.Time, time.Time, query.Interval) {
-	now := time.Now()
+	now := currency_util.GetLatestExchangeRateTime()
 
 	switch predefinedRange {
 	case currencypb.GetHistoricalMintDataRequest_LAST_DAY:
