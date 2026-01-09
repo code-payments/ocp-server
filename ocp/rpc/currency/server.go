@@ -2,17 +2,19 @@ package currency
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
+	"github.com/pkg/errors"
 
+	"github.com/code-payments/ocp-server/cache"
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/grpc/client"
@@ -29,6 +31,9 @@ type currencyServer struct {
 	log  *zap.Logger
 	data ocp_data.Provider
 
+	exchangeRateHistoryCache cache.Cache
+	reserveHistoryCache      cache.Cache
+
 	currencypb.UnimplementedCurrencyServer
 }
 
@@ -39,6 +44,9 @@ func NewCurrencyServer(
 	return &currencyServer{
 		log:  log,
 		data: data,
+
+		exchangeRateHistoryCache: cache.NewCache(1_000),
+		reserveHistoryCache:      cache.NewCache(1_000),
 	}
 }
 
@@ -48,9 +56,9 @@ func (s *currencyServer) GetAllRates(ctx context.Context, req *currencypb.GetAll
 
 	var record *currency.MultiRateRecord
 	if req.Timestamp != nil && req.Timestamp.AsTime().Before(time.Now().Add(-15*time.Minute)) {
-		record, err = s.LoadExchangeRatesForTime(ctx, req.Timestamp.AsTime())
+		record, err = s.loadExchangeRatesForTime(ctx, req.Timestamp.AsTime())
 	} else if req.Timestamp == nil || req.Timestamp.AsTime().Sub(time.Now()) < time.Hour {
-		record, err = s.LoadExchangeRatesLatest(ctx)
+		record, err = s.loadExchangeRatesLatest(ctx)
 	} else {
 		return nil, status.Error(codes.InvalidArgument, "timestamp too far in the future")
 	}
@@ -192,22 +200,6 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 	return resp, nil
 }
 
-func (s *currencyServer) LoadExchangeRatesForTime(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error) {
-	record, err := s.data.GetAllExchangeRates(ctx, t)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get price record by date")
-	}
-	return record, nil
-}
-
-func (s *currencyServer) LoadExchangeRatesLatest(ctx context.Context) (*currency.MultiRateRecord, error) {
-	latest, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get latest price record")
-	}
-	return latest, nil
-}
-
 func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currencypb.GetHistoricalMintDataRequest) (*currencypb.GetHistoricalMintDataResponse, error) {
 	log := s.log.With(zap.String("method", "GetHistoricalMintData"))
 	log = client.InjectLoggingMetadata(ctx, log)
@@ -230,6 +222,14 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		}, nil
 	}
 
+	// Get currency code
+	currencyCode := currency_lib.Code(strings.ToLower(req.CurrencyCode))
+	if currencyCode == "" {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_NOT_FOUND,
+		}, nil
+	}
+
 	// Verify the mint exists as a currency creator mint
 	_, err = s.data.GetCurrencyMetadata(ctx, mintAccount.PublicKey().ToBase58())
 	if err == currency.ErrNotFound {
@@ -241,25 +241,19 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		return nil, status.Error(codes.Internal, "")
 	}
 
-	// Determine the time range and interval based on the predefined range
+	// Determine the time range and interval based on the predefined range.
+	// endTime is GetLatestExchangeRateTime() which is used in cache keys to
+	// invalidate entries when new market data is generated (every 15 minutes).
 	startTime, endTime, interval := getTimeRangeForPredefinedRange(req.GetPredefinedRange())
 
-	// Get currency code
-	currencyCode := currency_lib.Code(strings.ToLower(req.CurrencyCode))
-	if currencyCode == "" {
-		return &currencypb.GetHistoricalMintDataResponse{
-			Result: currencypb.GetHistoricalMintDataResponse_NOT_FOUND,
-		}, nil
-	}
-
-	// Get reserve history for the mint within the time range
-	reserveHistory, err := s.data.GetCurrencyReserveHistory(
+	// Get reserve history (cached by mint + range)
+	reserveHistory, err := s.getCachedReserveHistory(
 		ctx,
 		mintAccount.PublicKey().ToBase58(),
-		query.WithStartTime(startTime),
-		query.WithEndTime(endTime),
-		query.WithInterval(interval),
-		query.WithDirection(query.Ascending),
+		req.GetPredefinedRange(),
+		startTime,
+		endTime,
+		interval,
 	)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load currency reserve history")
@@ -272,14 +266,14 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		}, nil
 	}
 
-	// Get exchange rate history for the same time range
-	exchangeRateHistory, err := s.data.GetExchangeRateHistory(
+	// Get exchange rate history (cached by currency code + range)
+	exchangeRateHistory, err := s.getCachedExchangeRateHistory(
 		ctx,
 		currencyCode,
-		query.WithStartTime(startTime),
-		query.WithEndTime(endTime),
-		query.WithInterval(interval),
-		query.WithDirection(query.Ascending),
+		req.GetPredefinedRange(),
+		startTime,
+		endTime,
+		interval,
 	)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load exchange rate history")
@@ -317,6 +311,80 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		Result: currencypb.GetHistoricalMintDataResponse_OK,
 		Data:   data,
 	}, nil
+}
+
+func (s *currencyServer) loadExchangeRatesForTime(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error) {
+	record, err := s.data.GetAllExchangeRates(ctx, t)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get price record by date")
+	}
+	return record, nil
+}
+
+func (s *currencyServer) loadExchangeRatesLatest(ctx context.Context) (*currency.MultiRateRecord, error) {
+	latest, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get latest price record")
+	}
+	return latest, nil
+}
+
+func (s *currencyServer) getCachedReserveHistory(
+	ctx context.Context,
+	mint string,
+	predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange,
+	startTime, endTime time.Time,
+	interval query.Interval,
+) ([]*currency.ReserveRecord, error) {
+	cacheKey := fmt.Sprintf("%s:%s:%d", mint, predefinedRange.String(), endTime.Unix())
+
+	if cached, ok := s.reserveHistoryCache.Retrieve(cacheKey); ok {
+		return cached.([]*currency.ReserveRecord), nil
+	}
+
+	reserveHistory, err := s.data.GetCurrencyReserveHistory(
+		ctx,
+		mint,
+		query.WithStartTime(startTime),
+		query.WithEndTime(endTime),
+		query.WithInterval(interval),
+		query.WithDirection(query.Ascending),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s.reserveHistoryCache.Insert(cacheKey, reserveHistory, 1)
+	return reserveHistory, nil
+}
+
+func (s *currencyServer) getCachedExchangeRateHistory(
+	ctx context.Context,
+	currencyCode currency_lib.Code,
+	predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange,
+	startTime, endTime time.Time,
+	interval query.Interval,
+) ([]*currency.ExchangeRateRecord, error) {
+	cacheKey := fmt.Sprintf("%s:%s:%d", currencyCode, predefinedRange.String(), endTime.Unix())
+
+	if cached, ok := s.exchangeRateHistoryCache.Retrieve(cacheKey); ok {
+		return cached.([]*currency.ExchangeRateRecord), nil
+	}
+
+	exchangeRateHistory, err := s.data.GetExchangeRateHistory(
+		ctx,
+		currencyCode,
+		query.WithStartTime(startTime),
+		query.WithEndTime(endTime),
+		query.WithInterval(interval),
+		query.WithDirection(query.Ascending),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s.exchangeRateHistoryCache.Insert(cacheKey, exchangeRateHistory, 1)
+	return exchangeRateHistory, nil
 }
 
 // findClosestExchangeRate finds the exchange rate closest to the given time.
