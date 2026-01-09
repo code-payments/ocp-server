@@ -147,3 +147,34 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 	}
 	return fromReserveModel(model), nil
 }
+
+func (s *store) GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
+	if interval > query.IntervalMonth {
+		return nil, currency.ErrInvalidInterval
+	}
+
+	if start.IsZero() || end.IsZero() {
+		return nil, currency.ErrInvalidRange
+	}
+
+	var actualStart, actualEnd time.Time
+	if start.Unix() > end.Unix() {
+		actualStart = end
+		actualEnd = start
+	} else {
+		actualStart = start
+		actualEnd = end
+	}
+
+	list, err := dbGetAllReservesForRange(ctx, s.db, mint, interval, actualStart, actualEnd, ordering)
+	if err != nil {
+		return nil, err
+	}
+
+	res := []*currency.ReserveRecord{}
+	for _, item := range list {
+		res = append(res, fromReserveModel(item))
+	}
+
+	return res, nil
+}

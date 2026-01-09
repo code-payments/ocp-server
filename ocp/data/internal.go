@@ -136,6 +136,7 @@ type DatabaseData interface {
 	GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error)
 	PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
 	GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
+	GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error)
 
 	// Deposits
 	// --------------------------------------------------------------------------------
@@ -514,6 +515,24 @@ func (dp *DatabaseProvider) PutCurrencyReserve(ctx context.Context, record *curr
 }
 func (dp *DatabaseProvider) GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error) {
 	return dp.currencies.GetReserveAtTime(ctx, mint, t)
+}
+func (dp *DatabaseProvider) GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error) {
+	req := query.QueryOptions{
+		Limit:     maxCurrencyHistoryReqSize,
+		End:       time.Now(),
+		SortBy:    query.Ascending,
+		Supported: query.CanLimitResults | query.CanSortBy | query.CanBucketBy | query.CanQueryByStartTime | query.CanQueryByEndTime,
+	}
+	req.Apply(opts...)
+
+	if req.Start.IsZero() {
+		return nil, query.ErrQueryNotSupported
+	}
+	if req.Limit > maxCurrencyHistoryReqSize {
+		return nil, query.ErrQueryNotSupported
+	}
+
+	return dp.currencies.GetReservesInRange(ctx, mint, req.Interval, req.Start, req.End, req.SortBy)
 }
 
 // Deposits

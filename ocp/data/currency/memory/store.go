@@ -235,3 +235,32 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 
 	return results[0].Clone(), nil
 }
+
+func (s *store) GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sort.Sort(ReserveByTime(s.reserveRecords))
+
+	// Not ideal but fine for testing the currency store
+	var all []*currency.ReserveRecord
+	for _, item := range s.reserveRecords {
+		if item.Mint == mint && item.Time.Unix() >= start.Unix() && item.Time.Unix() <= end.Unix() {
+			all = append(all, item.Clone())
+		}
+	}
+
+	// TODO: handle the interval
+
+	if len(all) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	if ordering == query.Ascending {
+		for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
+			all[i], all[j] = all[j], all[i]
+		}
+	}
+
+	return all, nil
+}

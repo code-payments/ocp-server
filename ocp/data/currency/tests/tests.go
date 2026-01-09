@@ -19,6 +19,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testGetExchangeRatesInRange,
 		testMetadataRoundTrip,
 		testReserveRoundTrip,
+		testGetReservesInRange,
 	} {
 		tf(t, s)
 		teardown()
@@ -100,12 +101,31 @@ func testGetExchangeRatesInRange(t *testing.T, s currency.Store) {
 	result, err := s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalRaw, rates[0].Time, rates[99].Time, query.Ascending)
 	require.NoError(t, err)
 	assert.Equal(t, len(result), 100)
-
 	for i, item := range result {
 		assert.Equal(t, rates[i].Time.Unix(), item.Time.Unix())
 		assert.EqualValues(t, rates[i].Rates["usd"], item.Rate)
 	}
 
+	result, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalRaw, rates[0].Time, rates[49].Time, query.Ascending)
+	require.NoError(t, err)
+	assert.Equal(t, len(result), 50)
+	for i, item := range result {
+		assert.Equal(t, rates[i].Time.Unix(), item.Time.Unix())
+		assert.EqualValues(t, rates[i].Rates["usd"], item.Rate)
+	}
+
+	result, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalRaw, rates[0].Time, rates[99].Time, query.Descending)
+	require.NoError(t, err)
+	assert.Equal(t, len(result), 100)
+	for i, item := range result {
+		assert.Equal(t, rates[99-i].Time.Unix(), item.Time.Unix())
+		assert.EqualValues(t, rates[99-i].Rates["usd"], item.Rate)
+	}
+
+	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalSecond, rates[0].Time, rates[99].Time, query.Ascending)
+	require.NoError(t, err)
+	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalMinute, rates[0].Time, rates[99].Time, query.Ascending)
+	require.NoError(t, err)
 	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalHour, rates[0].Time, rates[99].Time, query.Ascending)
 	require.NoError(t, err)
 	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalDay, rates[0].Time, rates[99].Time, query.Ascending)
@@ -194,6 +214,67 @@ func testReserveRoundTrip(t *testing.T, s currency.Store) {
 	actual, err = s.GetReserveAtTime(context.Background(), "mint", tomorrow)
 	assert.Nil(t, actual)
 	assert.Equal(t, currency.ErrNotFound, err)
+}
+
+func testGetReservesInRange(t *testing.T, s currency.Store) {
+	var reserves []currency.ReserveRecord
+
+	now := time.Now().UTC()
+	mint := "test-mint"
+
+	for i := 0; i < 100; i++ {
+		reserves = append(reserves, currency.ReserveRecord{
+			Mint:              mint,
+			SupplyFromBonding: uint64(1000 + i),
+			Time:              now.Add(time.Duration(i) * time.Hour),
+		})
+	}
+
+	record, err := s.GetReserveAtTime(context.Background(), mint, reserves[0].Time)
+	assert.Nil(t, record)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	for _, item := range reserves {
+		itemCopy := item
+		require.NoError(t, s.PutReserveRecord(context.Background(), &itemCopy))
+	}
+
+	result, err := s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
+	assert.Equal(t, len(result), 100)
+	for i, item := range result {
+		assert.Equal(t, reserves[i].Time.Unix(), item.Time.Unix())
+		assert.EqualValues(t, reserves[i].SupplyFromBonding, item.SupplyFromBonding)
+	}
+
+	result, err = s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[49].Time, query.Ascending)
+	require.NoError(t, err)
+	assert.Equal(t, len(result), 50)
+	for i, item := range result {
+		assert.Equal(t, reserves[i].Time.Unix(), item.Time.Unix())
+		assert.EqualValues(t, reserves[i].SupplyFromBonding, item.SupplyFromBonding)
+	}
+
+	result, err = s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[99].Time, query.Descending)
+	require.NoError(t, err)
+	assert.Equal(t, len(result), 100)
+	for i, item := range result {
+		assert.Equal(t, reserves[99-i].Time.Unix(), item.Time.Unix())
+		assert.EqualValues(t, reserves[99-i].SupplyFromBonding, item.SupplyFromBonding)
+	}
+
+	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalSecond, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
+	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalMinute, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
+	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalHour, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
+	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalDay, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
+	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalWeek, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
+	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalMonth, reserves[0].Time, reserves[99].Time, query.Ascending)
+	require.NoError(t, err)
 }
 
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {
