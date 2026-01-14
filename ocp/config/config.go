@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/mr-tron/base58"
 
 	"github.com/code-payments/ocp-server/usdf"
@@ -14,14 +16,12 @@ const (
 	CoreMintDecimals        = usdf.Decimals
 	CoreMintName            = "USDF"
 	CoreMintSymbol          = "USDF"
-	CoreMintDescription     = "Your cash reserves are held in USDF, a fully backed digital dollar supported 1:1 by U.S. dollars. This ensures your funds retain the same value and stability as traditional USD, while benefiting from faster, more transparent transactions on modern financial infrastructure. You can deposit additional funds at any time, or withdraw your USDF for U.S. dollars whenever you like."
-	CoreMintImageUrl        = "https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/todo/icon.png"
+	CoreMintDescription     = "Your USD Reserves are held in USDF, a fully backed digital dollar created in partnership with Coinbase. Your USD Reserves can be used to buy currencies on Flipcash, or can be withdrawn to any other crypto wallet that supports the Solana blockchain. USDF can also be sold, allowing you to move your funds into a traditional bank account."
 
 	SubsidizerPublicKey = "cash11ndAmdKFEnG2wrQQ5Zqvr1kN9htxxLyoPLYFUV"
 
-	// todo: replace with real VM
-	CoreMintVmAccountPublicKey = "BVMGLfRgr3nVFCH5DuW6VR2kfSDxq4EFEopXfwCDpYzb"
-	CoreMintVmOmnibusPublicKey = "GNw1t85VH8b1CcwB5933KBC7PboDPJ5EcQdGynbfN1Pb"
+	CoreMintVmAccountPublicKey = "JACkaKsm2Rd6TNJwH4UB7G6tHrWUATJPTgNNnRVsg4ip"
+	CoreMintVmOmnibusPublicKey = "D8oUTXRvarxhx9cjYdFJqWAVj2rmzry58bS6JSTiQsv5"
 
 	// todo: replace with new Jeffy
 	// todo: DB store to track VM per mint
@@ -32,6 +32,7 @@ const (
 )
 
 var (
+	CoreMintImageUrl       = fmt.Sprintf("https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/%s/icon.png", CoreMintPublicKeyString)
 	CoreMintPublicKeyBytes []byte
 )
 
