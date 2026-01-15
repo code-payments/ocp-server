@@ -181,7 +181,7 @@ func dbGetCountForMetrics(ctx context.Context, db *sqlx.DB, state fulfillment.St
 		WHERE state = $1 AND fulfillment_type != $2 
 		GROUP BY fulfillment_type
 	`
-	err := db.SelectContext(ctx, &countedTypes, query, exclusion, state)
+	err := db.SelectContext(ctx, &countedTypes, query, state, exclusion)
 	if err != nil {
 		return nil, err
 	}
