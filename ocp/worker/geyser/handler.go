@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
+	"github.com/code-payments/ocp-server/ocp/config"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 
 	"github.com/code-payments/ocp-server/ocp/common"
@@ -85,7 +86,8 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 
 	switch mintAccount.PublicKey().ToBase58() {
 
-	case common.CoreMintAccount.PublicKey().ToBase58():
+	// todo: Don't hardcode Jeffy and other Flipcash currencies
+	case common.CoreMintAccount.PublicKey().ToBase58(), config.JeffyMintPublicKey:
 		// Not an ATA, so filter it out. It cannot be a VM deposit ATA
 		if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
 			return nil

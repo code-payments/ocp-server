@@ -11,6 +11,7 @@ import (
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/worker"
@@ -69,6 +70,7 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 	// todo: Dynamically detect VMs
 	for _, vm := range []string{
 		common.CoreMintVmAccount.PublicKey().ToBase58(),
+		config.JeffyVmAccountPublicKey,
 	} {
 		for _, state := range []nonce.State{
 			nonce.StateReleased,

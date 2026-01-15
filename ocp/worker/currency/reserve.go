@@ -8,6 +8,7 @@ import (
 
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/worker"
@@ -34,7 +35,7 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 	for {
 		_, err := retry.Retry(
 			func() error {
-				p.log.Debug("updating exchange rates")
+				p.log.Debug("updating reserves")
 
 				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
 				trace := provider.StartTrace("currency_reserve_runtime")
@@ -72,8 +73,8 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 // todo: Don't hardcode Jeffy and other Flipcash currencies
 func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) error {
 	err1 := func() error {
-		jeffyMintAccount, _ := common.NewAccountFromPublicKeyString("todo")
-		jeffyVaultAccount, _ := common.NewAccountFromPublicKeyString("todo")
+		jeffyMintAccount, _ := common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+		jeffyVaultAccount, _ := common.NewAccountFromPublicKeyString("BMYftxDcbLDTzRCkLmQ9amwNgqsZ74A1wsd1gURum3Ep")
 
 		var tokenAccount token.Account
 		ai, err := p.data.GetBlockchainAccountInfo(ctx, jeffyVaultAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)

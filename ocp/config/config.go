@@ -23,12 +23,11 @@ const (
 	CoreMintVmAccountPublicKey = "JACkaKsm2Rd6TNJwH4UB7G6tHrWUATJPTgNNnRVsg4ip"
 	CoreMintVmOmnibusPublicKey = "D8oUTXRvarxhx9cjYdFJqWAVj2rmzry58bS6JSTiQsv5"
 
-	// todo: replace with new Jeffy
 	// todo: DB store to track VM per mint
-	JeffyMintPublicKey      = "52MNGpgvydSwCtC2H4qeiZXZ1TxEuRVCRGa8LAfk2kSj"
+	JeffyMintPublicKey      = "54ggcQ23uen5b9QXMAns99MQNTKn7iyzq4wvCW6e8r25"
 	JeffyAuthorityPublicKey = "jfy1btcfsjSn2WCqLVaxiEjp4zgmemGyRsdCPbPwnZV"
-	JeffyVmAccountPublicKey = "Bii3UFB9DzPq6UxgewF5iv9h1Gi8ZnP6mr7PtocHGNta"
-	JeffyVmOmnibusPublicKey = "CQ5jni8XTXEcMFXS1ytNyTVbJBZHtHCzEtjBPowB3MLD"
+	JeffyVmAccountPublicKey = "8rwgUXsLSq1Pn51UJs4NGVA1cTkemwBgKyWPfFYgnm3B"
+	JeffyVmOmnibusPublicKey = "9XiqBPYSG2cBwpb8MqJeuFmLaQaAAr6gwikyBrPZDQ8R"
 )
 
 var (
