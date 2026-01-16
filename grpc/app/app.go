@@ -113,6 +113,7 @@ func Run(app App, options ...Option) error {
 			newrelic.ConfigLicense(config.NewRelicLicenseKey),
 			newrelic.ConfigDistributedTracerEnabled(true),
 			newrelic.ConfigAppLogForwardingEnabled(true),
+			newrelic.ConfigAppLogForwardingLabelsEnabled(true),
 		)
 		if err != nil {
 			log.With(zap.Error(err)).Error("error connecting to new relic")
