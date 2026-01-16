@@ -237,6 +237,7 @@ type DatabaseData interface {
 	FreeVmMemoryByIndex(ctx context.Context, memoryAccount string, index uint16) error
 	FreeVmMemoryByAddress(ctx context.Context, address string) error
 	ReserveVmMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error)
+	GetVmMemoryLocationByAddress(ctx context.Context, address string) (string, uint16, error)
 
 	// VM Storage
 	// --------------------------------------------------------------------------------
@@ -875,6 +876,9 @@ func (dp *DatabaseProvider) FreeVmMemoryByAddress(ctx context.Context, address s
 }
 func (dp *DatabaseProvider) ReserveVmMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error) {
 	return dp.vmRam.ReserveMemory(ctx, vm, accountType, address)
+}
+func (dp *DatabaseProvider) GetVmMemoryLocationByAddress(ctx context.Context, address string) (string, uint16, error) {
+	return dp.vmRam.GetMemoryLocationByAddress(ctx, address)
 }
 
 // VM Storage

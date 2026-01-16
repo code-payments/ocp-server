@@ -32,4 +32,7 @@ type Store interface {
 
 	// ReserveMemory reserves a piece of memory in a VM for the virtual account address
 	ReserveMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error)
+
+	// GetMemoryLocationByAddress returns the memory account and index for a reserved virtual account address
+	GetMemoryLocationByAddress(ctx context.Context, address string) (string, uint16, error)
 }

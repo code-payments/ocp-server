@@ -112,6 +112,20 @@ func (s *store) ReserveMemory(_ context.Context, vm string, accountType vm.Virtu
 	return "", 0, ram.ErrNoFreeMemory
 }
 
+// GetMemoryLocationByAddress implements vm.ram.Store.GetMemoryLocationByAddress
+func (s *store) GetMemoryLocationByAddress(_ context.Context, address string) (string, uint16, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	reservationKey, ok := s.storedVirtualAccounts[address]
+	if !ok {
+		return "", 0, ram.ErrNotReserved
+	}
+
+	memoryAccount, index := parseAccountIndexKey(reservationKey)
+	return memoryAccount, index, nil
+}
+
 func (s *store) find(data *ram.Record) *ram.Record {
 	for _, item := range s.records {
 		if item.Id == data.Id {
@@ -153,4 +167,19 @@ func (s *store) reset() {
 
 func getAccountIndexKey(memoryAccount string, index uint16) string {
 	return fmt.Sprintf("%s:%d", memoryAccount, index)
+}
+
+func parseAccountIndexKey(key string) (string, uint16) {
+	var memoryAccount string
+	var index uint16
+	fmt.Sscanf(key, "%s", &memoryAccount)
+	// Find the last colon and parse
+	for i := len(key) - 1; i >= 0; i-- {
+		if key[i] == ':' {
+			memoryAccount = key[:i]
+			fmt.Sscanf(key[i+1:], "%d", &index)
+			break
+		}
+	}
+	return memoryAccount, index
 }
