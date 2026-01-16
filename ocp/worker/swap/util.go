@@ -93,7 +93,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, record *swap.Record) er
 		}
 
 		switch record.State {
-		case swap.StateCreated, swap.StateFunding:
+		case swap.StateCreated, swap.StateFunding, swap.StateFunded:
 			err = p.markNonceAvailableDueToCancelledSwap(ctx, record)
 			if err != nil {
 				return err
