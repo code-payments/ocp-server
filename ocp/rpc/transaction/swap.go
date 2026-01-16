@@ -226,6 +226,10 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			log.With(zap.Error(err)).Warn("invalid funding id")
 			return handleStatefulSwapError(streamer, NewSwapValidationError("funding id is not a signature"))
 		}
+
+		if !common.IsCoreMint(fromMint) {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("source mint must be core mint"))
+		}
 	default:
 		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateCurrencyCreatorSwapReq.FundingSource))
 	}
