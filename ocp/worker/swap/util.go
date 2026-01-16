@@ -281,7 +281,7 @@ func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context
 }
 
 func (p *runtime) markNonceAvailableDueToCancelledSwap(ctx context.Context, record *swap.Record) error {
-	err := p.validateSwapState(record, swap.StateCreated)
+	err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding, swap.StateFunded)
 	if err != nil {
 		return err
 	}
