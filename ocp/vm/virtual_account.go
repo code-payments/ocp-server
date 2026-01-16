@@ -14,18 +14,8 @@ import (
 	vm_program "github.com/code-payments/ocp-server/solana/vm"
 )
 
-func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, mint, owner *common.Account, waitForInitialization bool) error {
-	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
-	if err != nil {
-		return err
-	}
-
-	timelockAccounts, err := owner.GetTimelockAccounts(vmConfig)
-	if err != nil {
-		return err
-	}
-
-	timelockRecord, err := data.GetTimelockByVault(ctx, timelockAccounts.Vault.PublicKey().ToBase58())
+func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_data.Provider, vault *common.Account, waitForInitialization bool) error {
+	timelockRecord, err := data.GetTimelockByVault(ctx, vault.PublicKey().ToBase58())
 	if err != nil {
 		return err
 	}
@@ -44,6 +34,8 @@ func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_dat
 		if err != nil {
 			return err
 		}
+	} else {
+		return nil
 	}
 
 	if !waitForInitialization {
@@ -51,8 +43,12 @@ func EnsureVirtualTimelockAccountIsInitialized(ctx context.Context, data ocp_dat
 	}
 
 	for range 60 {
-		_, _, err := GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, owner)
-		if err == nil {
+		timelockRecord, err := data.GetTimelockByVault(ctx, vault.PublicKey().ToBase58())
+		if err != nil {
+			continue
+		}
+
+		if timelockRecord.ExistsOnBlockchain() {
 			return nil
 		}
 
@@ -101,12 +97,18 @@ func GetVirtualTimelockAccountStateInMemory(ctx context.Context, vmIndexerClient
 	return &state, memory, uint16(protoMemory.Index), nil
 }
 
-func GetVirtualTimelockAccountLocationInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, owner *common.Account) (*common.Account, uint16, error) {
-	_, memory, memoryIndex, err := GetVirtualTimelockAccountStateInMemory(ctx, vmIndexerClient, vm, owner)
+func GetVirtualTimelockAccountLocationInMemory(ctx context.Context, data ocp_data.Provider, vault *common.Account) (*common.Account, uint16, error) {
+	memoryAddress, index, err := data.GetVmMemoryLocationByAddress(ctx, vault.PublicKey().ToBase58())
 	if err != nil {
 		return nil, 0, err
 	}
-	return memory, memoryIndex, nil
+
+	memoryAccount, err := common.NewAccountFromPublicKeyString(memoryAddress)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return memoryAccount, index, err
 }
 
 func GetVirtualDurableNonceAccountStateInMemory(ctx context.Context, vmIndexerClient indexerpb.IndexerClient, vm, nonce *common.Account) (*vm_program.VirtualDurableNonce, *common.Account, uint16, error) {

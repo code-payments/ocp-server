@@ -107,5 +107,18 @@ func testHappyPath(t *testing.T, s ram.Store) {
 
 		_, _, err = s.ReserveMemory(ctx, "vm1", vm.VirtualAccountTypeTimelock, "newvirtualaccount3")
 		assert.Equal(t, ram.ErrNoFreeMemory, err)
+
+		memoryAccount, index, err := s.GetMemoryLocationByAddress(ctx, "newvirtualaccount1")
+		require.NoError(t, err)
+		assert.Equal(t, "memoryaccount1", memoryAccount)
+		assert.Equal(t, freedIndex1, index)
+
+		memoryAccount, index, err = s.GetMemoryLocationByAddress(ctx, "newvirtualaccount2")
+		require.NoError(t, err)
+		assert.Equal(t, "memoryaccount1", memoryAccount)
+		assert.Equal(t, freedIndex2, index)
+
+		_, _, err = s.GetMemoryLocationByAddress(ctx, "nonexistent")
+		assert.Equal(t, ram.ErrNotReserved, err)
 	})
 }

@@ -255,9 +255,9 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	// Section: On-demand account creation
 	//
 
-	err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, s.vmIndexerClient, toMint, owner, true)
+	err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, ownerDestinationTimelockVault, false)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("timed out waiting for destination timelock account initialization")
+		log.With(zap.Error(err)).Warn("error ensuring destination virtual timelock account is initialized")
 		return handleStatefulSwapError(streamer, err)
 	}
 
@@ -288,7 +288,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	if common.IsCoreMint(fromMint) {
 		swapHandler = NewCurrencyCreatorBuySwapHandler(
 			s.data,
-			s.vmIndexerClient,
 			owner,
 			swapAuthority,
 			toMint,
@@ -298,7 +297,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	} else if common.IsCoreMint(toMint) {
 		swapHandler = NewCurrencyCreatorSellSwapHandler(
 			s.data,
-			s.vmIndexerClient,
 			owner,
 			swapAuthority,
 			fromMint,
@@ -308,7 +306,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	} else {
 		swapHandler = NewCurrencyCreatorBuySellSwapHandler(
 			s.data,
-			s.vmIndexerClient,
 			owner,
 			swapAuthority,
 			fromMint,

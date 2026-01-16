@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 	"github.com/code-payments/ocp-server/ocp/worker"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -22,10 +21,9 @@ type eventWorkerMetrics struct {
 
 // todo: we can consolidate the various subscription streams into one
 type runtime struct {
-	log             *zap.Logger
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
-	conf            *conf
+	log  *zap.Logger
+	data ocp_data.Provider
+	conf *conf
 
 	integration Integration
 
@@ -46,16 +44,15 @@ type runtime struct {
 	backupExternalDepositWorkerStatus bool
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, configProvider ConfigProvider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, integration Integration, configProvider ConfigProvider) worker.Runtime {
 	conf := configProvider()
 	return &runtime{
 		log:                        log,
 		data:                       data,
-		vmIndexerClient:            vmIndexerClient,
 		conf:                       configProvider(),
 		integration:                integration,
 		programUpdatesChan:         make(chan *geyserpb.SubscribeUpdateAccount, conf.programUpdateQueueSize.Get(context.Background())),
-		programUpdateHandlers:      initializeProgramAccountUpdateHandlers(conf, data, vmIndexerClient, integration),
+		programUpdateHandlers:      initializeProgramAccountUpdateHandlers(conf, data, integration),
 		programUpdateWorkerMetrics: make(map[int]*eventWorkerMetrics),
 	}
 }

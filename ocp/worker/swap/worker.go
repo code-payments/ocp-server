@@ -184,6 +184,12 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 		// todo: Return funds if the amount was wrong
 		return p.markSwapCancelled(ctx, record)
 	}
+
+	err = p.ensureSwapDestinationIsInitialized(ctx, record)
+	if err != nil {
+		return errors.Wrap(err, "error ensuring swap destination is initialized")
+	}
+
 	return p.markSwapSubmitting(ctx, record)
 }
 

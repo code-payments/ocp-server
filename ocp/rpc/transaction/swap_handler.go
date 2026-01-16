@@ -3,8 +3,6 @@ package transaction
 import (
 	"context"
 
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
-
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
@@ -36,8 +34,7 @@ type SwapHandler interface {
 }
 
 type CurrencyCreatorBuySwapHandler struct {
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
+	data ocp_data.Provider
 
 	buyer           *common.Account
 	temporaryHolder *common.Account
@@ -54,7 +51,6 @@ type CurrencyCreatorBuySwapHandler struct {
 
 func NewCurrencyCreatorBuySwapHandler(
 	data ocp_data.Provider,
-	vmIndexerClient indexerpb.IndexerClient,
 	buyer *common.Account,
 	temporaryHolder *common.Account,
 	mint *common.Account,
@@ -62,8 +58,7 @@ func NewCurrencyCreatorBuySwapHandler(
 	nonce *common.Account,
 ) SwapHandler {
 	return &CurrencyCreatorBuySwapHandler{
-		data:            data,
-		vmIndexerClient: vmIndexerClient,
+		data: data,
 
 		buyer:           buyer,
 		temporaryHolder: temporaryHolder,
@@ -71,7 +66,7 @@ func NewCurrencyCreatorBuySwapHandler(
 		amount:          amount,
 
 		nonce:            nonce,
-		computeUnitLimit: 300_000,
+		computeUnitLimit: 150_000,
 		computeUnitPrice: 1_000,
 		memoValue:        "buy_v0",
 	}
@@ -103,7 +98,12 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.buyer)
+	destinationTimelockAccounts, err := h.buyer.GetTimelockAccounts(destinationVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationTimelockAccounts.Vault)
 	if err != nil {
 		return nil, err
 	}
@@ -203,8 +203,7 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 }
 
 type CurrencyCreatorSellSwapHandler struct {
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
+	data ocp_data.Provider
 
 	seller          *common.Account
 	temporaryHolder *common.Account
@@ -221,7 +220,6 @@ type CurrencyCreatorSellSwapHandler struct {
 
 func NewCurrencyCreatorSellSwapHandler(
 	data ocp_data.Provider,
-	vmIndexerClient indexerpb.IndexerClient,
 	seller *common.Account,
 	temporaryHolder *common.Account,
 	mint *common.Account,
@@ -229,8 +227,7 @@ func NewCurrencyCreatorSellSwapHandler(
 	nonce *common.Account,
 ) SwapHandler {
 	return &CurrencyCreatorSellSwapHandler{
-		data:            data,
-		vmIndexerClient: vmIndexerClient,
+		data: data,
 
 		seller:          seller,
 		temporaryHolder: temporaryHolder,
@@ -238,7 +235,7 @@ func NewCurrencyCreatorSellSwapHandler(
 		amount:          amount,
 
 		nonce:            nonce,
-		computeUnitLimit: 300_000,
+		computeUnitLimit: 175_000,
 		computeUnitPrice: 1_000,
 		memoValue:        "sell_v0",
 	}
@@ -280,7 +277,12 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.seller)
+	destinationTimelockAccounts, err := h.seller.GetTimelockAccounts(destinationVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationTimelockAccounts.Vault)
 	if err != nil {
 		return nil, err
 	}
@@ -370,8 +372,7 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 }
 
 type CurrencyCreatorBuySellSwapHandler struct {
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
+	data ocp_data.Provider
 
 	swapper         *common.Account
 	temporaryHolder *common.Account
@@ -389,7 +390,6 @@ type CurrencyCreatorBuySellSwapHandler struct {
 
 func NewCurrencyCreatorBuySellSwapHandler(
 	data ocp_data.Provider,
-	vmIndexerClient indexerpb.IndexerClient,
 	swapper *common.Account,
 	temporaryHolder *common.Account,
 	fromMint *common.Account,
@@ -398,8 +398,7 @@ func NewCurrencyCreatorBuySellSwapHandler(
 	nonce *common.Account,
 ) SwapHandler {
 	return &CurrencyCreatorBuySellSwapHandler{
-		data:            data,
-		vmIndexerClient: vmIndexerClient,
+		data: data,
 
 		swapper:         swapper,
 		temporaryHolder: temporaryHolder,
@@ -450,7 +449,12 @@ func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context
 		return nil, err
 	}
 
-	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, destinationVmConfig.Vm, h.swapper)
+	destinationTimelockAccounts, err := h.swapper.GetTimelockAccounts(destinationVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	h.memoryAccount, h.memoryIndex, err = vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationTimelockAccounts.Vault)
 	if err != nil {
 		return nil, err
 	}

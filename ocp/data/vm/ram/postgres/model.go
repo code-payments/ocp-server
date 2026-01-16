@@ -211,3 +211,18 @@ func dbReserveMemory(ctx context.Context, db *sqlx.DB, vm string, accountType vm
 	})
 	return memoryAccount, index, err
 }
+
+func dbGetMemoryLocationByAddress(ctx context.Context, db *sqlx.DB, address string) (string, uint16, error) {
+	var model allocatedMemoryModel
+
+	query := `SELECT id, vm, memory_account, index, is_allocated, stored_account_type, address, last_updated_at
+		FROM ` + allocatedMemoryTableName + `
+		WHERE address = $1 AND is_allocated`
+
+	err := db.QueryRowxContext(ctx, query, address).StructScan(&model)
+	if err != nil {
+		return "", 0, pgutil.CheckNoRows(err, ram.ErrNotReserved)
+	}
+
+	return model.MemoryAccount, model.Index, nil
+}

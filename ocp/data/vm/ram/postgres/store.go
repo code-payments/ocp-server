@@ -53,3 +53,8 @@ func (s *store) FreeMemoryByAddress(ctx context.Context, address string) error {
 func (s *store) ReserveMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error) {
 	return dbReserveMemory(ctx, s.db, vm, accountType, address)
 }
+
+// GetMemoryLocationByAddress implements vm.ram.Store.GetMemoryLocationByAddress
+func (s *store) GetMemoryLocationByAddress(ctx context.Context, address string) (string, uint16, error) {
+	return dbGetMemoryLocationByAddress(ctx, s.db, address)
+}

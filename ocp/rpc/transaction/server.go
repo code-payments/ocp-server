@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/ocp/aml"
@@ -24,8 +23,7 @@ type transactionServer struct {
 
 	log *zap.Logger
 
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
+	data ocp_data.Provider
 
 	auth *auth_util.RPCSignatureVerifier
 
@@ -51,7 +49,6 @@ type transactionServer struct {
 func NewTransactionServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
-	vmIndexerClient indexerpb.IndexerClient,
 	submitIntentIntegration SubmitIntentIntegration,
 	airdropIntegration AirdropIntegration,
 	antispamGuard *antispam.Guard,
@@ -92,8 +89,7 @@ func NewTransactionServer(
 
 		log: log,
 
-		data:            data,
-		vmIndexerClient: vmIndexerClient,
+		data: data,
 
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
