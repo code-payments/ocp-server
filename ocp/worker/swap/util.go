@@ -87,7 +87,7 @@ func (p *runtime) markSwapFailed(ctx context.Context, record *swap.Record) error
 
 func (p *runtime) markSwapCancelled(ctx context.Context, record *swap.Record) error {
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding)
+		err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding, swap.StateFunded)
 		if err != nil {
 			return err
 		}
