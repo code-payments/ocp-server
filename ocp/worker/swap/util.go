@@ -19,6 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
+	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 )
 
@@ -389,6 +390,30 @@ func (p *runtime) validateExternalWalletFunding(ctx context.Context, record *swa
 		return false, nil
 	}
 	return true, nil
+}
+
+func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record *swap.Record) error {
+	toMint, err := common.NewAccountFromPublicKeyString(record.ToMint)
+	if err != nil {
+		return err
+	}
+
+	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+	if err != nil {
+		return err
+	}
+
+	destinationVmConfig, err := common.GetVmConfigForMint(ctx, p.data, toMint)
+	if err != nil {
+		return err
+	}
+
+	destinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
+	if err != nil {
+		return err
+	}
+
+	return vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, p.data, destinationTimelockVault, true)
 }
 
 func getSwapDepositIntentID(signature string, destination *common.Account) string {

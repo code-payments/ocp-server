@@ -11,7 +11,6 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/cache"
@@ -40,8 +39,8 @@ var (
 	syncedDepositCache = cache.NewCache(1_000_000)
 )
 
-func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, userAuthority, mint *common.Account) error {
-	err := maybeInitiateExternalDepositIntoVm(ctx, data, vmIndexerClient, userAuthority, mint)
+func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, integration Integration, userAuthority, mint *common.Account) error {
+	err := maybeInitiateExternalDepositIntoVm(ctx, data, userAuthority, mint)
 	if err != nil {
 		return errors.Wrap(err, "error depositing into the vm")
 	}
@@ -65,7 +64,7 @@ func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, vmI
 	return markDepositsAsSynced(ctx, data, userAuthority, mint)
 }
 
-func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, userAuthority, mint *common.Account) error {
+func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, userAuthority, mint *common.Account) error {
 	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
 	if err != nil {
 		return err
@@ -86,10 +85,10 @@ func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provi
 	if balance == 0 {
 		return nil
 	}
-	return initiateExternalDepositIntoVm(ctx, data, vmIndexerClient, userAuthority, mint, balance)
+	return initiateExternalDepositIntoVm(ctx, data, userAuthority, mint, balance)
 }
 
-func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, userAuthority, mint *common.Account, balance uint64) error {
+func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, userAuthority, mint *common.Account, balance uint64) error {
 	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
 	if err != nil {
 		return errors.Wrap(err, "error getting vm config")
@@ -100,12 +99,12 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		return errors.Wrap(err, "error getting timelock accounts")
 	}
 
-	err = vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, data, vmIndexerClient, mint, userAuthority, true)
+	err = vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, data, timelockAccounts.Vault, true)
 	if err != nil {
 		return errors.Wrap(err, "error ensuring vta is initialized")
 	}
 
-	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, vmIndexerClient, vmConfig.Vm, userAuthority)
+	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, data, timelockAccounts.Vault)
 	if err != nil {
 		return errors.Wrap(err, "error getting vta location in memory")
 	}

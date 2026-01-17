@@ -345,11 +345,6 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 		return nil, nil, err
 	}
 
-	sourceAuthority, err := common.NewAccountFromPublicKeyString(sourceAccountInfoRecord.AuthorityAccount)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	mint, err := common.NewAccountFromPublicKeyString(sourceAccountInfoRecord.MintAccount)
 	if err != nil {
 		return nil, nil, err
@@ -370,7 +365,7 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 		return nil, nil, err
 	}
 
-	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
+	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, sourceVault)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -383,17 +378,7 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 	var txn solana.Transaction
 	var makeTxnErr error
 	if isInternal {
-		destinationAccountInfoRecord, err := h.data.GetAccountInfoByTokenAddress(ctx, destinationToken.PublicKey().ToBase58())
-		if err != nil {
-			return nil, nil, err
-		}
-
-		destinationAuthority, err := common.NewAccountFromPublicKeyString(destinationAccountInfoRecord.AuthorityAccount)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
+		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationToken)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -564,11 +549,6 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 		return nil, nil, err
 	}
 
-	sourceAuthority, err := common.NewAccountFromPublicKeyString(sourceAccountInfoRecord.AuthorityAccount)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	mint, err := common.NewAccountFromPublicKeyString(sourceAccountInfoRecord.MintAccount)
 	if err != nil {
 		return nil, nil, err
@@ -589,7 +569,7 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 		return nil, nil, err
 	}
 
-	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, sourceAuthority)
+	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, sourceVault)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -602,17 +582,7 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 	var txn solana.Transaction
 	var makeTxnErr error
 	if isInternal {
-		destinationAccountInfoRecord, err := h.data.GetAccountInfoByTokenAddress(ctx, destinationToken.PublicKey().ToBase58())
-		if err != nil {
-			return nil, nil, err
-		}
-
-		destinationAuthority, err := common.NewAccountFromPublicKeyString(destinationAccountInfoRecord.AuthorityAccount)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.vmIndexerClient, vmConfig.Vm, destinationAuthority)
+		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationToken)
 		if err != nil {
 			return nil, nil, err
 		}

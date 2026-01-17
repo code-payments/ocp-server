@@ -7,7 +7,6 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
-	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 	"github.com/code-payments/ocp-server/ocp/config"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 
@@ -29,18 +28,16 @@ type ProgramAccountUpdateHandler interface {
 }
 
 type TokenProgramAccountHandler struct {
-	conf            *conf
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
-	integration     Integration
+	conf        *conf
+	data        ocp_data.Provider
+	integration Integration
 }
 
-func NewTokenProgramAccountHandler(conf *conf, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration) ProgramAccountUpdateHandler {
+func NewTokenProgramAccountHandler(conf *conf, data ocp_data.Provider, integration Integration) ProgramAccountUpdateHandler {
 	return &TokenProgramAccountHandler{
-		conf:            conf,
-		data:            data,
-		vmIndexerClient: vmIndexerClient,
-		integration:     integration,
+		conf:        conf,
+		data:        data,
+		integration: integration,
 	}
 }
 
@@ -106,7 +103,7 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		}
 
 		if unmarshalled.Amount > 0 {
-			err = initiateExternalDepositIntoVm(ctx, h.data, h.vmIndexerClient, userAuthorityAccount, mintAccount, unmarshalled.Amount)
+			err = initiateExternalDepositIntoVm(ctx, h.data, userAuthorityAccount, mintAccount, unmarshalled.Amount)
 			if err != nil {
 				return errors.Wrap(err, "error depositing into the vm")
 			}
@@ -118,8 +115,8 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 	}
 }
 
-func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration) map[string]ProgramAccountUpdateHandler {
+func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, integration Integration) map[string]ProgramAccountUpdateHandler {
 	return map[string]ProgramAccountUpdateHandler{
-		base58.Encode(token.ProgramKey): NewTokenProgramAccountHandler(conf, data, vmIndexerClient, integration),
+		base58.Encode(token.ProgramKey): NewTokenProgramAccountHandler(conf, data, integration),
 	}
 }

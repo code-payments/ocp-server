@@ -157,7 +157,7 @@ func (p *runtime) backupExternalDepositWorker(runtimeCtx context.Context, interv
 							zap.String("mint", mintAccount.PublicKey().ToBase58()),
 						)
 
-						err = fixMissingExternalDeposits(tracedCtx, p.data, p.vmIndexerClient, p.integration, authorityAccount, mintAccount)
+						err = fixMissingExternalDeposits(tracedCtx, p.data, p.integration, authorityAccount, mintAccount)
 						if err != nil {
 							log.With(zap.Error(err)).Warn("failed to fix missing external deposits")
 						}
