@@ -104,7 +104,7 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		return errors.Wrap(err, "error ensuring vta is initialized")
 	}
 
-	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, data, timelockAccounts.Vault)
+	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, data, timelockAccounts.Vault, false)
 	if err != nil {
 		return errors.Wrap(err, "error getting vta location in memory")
 	}

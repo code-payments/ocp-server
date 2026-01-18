@@ -97,8 +97,18 @@ func GetVirtualTimelockAccountStateInMemory(ctx context.Context, vmIndexerClient
 	return &state, memory, uint16(protoMemory.Index), nil
 }
 
-func GetVirtualTimelockAccountLocationInMemory(ctx context.Context, data ocp_data.Provider, vault *common.Account) (*common.Account, uint16, error) {
-	memoryAddress, index, err := data.GetVmMemoryLocationByAddress(ctx, vault.PublicKey().ToBase58())
+func GetVirtualTimelockAccountLocationInMemory(ctx context.Context, data ocp_data.Provider, vault *common.Account, waitForReservation bool) (*common.Account, uint16, error) {
+	var memoryAddress string
+	var index uint16
+	var err error
+	for range 20 {
+		memoryAddress, index, err = data.GetVmMemoryLocationByAddress(ctx, vault.PublicKey().ToBase58())
+		if err == nil || !waitForReservation {
+			break
+		}
+
+		time.Sleep(time.Second / 4)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
