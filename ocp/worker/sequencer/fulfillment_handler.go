@@ -365,7 +365,7 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 		return nil, nil, err
 	}
 
-	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, sourceVault)
+	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, sourceVault, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -378,7 +378,7 @@ func (h *NoPrivacyTransferWithAuthorityFulfillmentHandler) MakeOnDemandTransacti
 	var txn solana.Transaction
 	var makeTxnErr error
 	if isInternal {
-		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationToken)
+		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationToken, false)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -569,7 +569,7 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 		return nil, nil, err
 	}
 
-	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, sourceVault)
+	sourceMemory, sourceIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, sourceVault, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -582,7 +582,7 @@ func (h *NoPrivacyWithdrawFulfillmentHandler) MakeOnDemandTransaction(ctx contex
 	var txn solana.Transaction
 	var makeTxnErr error
 	if isInternal {
-		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationToken)
+		destinationMemory, destinationIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, h.data, destinationToken, false)
 		if err != nil {
 			return nil, nil, err
 		}
