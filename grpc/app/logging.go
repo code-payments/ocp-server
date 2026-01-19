@@ -10,7 +10,7 @@ import (
 
 func getLogCore(level zapcore.LevelEnabler) zapcore.Core {
 	return zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+		zapcore.NewJSONEncoder(config),
 		zapcore.AddSync(os.Stdout),
 		level,
 	)
