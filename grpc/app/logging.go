@@ -12,7 +12,7 @@ func getLogCore(level zapcore.LevelEnabler) zapcore.Core {
 	config := zap.NewProductionEncoderConfig()
 	config.StacktraceKey = ""
 	return zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+		zapcore.NewJSONEncoder(config),
 		zapcore.AddSync(os.Stdout),
 		level,
 	)
