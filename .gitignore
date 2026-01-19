@@ -29,3 +29,6 @@ build/
 # Jetbrains
 .idea/
 
+# Executable Golang code
+cmd*/
+main.go
