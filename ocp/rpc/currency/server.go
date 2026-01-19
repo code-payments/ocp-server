@@ -255,7 +255,11 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		endTime,
 		interval,
 	)
-	if err != nil {
+	if err == currency.ErrNotFound {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
+		}, nil
+	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load currency reserve history")
 		return nil, status.Error(codes.Internal, "")
 	}
@@ -275,7 +279,11 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		endTime,
 		interval,
 	)
-	if err != nil {
+	if err == currency.ErrNotFound {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
+		}, nil
+	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load exchange rate history")
 		return nil, status.Error(codes.Internal, "")
 	}
