@@ -246,12 +246,12 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	}
 	log = log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
 
-	_, err = common.GetVmConfigForMint(ctx, s.data, mintAccount)
-	if err == common.ErrUnsupportedMint {
-		return handleSubmitIntentError(ctx, streamer, intentRecord, NewIntentValidationError("mint account must be the core mint or a launchpad currency"))
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting vm config for mint")
+	isSupportedMint, err := common.IsSupportedMint(ctx, s.data, mintAccount)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure checking for mint support")
 		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
+	} else if !isSupportedMint {
+		return handleSubmitIntentError(ctx, streamer, intentRecord, NewIntentValidationError("mint account must be the core mint or a launchpad currency"))
 	}
 
 	// Populate metadata into the new DB record

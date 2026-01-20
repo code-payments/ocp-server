@@ -13,9 +13,11 @@ import (
 // CalculateUsdMarketValue calculates the current USD market value of a crypto
 // amount in quarks.
 func CalculateUsdMarketValue(ctx context.Context, data ocp_data.Provider, mint *common.Account, quarks uint64, at time.Time) (float64, float64, error) {
-	_, err := common.GetVmConfigForMint(ctx, data, mint)
+	isSupportedMint, err := common.IsSupportedMint(ctx, data, mint)
 	if err != nil {
 		return 0, 0, err
+	} else if !isSupportedMint {
+		return 0, 0, common.ErrUnsupportedMint
 	}
 
 	usdExchangeRecord, err := data.GetExchangeRate(ctx, currency_lib.USD, at)
