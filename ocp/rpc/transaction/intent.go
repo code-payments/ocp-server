@@ -312,6 +312,10 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		switch err.(type) {
 		case IntentValidationError:
 			log.With(zap.Error(err)).Warn("new intent failed validation")
+		case IntentDeniedError:
+			log.With(zap.Error(err)).Warn("new intent was denied")
+		case StaleStateError:
+			log.With(zap.Error(err)).Warn("detected a client with stale state")
 		default:
 			log.With(zap.Error(err)).Warn("failure checking if new intent was allowed")
 		}
