@@ -95,19 +95,24 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 
 	// Figure out what kind of intent we're operating on and initialize the intent handler
 	var intentHandler CreateIntentHandler
-	switch submitActionsReq.Metadata.Type.(type) {
+	var protoMint *commonpb.SolanaAccountId
+	switch typed := submitActionsReq.Metadata.Type.(type) {
 	case *transactionpb.Metadata_OpenAccounts:
 		log = log.With(zap.String("intent_type", "open_accounts"))
 		intentHandler = NewOpenAccountsIntentHandler(s.conf, s.log, s.data, s.antispamGuard)
+		protoMint = typed.OpenAccounts.Mint
 	case *transactionpb.Metadata_SendPublicPayment:
 		log = log.With(zap.String("intent_type", "send_public_payment"))
 		intentHandler = NewSendPublicPaymentIntentHandler(s.conf, s.log, s.data, s.antispamGuard, s.amlGuard)
+		protoMint = typed.SendPublicPayment.Mint
 	case *transactionpb.Metadata_ReceivePaymentsPublicly:
 		log = log.With(zap.String("intent_type", "receive_payments_publicly"))
 		intentHandler = NewReceivePaymentsPubliclyIntentHandler(s.conf, s.log, s.data, s.antispamGuard, s.amlGuard)
+		protoMint = typed.ReceivePaymentsPublicly.Mint
 	case *transactionpb.Metadata_PublicDistribution:
 		log = log.With(zap.String("intent_type", "public_distribution"))
 		intentHandler = NewPublicDistributionIntentHandler(s.conf, s.log, s.data, s.antispamGuard, s.amlGuard)
+		protoMint = typed.PublicDistribution.Mint
 	default:
 		return handleSubmitIntentError(ctx, streamer, intentRecord, status.Error(codes.InvalidArgument, "SubmitIntentRequest.SubmitActions.Metadata is nil"))
 	}
@@ -231,6 +236,22 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	if existingIntentRecord != nil {
 		log.Warn("client is attempting to resubmit an intent or reuse an intent id")
 		return handleSubmitIntentError(ctx, streamer, intentRecord, NewStaleStateError("intent already exists"))
+	}
+
+	// Global validation on supported mint
+	mintAccount, err := common.GetBackwardsCompatMint(protoMint)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid mint account")
+		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
+	}
+	log = log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
+
+	_, err = common.GetVmConfigForMint(ctx, s.data, mintAccount)
+	if err == common.ErrUnsupportedMint {
+		return handleSubmitIntentError(ctx, streamer, intentRecord, NewIntentValidationError("mint account must be the core mint or a launchpad currency"))
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting vm config for mint")
+		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
 	}
 
 	// Populate metadata into the new DB record
