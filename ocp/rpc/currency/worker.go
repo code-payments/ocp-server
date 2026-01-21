@@ -20,13 +20,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 )
 
-const (
-	exchangeRatePollInterval = 5 * time.Minute
-	reserveStatePollInterval = 15 * time.Second
-	streamNotifyTimeout      = 10 * time.Second
-	streamBufferSize         = 100
-)
-
 var (
 	jeffyMintAccount, _ = common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
 )
@@ -54,6 +47,7 @@ type liveReserveStateData struct {
 
 type liveMintStateWorker struct {
 	log  *zap.Logger
+	conf *conf
 	data ocp_data.Provider
 
 	stateMu           sync.RWMutex
@@ -75,10 +69,11 @@ type liveMintStateWorker struct {
 	cancel context.CancelFunc
 }
 
-func newLiveMintStateWorker(log *zap.Logger, data ocp_data.Provider) *liveMintStateWorker {
+func newLiveMintStateWorker(log *zap.Logger, data ocp_data.Provider, conf *conf) *liveMintStateWorker {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &liveMintStateWorker{
 		log:                      log,
+		conf:                     conf,
 		data:                     data,
 		launchpadReserves:        make(map[string]*liveReserveStateData),
 		streams:                  make(map[string]*liveMintDataStream),
@@ -200,7 +195,7 @@ func (m *liveMintStateWorker) pollExchangeRates(ctx context.Context) {
 	// Initial poll immediately
 	m.fetchAndUpdateExchangeRates(ctx, log)
 
-	ticker := time.NewTicker(exchangeRatePollInterval)
+	ticker := time.NewTicker(m.conf.exchangeRatePollInterval.Get(ctx))
 	defer ticker.Stop()
 
 	for {
@@ -247,7 +242,7 @@ func (m *liveMintStateWorker) pollReserveState(ctx context.Context) {
 	// Initial poll immediately
 	m.fetchAndUpdateReserveState(ctx, log)
 
-	ticker := time.NewTicker(reserveStatePollInterval)
+	ticker := time.NewTicker(m.conf.reserveStatePollInterval.Get(ctx))
 	defer ticker.Stop()
 
 	for {

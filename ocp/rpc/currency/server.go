@@ -51,8 +51,9 @@ type currencyServer struct {
 func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	configProvider ConfigProvider,
 ) currencypb.CurrencyServer {
-	liveMintStateWorker := newLiveMintStateWorker(log, data)
+	liveMintStateWorker := newLiveMintStateWorker(log, data, configProvider())
 	liveMintStateWorker.start(context.Background())
 
 	return &currencyServer{

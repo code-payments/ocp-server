@@ -11,6 +11,11 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 )
 
+const (
+	streamNotifyTimeout = 10 * time.Second
+	streamBufferSize    = 100
+)
+
 // streamUpdate represents an update to send to streams (pre-signed)
 type streamUpdate struct {
 	// Pre-signed response ready to send directly
