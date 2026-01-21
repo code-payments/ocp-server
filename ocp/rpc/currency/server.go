@@ -6,13 +6,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
-	"github.com/pkg/errors"
 
 	"github.com/code-payments/ocp-server/cache"
 	currency_lib "github.com/code-payments/ocp-server/currency"
@@ -23,8 +26,14 @@ import (
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
+)
+
+const (
+	streamPingDelay          = 5 * time.Second
+	streamInitialRecvTimeout = 250 * time.Millisecond
 )
 
 type currencyServer struct {
@@ -33,6 +42,8 @@ type currencyServer struct {
 
 	exchangeRateHistoryCache cache.Cache
 	reserveHistoryCache      cache.Cache
+
+	liveMintStateWorker *liveMintStateWorker
 
 	currencypb.UnimplementedCurrencyServer
 }
@@ -47,6 +58,21 @@ func NewCurrencyServer(
 
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
+	}
+}
+
+func NewCurrencyServerWithStateWorker(
+	log *zap.Logger,
+	data ocp_data.Provider,
+) currencypb.CurrencyServer {
+	return &currencyServer{
+		log:  log,
+		data: data,
+
+		exchangeRateHistoryCache: cache.NewCache(1_000),
+		reserveHistoryCache:      cache.NewCache(1_000),
+
+		liveMintStateWorker: newLiveMintStateWorker(log, data),
 	}
 }
 
@@ -73,6 +99,22 @@ func (s *currencyServer) GetAllRates(ctx context.Context, req *currencypb.GetAll
 		AsOf:  protoTime,
 		Rates: record.Rates,
 	}, nil
+}
+
+func (s *currencyServer) loadExchangeRatesForTime(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error) {
+	record, err := s.data.GetAllExchangeRates(ctx, t)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get price record by date")
+	}
+	return record, nil
+}
+
+func (s *currencyServer) loadExchangeRatesLatest(ctx context.Context) (*currency.MultiRateRecord, error) {
+	latest, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get latest price record")
+	}
+	return latest, nil
 }
 
 func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsRequest) (*currencypb.GetMintsResponse, error) {
@@ -353,22 +395,6 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	}, nil
 }
 
-func (s *currencyServer) loadExchangeRatesForTime(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error) {
-	record, err := s.data.GetAllExchangeRates(ctx, t)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get price record by date")
-	}
-	return record, nil
-}
-
-func (s *currencyServer) loadExchangeRatesLatest(ctx context.Context) (*currency.MultiRateRecord, error) {
-	latest, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get latest price record")
-	}
-	return latest, nil
-}
-
 func (s *currencyServer) getCachedReserveHistory(
 	ctx context.Context,
 	mint string,
@@ -481,5 +507,147 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMint
 	default:
 		// For all time, go back 100 years with daily intervals
 		return now.Add(-100 * 365 * 24 * time.Hour), now, query.IntervalDay
+	}
+}
+
+func (s *currencyServer) StreamLiveMintData(
+	streamer currencypb.Currency_StreamLiveMintDataServer,
+) error {
+	ctx := streamer.Context()
+
+	log := s.log.With(zap.String("method", "StreamLiveMintData"))
+	log = client.InjectLoggingMetadata(ctx, log)
+
+	// Wait for the initial request to get the list of mints
+	req, err := protoutil.BoundedReceive[currencypb.StreamLiveMintDataRequest](ctx, streamer, streamInitialRecvTimeout)
+	if err != nil {
+		log.With(zap.Error(err)).Debug("error receiving initial request")
+		return err
+	}
+
+	// Must be a request type
+	request := req.GetRequest()
+	if request == nil {
+		return status.Error(codes.InvalidArgument, "first message must be a request")
+	}
+
+	// Parse requested mints
+	var requestedMints []*common.Account
+	for _, protoMint := range request.GetMints() {
+		mint, err := common.NewAccountFromProto(protoMint)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("invalid mint")
+			return status.Error(codes.Internal, "")
+		}
+		requestedMints = append(requestedMints, mint)
+	}
+
+	// Generate unique stream ID
+	streamID := uuid.New().String()
+	log = log.With(zap.String("stream_id", streamID))
+
+	// Register stream with state worker
+	stream := s.liveMintStateWorker.RegisterStream(streamID, requestedMints)
+	defer s.liveMintStateWorker.UnregisterStream(streamID)
+
+	log.Debug("stream registered")
+
+	// Wait for initial data to be available
+	if err := s.liveMintStateWorker.WaitForData(ctx); err != nil {
+		log.With(zap.Error(err)).Debug("context cancelled while waiting for data")
+		return status.Error(codes.Canceled, "")
+	}
+
+	// Initial flush: send current exchange rates if the stream wants them
+	if stream.wantsExchangeRates() {
+		exchangeRates := s.liveMintStateWorker.GetExchangeRates()
+		if exchangeRates != nil && exchangeRates.SignedResponse != nil {
+			if err := streamer.Send(exchangeRates.SignedResponse); err != nil {
+				log.With(zap.Error(err)).Debug("failed to send initial exchange rates")
+				return err
+			}
+		}
+	}
+
+	// Initial flush: send current reserve states
+	reserveStates := s.liveMintStateWorker.GetReserveStates()
+	if len(reserveStates) > 0 {
+		// Filter based on requested mints and build batch response
+		var filtered []*currencypb.VerifiedLaunchpadCurrencyReserveState
+		for _, state := range reserveStates {
+			if stream.wantsMint(state.Mint.PublicKey().ToBase58()) && state.SignedState != nil {
+				filtered = append(filtered, state.SignedState)
+			}
+		}
+		if len(filtered) > 0 {
+			resp := &currencypb.StreamLiveMintDataResponse{
+				Type: &currencypb.StreamLiveMintDataResponse_Data{
+					Data: &currencypb.StreamLiveMintDataResponse_LiveData{
+						Type: &currencypb.StreamLiveMintDataResponse_LiveData_LaunchpadCurrencyReserveStates{
+							LaunchpadCurrencyReserveStates: &currencypb.VerifiedLaunchapdCurrencyReserveStateBatch{
+								ReserveStates: filtered,
+							},
+						},
+					},
+				},
+			}
+			if err := streamer.Send(resp); err != nil {
+				log.With(zap.Error(err)).Debug("failed to send initial reserve states")
+				return err
+			}
+		}
+	}
+
+	log.Debug("initial flush complete")
+
+	// Set up ping/pong health monitoring
+	sendPingCh := time.After(0) // Send first ping immediately
+	streamHealthCh := protoutil.MonitorStreamHealth(ctx, log, streamer, func(req *currencypb.StreamLiveMintDataRequest) bool {
+		return req.GetPong() != nil
+	})
+
+	// Main loop: listen on stream channel and send updates
+	for {
+		select {
+		case update, ok := <-stream.streamCh:
+			if !ok {
+				log.Debug("stream channel closed")
+				return status.Error(codes.Aborted, "stream closed")
+			}
+
+			if update.response == nil {
+				continue
+			}
+
+			if err := streamer.Send(update.response); err != nil {
+				log.With(zap.Error(err)).Debug("failed to send update")
+				return err
+			}
+
+		case <-sendPingCh:
+			log.Debug("sending ping to client")
+			sendPingCh = time.After(streamPingDelay)
+
+			err := streamer.Send(&currencypb.StreamLiveMintDataResponse{
+				Type: &currencypb.StreamLiveMintDataResponse_Ping{
+					Ping: &commonpb.ServerPing{
+						Timestamp: timestamppb.Now(),
+						PingDelay: durationpb.New(streamPingDelay),
+					},
+				},
+			})
+			if err != nil {
+				log.Debug("failed to send ping, stream is unhealthy")
+				return status.Error(codes.Aborted, "terminating unhealthy stream")
+			}
+
+		case <-streamHealthCh:
+			log.Debug("stream is unhealthy, terminating")
+			return status.Error(codes.Aborted, "terminating unhealthy stream")
+
+		case <-ctx.Done():
+			log.Debug("context cancelled")
+			return status.Error(codes.Canceled, "")
+		}
 	}
 }
