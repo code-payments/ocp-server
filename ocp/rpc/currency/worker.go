@@ -89,15 +89,15 @@ func newLiveMintStateWorker(log *zap.Logger, data ocp_data.Provider) *liveMintSt
 	}
 }
 
-// Start begins the polling goroutines for exchange rates and reserve state
-func (m *liveMintStateWorker) Start(ctx context.Context) error {
+// start begins the polling goroutines for exchange rates and reserve state
+func (m *liveMintStateWorker) start(ctx context.Context) error {
 	go m.pollExchangeRates(ctx)
 	go m.pollReserveState(ctx)
 	return nil
 }
 
-// Stop cancels the polling goroutines and closes all streams
-func (m *liveMintStateWorker) Stop() {
+// stop cancels the polling goroutines and closes all streams
+func (m *liveMintStateWorker) stop() {
 	m.cancel()
 
 	m.streamsMu.Lock()
@@ -109,8 +109,8 @@ func (m *liveMintStateWorker) Stop() {
 	m.streams = make(map[string]*liveMintDataStream)
 }
 
-// RegisterStream creates and registers a new stream for the given mints
-func (m *liveMintStateWorker) RegisterStream(id string, mints []*common.Account) *liveMintDataStream {
+// registerStream creates and registers a new stream for the given mints
+func (m *liveMintStateWorker) registerStream(id string, mints []*common.Account) *liveMintDataStream {
 	stream := newLiveMintDataStream(id, mints, streamBufferSize)
 
 	m.streamsMu.Lock()
@@ -120,8 +120,8 @@ func (m *liveMintStateWorker) RegisterStream(id string, mints []*common.Account)
 	return stream
 }
 
-// UnregisterStream removes a stream and closes it
-func (m *liveMintStateWorker) UnregisterStream(id string) {
+// unregisterStream removes a stream and closes it
+func (m *liveMintStateWorker) unregisterStream(id string) {
 	m.streamsMu.Lock()
 	stream, ok := m.streams[id]
 	if ok {
@@ -135,7 +135,7 @@ func (m *liveMintStateWorker) UnregisterStream(id string) {
 }
 
 // WaitForData blocks until initial data is loaded or context is cancelled
-func (m *liveMintStateWorker) WaitForData(ctx context.Context) error {
+func (m *liveMintStateWorker) waitForData(ctx context.Context) error {
 	select {
 	case <-m.dataReady:
 		return nil
@@ -145,7 +145,7 @@ func (m *liveMintStateWorker) WaitForData(ctx context.Context) error {
 }
 
 // GetExchangeRates returns the current pre-signed exchange rate data
-func (m *liveMintStateWorker) GetExchangeRates() *liveExchangeRateData {
+func (m *liveMintStateWorker) getExchangeRates() *liveExchangeRateData {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
@@ -153,7 +153,7 @@ func (m *liveMintStateWorker) GetExchangeRates() *liveExchangeRateData {
 }
 
 // GetReserveStates returns all current pre-signed launchpad currency reserve states
-func (m *liveMintStateWorker) GetReserveStates() []*liveReserveStateData {
+func (m *liveMintStateWorker) getReserveStates() []*liveReserveStateData {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 

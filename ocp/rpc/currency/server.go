@@ -52,6 +52,9 @@ func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
 ) currencypb.CurrencyServer {
+	liveMintStateWorker := newLiveMintStateWorker(log, data)
+	liveMintStateWorker.start(context.Background())
+
 	return &currencyServer{
 		log:  log,
 		data: data,
@@ -59,7 +62,7 @@ func NewCurrencyServer(
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
 
-		liveMintStateWorker: newLiveMintStateWorker(log, data),
+		liveMintStateWorker: liveMintStateWorker,
 	}
 }
 
@@ -534,20 +537,20 @@ func (s *currencyServer) StreamLiveMintData(
 	log = log.With(zap.String("stream_id", streamID))
 
 	// Register stream with state worker
-	stream := s.liveMintStateWorker.RegisterStream(streamID, requestedMints)
-	defer s.liveMintStateWorker.UnregisterStream(streamID)
+	stream := s.liveMintStateWorker.registerStream(streamID, requestedMints)
+	defer s.liveMintStateWorker.unregisterStream(streamID)
 
 	log.Debug("stream registered")
 
 	// Wait for initial data to be available
-	if err := s.liveMintStateWorker.WaitForData(ctx); err != nil {
+	if err := s.liveMintStateWorker.waitForData(ctx); err != nil {
 		log.With(zap.Error(err)).Debug("context cancelled while waiting for data")
 		return status.Error(codes.Canceled, "")
 	}
 
 	// Initial flush: send current exchange rates if the stream wants them
 	if stream.wantsExchangeRates() {
-		exchangeRates := s.liveMintStateWorker.GetExchangeRates()
+		exchangeRates := s.liveMintStateWorker.getExchangeRates()
 		if exchangeRates != nil && exchangeRates.SignedResponse != nil {
 			if err := streamer.Send(exchangeRates.SignedResponse); err != nil {
 				log.With(zap.Error(err)).Debug("failed to send initial exchange rates")
@@ -557,7 +560,7 @@ func (s *currencyServer) StreamLiveMintData(
 	}
 
 	// Initial flush: send current reserve states
-	reserveStates := s.liveMintStateWorker.GetReserveStates()
+	reserveStates := s.liveMintStateWorker.getReserveStates()
 	if len(reserveStates) > 0 {
 		// Filter based on requested mints and build batch response
 		var filtered []*currencypb.VerifiedLaunchpadCurrencyReserveState
