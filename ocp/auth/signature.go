@@ -63,7 +63,7 @@ type marshalStrategy func(proto.Message) ([]byte, error)
 
 // defaultMarshalStrategies are the default marshal strategies
 var defaultMarshalStrategies = []marshalStrategy{
-	forceConsistentMarshal,
+	ForceConsistentMarshal,
 	proto.Marshal, // todo: deprecate this option
 }
 

@@ -43,7 +43,9 @@ var wireTypes = map[protoreflect.Kind]protowire.Type{
 	protoreflect.GroupKind:    protowire.StartGroupType,
 }
 
-func forceConsistentMarshal(m proto.Message) ([]byte, error) {
+// ForceConsistentMarshal marshals a proto message using field number ordering
+// for consistent serialization across different language implementations.
+func ForceConsistentMarshal(m proto.Message) ([]byte, error) {
 	out, err := consistentMarshal(nil, m.ProtoReflect())
 	if err != nil {
 		return nil, err

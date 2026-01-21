@@ -9,14 +9,12 @@ import (
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/worker"
 	"github.com/code-payments/ocp-server/retry"
 	"github.com/code-payments/ocp-server/retry/backoff"
-	"github.com/code-payments/ocp-server/solana"
-	"github.com/code-payments/ocp-server/solana/currencycreator"
-	"github.com/code-payments/ocp-server/solana/token"
 )
 
 type reserveRuntime struct {
@@ -74,20 +72,16 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) error {
 	err1 := func() error {
 		jeffyMintAccount, _ := common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
-		jeffyVaultAccount, _ := common.NewAccountFromPublicKeyString("BMYftxDcbLDTzRCkLmQ9amwNgqsZ74A1wsd1gURum3Ep")
 
-		var tokenAccount token.Account
-		ai, err := p.data.GetBlockchainAccountInfo(ctx, jeffyVaultAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+		jeffyCirculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, jeffyMintAccount)
 		if err != nil {
 			return err
 		}
-		tokenAccount.Unmarshal(ai.Data)
-		jeffyVaultBalance := tokenAccount.Amount
 
 		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
 			Mint:              jeffyMintAccount.PublicKey().ToBase58(),
-			SupplyFromBonding: currencycreator.DefaultMintMaxQuarkSupply - jeffyVaultBalance,
-			Time:              time.Now(),
+			SupplyFromBonding: jeffyCirculatingSupply,
+			Time:              ts,
 		})
 	}()
 

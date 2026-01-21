@@ -42,7 +42,7 @@ func TestProtoEncoding_CrossLanguageSupport(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, goValue, base64.StdEncoding.EncodeToString(marshalled))
 
-		marshalled, err = forceConsistentMarshal(&msg)
+		marshalled, err = ForceConsistentMarshal(&msg)
 		require.NoError(t, err)
 		assert.Equal(t, otherLanguageValue, base64.StdEncoding.EncodeToString(marshalled))
 	}
@@ -83,7 +83,7 @@ func TestProtoEncoding_SDKTestParity(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, marshalled, expected)
 
-	marshalled, err = forceConsistentMarshal(&msg)
+	marshalled, err = ForceConsistentMarshal(&msg)
 	require.NoError(t, err)
 	assert.Equal(t, marshalled, expected)
 }
