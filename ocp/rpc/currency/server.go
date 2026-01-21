@@ -58,19 +58,6 @@ func NewCurrencyServer(
 
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
-	}
-}
-
-func NewCurrencyServerWithStateWorker(
-	log *zap.Logger,
-	data ocp_data.Provider,
-) currencypb.CurrencyServer {
-	return &currencyServer{
-		log:  log,
-		data: data,
-
-		exchangeRateHistoryCache: cache.NewCache(1_000),
-		reserveHistoryCache:      cache.NewCache(1_000),
 
 		liveMintStateWorker: newLiveMintStateWorker(log, data),
 	}
