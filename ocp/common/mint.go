@@ -62,6 +62,10 @@ func GetMintQuarksPerUnit(mint *Account) uint64 {
 }
 
 func IsSupportedMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (bool, error) {
+	if !IsCoreMint(mintAccount) && !IsCoreMintUsdStableCoin() {
+		return false, nil
+	}
+
 	_, err := GetVmConfigForMint(ctx, data, mintAccount)
 	if err == ErrUnsupportedMint {
 		return false, nil

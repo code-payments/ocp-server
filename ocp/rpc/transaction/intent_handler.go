@@ -3,18 +3,22 @@ package transaction
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"strings"
 	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/aml"
 	"github.com/code-payments/ocp-server/ocp/antispam"
+	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
@@ -230,7 +234,7 @@ func (h *OpenAccountsIntentHandler) AllowCreation(ctx context.Context, intentRec
 	// Part 4: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.conf, intentRecord, simResult, nil)
 	if err != nil {
 		return err
 	}
@@ -392,9 +396,30 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 		return err
 	}
 
-	exchangeData := typedProtoMetadata.ExchangeData
+	var currencyCode currency_lib.Code
+	var nativeAmount float64
+	var exchangeRate float64
+	var quarks uint64
+	switch typed := typedProtoMetadata.ExchangeData.(type) {
+	case *transactionpb.SendPublicPaymentMetadata_ClientExchangeData:
+		currencyCode = currency_lib.Code(typed.ClientExchangeData.CoreMintFiatExchangeRate.ExchangeRate.CurrencyCode)
+		nativeAmount = typed.ClientExchangeData.NativeAmount
+		if common.IsCoreMint(mint) {
+			exchangeRate = typed.ClientExchangeData.CoreMintFiatExchangeRate.ExchangeRate.ExchangeRate
+		} else {
+			exchangeRate = currency_util.CalculateExchangeRate(mint, typed.ClientExchangeData.NativeAmount, typed.ClientExchangeData.Quarks)
+		}
+		quarks = typed.ClientExchangeData.Quarks
+	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData: // todo: deprecate this flow
+		currencyCode = currency_lib.Code(typed.ServerExchangeData.Currency)
+		nativeAmount = typed.ServerExchangeData.NativeAmount
+		exchangeRate = typed.ServerExchangeData.ExchangeRate
+		quarks = typed.ServerExchangeData.Quarks
+	default:
+		return NewIntentDeniedError("client exchange data not provided")
+	}
 
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, h.data, mint, exchangeData.Quarks, currency_util.GetLatestExchangeRateTime())
+	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, h.data, mint, quarks, currency_util.GetLatestExchangeRateTime())
 	if err != nil {
 		return err
 	}
@@ -414,11 +439,11 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 	intentRecord.MintAccount = mint.PublicKey().ToBase58()
 	intentRecord.SendPublicPaymentMetadata = &intent.SendPublicPaymentMetadata{
 		DestinationTokenAccount: destination.PublicKey().ToBase58(),
-		Quantity:                exchangeData.Quarks,
+		Quantity:                quarks,
 
-		ExchangeCurrency: currency_lib.Code(exchangeData.Currency),
-		ExchangeRate:     exchangeData.ExchangeRate,
-		NativeAmount:     typedProtoMetadata.ExchangeData.NativeAmount,
+		ExchangeCurrency: currencyCode,
+		ExchangeRate:     exchangeRate,
+		NativeAmount:     nativeAmount,
 		UsdMarketValue:   usdMarketValue,
 
 		IsWithdrawal: typedProtoMetadata.IsWithdrawal,
@@ -578,8 +603,15 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 	// Part 4: Exchange data validation
 	//
 
-	if err := validateExchangeDataWithinIntent(ctx, h.log, h.data, typedMetadata.Mint, typedMetadata.ExchangeData); err != nil {
-		return err
+	switch typed := typedMetadata.ExchangeData.(type) {
+	case *transactionpb.SendPublicPaymentMetadata_ClientExchangeData:
+		if err := validateExchangeDataWithinIntent(typedMetadata.Mint, typed.ClientExchangeData); err != nil {
+			return err
+		}
+	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData:
+		if err := validateLegacyExchangeDataWithinIntent(ctx, h.log, h.data, typedMetadata.Mint, typed.ServerExchangeData); err != nil {
+			return err
+		}
 	}
 
 	//
@@ -595,7 +627,7 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 	// Part 6: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.conf, intentRecord, simResult, typedMetadata.GetClientExchangeData())
 	if err != nil {
 		return err
 	}
@@ -639,6 +671,14 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	destination, err := common.NewAccountFromProto(metadata.Destination)
 	if err != nil {
 		return err
+	}
+
+	var quarks uint64
+	switch typed := metadata.ExchangeData.(type) {
+	case *transactionpb.SendPublicPaymentMetadata_ClientExchangeData:
+		quarks = typed.ClientExchangeData.Quarks
+	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData:
+		quarks = typed.ServerExchangeData.Quarks
 	}
 
 	//
@@ -805,7 +845,7 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	//           minus any fees
 	//
 
-	expectedDestinationPayment := int64(metadata.ExchangeData.Quarks)
+	expectedDestinationPayment := int64(quarks)
 
 	// Minimal validation required here since validateFeePayments generically handles
 	// most checks that isn't specific to an intent.
@@ -834,8 +874,8 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	sourceSimulation, ok := simResult.SimulationsByAccount[source.PublicKey().ToBase58()]
 	if !ok {
 		return NewIntentValidationErrorf("must send payment from source account %s", source.PublicKey().ToBase58())
-	} else if sourceSimulation.GetDeltaQuarks(false) != -int64(metadata.ExchangeData.Quarks) {
-		return NewActionValidationErrorf(sourceSimulation.Transfers[0].Action, "must send %d quarks from source account", metadata.ExchangeData.Quarks)
+	} else if sourceSimulation.GetDeltaQuarks(false) != -int64(quarks) {
+		return NewActionValidationErrorf(sourceSimulation.Transfers[0].Action, "must send %d quarks from source account", quarks)
 	}
 
 	// Part 5: Generic validation of actions that move money
@@ -876,8 +916,8 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 			return NewIntentValidationError("expected auto-return for the remote send gift card")
 		} else if autoReturns[0].IsPrivate || !autoReturns[0].IsWithdraw {
 			return NewActionValidationError(destinationSimulation.Transfers[0].Action, "auto-return must be a public withdraw")
-		} else if autoReturns[0].DeltaQuarks != -int64(metadata.ExchangeData.Quarks) {
-			return NewActionValidationErrorf(autoReturns[0].Action, "must auto-return %d quarks from remote send gift card", metadata.ExchangeData.Quarks)
+		} else if autoReturns[0].DeltaQuarks != -int64(quarks) {
+			return NewActionValidationErrorf(autoReturns[0].Action, "must auto-return %d quarks from remote send gift card", quarks)
 		}
 
 		autoReturns = sourceSimulation.GetAutoReturns()
@@ -1114,7 +1154,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) AllowCreation(ctx context.Context
 	// Part 6: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.conf, intentRecord, simResult, nil)
 	if err != nil {
 		return err
 	}
@@ -1435,7 +1475,7 @@ func (h *PublicDistributionIntentHandler) AllowCreation(ctx context.Context, int
 	// Part 4: Validate fee payments
 	//
 
-	err = validateFeePayments(ctx, h.log, h.data, h.conf, intentRecord, simResult)
+	err = validateFeePayments(ctx, h.conf, intentRecord, simResult, nil)
 	if err != nil {
 		return err
 	}
@@ -1771,7 +1811,7 @@ func validateExternalTokenAccountWithinIntent(ctx context.Context, data ocp_data
 	return nil
 }
 
-func validateExchangeDataWithinIntent(ctx context.Context, log *zap.Logger, data ocp_data.Provider, intentMint *commonpb.SolanaAccountId, proto *transactionpb.ExchangeData) error {
+func validateExchangeDataWithinIntent(intentMint *commonpb.SolanaAccountId, proto *transactionpb.VerifiedExchangeData) error {
 	intentMintAccount, err := common.GetBackwardsCompatMint(intentMint)
 	if err != nil {
 		return err
@@ -1786,7 +1826,32 @@ func validateExchangeDataWithinIntent(ctx context.Context, log *zap.Logger, data
 		return NewIntentValidationErrorf("expected exchange data mint to be %s", intentMintAccount.PublicKey().ToBase58())
 	}
 
-	isValid, message, err := currency_util.ValidateClientExchangeData(ctx, log, data, proto)
+	isValid, message := currency_util.ValidateClientExchangeData(proto)
+	if !isValid {
+		if strings.Contains(message, "stale") {
+			return NewStaleStateError(message)
+		}
+		return NewIntentValidationError(message)
+	}
+	return nil
+}
+
+func validateLegacyExchangeDataWithinIntent(ctx context.Context, log *zap.Logger, data ocp_data.Provider, intentMint *commonpb.SolanaAccountId, proto *transactionpb.ExchangeData) error {
+	intentMintAccount, err := common.GetBackwardsCompatMint(intentMint)
+	if err != nil {
+		return err
+	}
+
+	exchangeMintAccount, err := common.GetBackwardsCompatMint(proto.Mint)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(intentMintAccount.PublicKey().ToBytes(), exchangeMintAccount.PublicKey().ToBytes()) {
+		return NewIntentValidationErrorf("expected exchange data mint to be %s", intentMintAccount.PublicKey().ToBase58())
+	}
+
+	isValid, message, err := currency_util.ValidateLegacyClientExchangeData(ctx, log, data, proto)
 	if err != nil {
 		return err
 	} else if !isValid {
@@ -1800,11 +1865,10 @@ func validateExchangeDataWithinIntent(ctx context.Context, log *zap.Logger, data
 
 func validateFeePayments(
 	ctx context.Context,
-	log *zap.Logger,
-	data ocp_data.Provider,
 	conf *conf,
 	intentRecord *intent.Record,
 	simResult *LocalSimulationResult,
+	clientExchangeData *transactionpb.VerifiedExchangeData,
 ) error {
 	var isFeeOptional bool
 	var expectedFeeType transactionpb.FeePaymentAction_FeeType
@@ -1828,6 +1892,10 @@ func validateFeePayments(
 	}
 	if !simResult.HasAnyFeePayments() && isFeeOptional {
 		return nil
+	}
+
+	if clientExchangeData == nil {
+		return errors.New("expected client exchange data")
 	}
 
 	feePayments := simResult.GetFeePayments()
@@ -1862,19 +1930,36 @@ func validateFeePayments(
 	}
 	feeAmount = -feeAmount // Because it's coming out of a user account in this simulation
 
-	mintQuarksPerUnit := common.GetMintQuarksPerUnit(mintAccount)
-	unitsOfMint := float64(feeAmount) / float64(mintQuarksPerUnit)
+	// todo: Fix for non USD stable coins
+	if !common.IsCoreMintUsdStableCoin() {
+		return errors.New("fee validation doesn't support non-stable coin core mint")
+	}
 
-	isValid, _, err := currency_util.ValidateClientExchangeData(ctx, log, data, &transactionpb.ExchangeData{
-		Currency:     string(currency_lib.USD),
-		NativeAmount: expectedUsdValue,
-		ExchangeRate: expectedUsdValue / unitsOfMint,
-		Quarks:       uint64(feeAmount),
-		Mint:         mintAccount.ToProto(),
-	})
+	// Fees are always in USD, and we assume a USD stablecoin for simplicity
+	// To support other types of core mint tokens, we'd need to pass additional
+	// USD exchange data from client.
+	coreMintFiatExchangeRate := &currencypb.CoreMintFiatExchangeRate{
+		CurrencyCode: string(currency_lib.USD),
+		ExchangeRate: 1.0,
+		Timestamp:    timestamppb.Now(),
+	}
+
+	marshalled, err := auth.ForceConsistentMarshal(coreMintFiatExchangeRate)
 	if err != nil {
 		return err
-	} else if !isValid {
+	}
+
+	isValid, _ := currency_util.ValidateClientExchangeData(&transactionpb.VerifiedExchangeData{
+		Mint:         mintAccount.ToProto(),
+		Quarks:       uint64(feeAmount),
+		NativeAmount: expectedUsdValue,
+		CoreMintFiatExchangeRate: &currencypb.VerifiedCoreMintFiatExchangeRate{
+			ExchangeRate: coreMintFiatExchangeRate,
+			Signature:    &commonpb.Signature{Value: ed25519.Sign(common.GetSubsidizer().PrivateKey().ToBytes(), marshalled)},
+		},
+		LaunchpadCurrencyReserveState: clientExchangeData.LaunchpadCurrencyReserveState,
+	})
+	if !isValid {
 		return NewActionValidationErrorf(feePayment.Action, "%s fee payment amount must be %.2f USD", expectedFeeType.String(), expectedUsdValue)
 	}
 
