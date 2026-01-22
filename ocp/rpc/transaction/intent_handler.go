@@ -392,7 +392,7 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 		return err
 	}
 
-	exchangeData := typedProtoMetadata.ExchangeData
+	exchangeData := typedProtoMetadata.GetServerExchangeData()
 
 	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, h.data, mint, exchangeData.Quarks, currency_util.GetLatestExchangeRateTime())
 	if err != nil {
@@ -418,7 +418,7 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 
 		ExchangeCurrency: currency_lib.Code(exchangeData.Currency),
 		ExchangeRate:     exchangeData.ExchangeRate,
-		NativeAmount:     typedProtoMetadata.ExchangeData.NativeAmount,
+		NativeAmount:     exchangeData.NativeAmount,
 		UsdMarketValue:   usdMarketValue,
 
 		IsWithdrawal: typedProtoMetadata.IsWithdrawal,
@@ -578,7 +578,7 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 	// Part 4: Exchange data validation
 	//
 
-	if err := validateExchangeDataWithinIntent(ctx, h.log, h.data, typedMetadata.Mint, typedMetadata.ExchangeData); err != nil {
+	if err := validateExchangeDataWithinIntent(ctx, h.log, h.data, typedMetadata.Mint, typedMetadata.GetServerExchangeData()); err != nil {
 		return err
 	}
 
@@ -805,7 +805,7 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	//           minus any fees
 	//
 
-	expectedDestinationPayment := int64(metadata.ExchangeData.Quarks)
+	expectedDestinationPayment := int64(metadata.GetServerExchangeData().Quarks)
 
 	// Minimal validation required here since validateFeePayments generically handles
 	// most checks that isn't specific to an intent.
@@ -834,8 +834,8 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	sourceSimulation, ok := simResult.SimulationsByAccount[source.PublicKey().ToBase58()]
 	if !ok {
 		return NewIntentValidationErrorf("must send payment from source account %s", source.PublicKey().ToBase58())
-	} else if sourceSimulation.GetDeltaQuarks(false) != -int64(metadata.ExchangeData.Quarks) {
-		return NewActionValidationErrorf(sourceSimulation.Transfers[0].Action, "must send %d quarks from source account", metadata.ExchangeData.Quarks)
+	} else if sourceSimulation.GetDeltaQuarks(false) != -int64(metadata.GetServerExchangeData().Quarks) {
+		return NewActionValidationErrorf(sourceSimulation.Transfers[0].Action, "must send %d quarks from source account", metadata.GetServerExchangeData().Quarks)
 	}
 
 	// Part 5: Generic validation of actions that move money
@@ -876,8 +876,8 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 			return NewIntentValidationError("expected auto-return for the remote send gift card")
 		} else if autoReturns[0].IsPrivate || !autoReturns[0].IsWithdraw {
 			return NewActionValidationError(destinationSimulation.Transfers[0].Action, "auto-return must be a public withdraw")
-		} else if autoReturns[0].DeltaQuarks != -int64(metadata.ExchangeData.Quarks) {
-			return NewActionValidationErrorf(autoReturns[0].Action, "must auto-return %d quarks from remote send gift card", metadata.ExchangeData.Quarks)
+		} else if autoReturns[0].DeltaQuarks != -int64(metadata.GetServerExchangeData().Quarks) {
+			return NewActionValidationErrorf(autoReturns[0].Action, "must auto-return %d quarks from remote send gift card", metadata.GetServerExchangeData().Quarks)
 		}
 
 		autoReturns = sourceSimulation.GetAutoReturns()

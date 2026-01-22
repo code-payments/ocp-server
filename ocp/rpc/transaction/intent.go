@@ -823,12 +823,14 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 				SendPublicPayment: &transactionpb.SendPublicPaymentMetadata{
 					Source:      sourceAccount.ToProto(),
 					Destination: destinationAccount.ToProto(),
-					ExchangeData: &transactionpb.ExchangeData{
-						Currency:     strings.ToLower(string(intentRecord.SendPublicPaymentMetadata.ExchangeCurrency)),
-						ExchangeRate: intentRecord.SendPublicPaymentMetadata.ExchangeRate,
-						NativeAmount: intentRecord.SendPublicPaymentMetadata.NativeAmount,
-						Quarks:       intentRecord.SendPublicPaymentMetadata.Quantity,
-						Mint:         mintAccount.ToProto(),
+					ExchangeData: &transactionpb.SendPublicPaymentMetadata_ServerExchangeData{
+						ServerExchangeData: &transactionpb.ExchangeData{
+							Currency:     strings.ToLower(string(intentRecord.SendPublicPaymentMetadata.ExchangeCurrency)),
+							ExchangeRate: intentRecord.SendPublicPaymentMetadata.ExchangeRate,
+							NativeAmount: intentRecord.SendPublicPaymentMetadata.NativeAmount,
+							Quarks:       intentRecord.SendPublicPaymentMetadata.Quantity,
+							Mint:         mintAccount.ToProto(),
+						},
 					},
 					IsRemoteSend: intentRecord.SendPublicPaymentMetadata.IsRemoteSend,
 					IsWithdrawal: intentRecord.SendPublicPaymentMetadata.IsWithdrawal,
