@@ -89,9 +89,9 @@ func ValidateVerifiedReserveState(proto *currencypb.VerifiedLaunchpadCurrencyRes
 	return true, ""
 }
 
-// ValidateVerifiedExchangeData validates client-provided exchange data with
+// ValidateClientExchangeData validates client-provided exchange data with
 // provable exchange rates and reserve states that were provided by server.
-func ValidateVerifiedExchangeData(proto *transactionpb.VerifiedExchangeData) (bool, string) {
+func ValidateClientExchangeData(proto *transactionpb.VerifiedExchangeData) (bool, string) {
 	if proto == nil {
 		return false, "verified exchange data is required"
 	}
@@ -237,8 +237,8 @@ func validateLaunchpadCurrencyVerifiedExchangeData(proto *transactionpb.Verified
 	return true, ""
 }
 
-// ValidateClientExchangeData validates proto exchange data provided by a client
-func ValidateClientExchangeData(ctx context.Context, log *zap.Logger, data ocp_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
+// ValidateLegacyClientExchangeData validates legacy proto exchange data provided by a client
+func ValidateLegacyClientExchangeData(ctx context.Context, log *zap.Logger, data ocp_data.Provider, proto *transactionpb.ExchangeData) (bool, string, error) {
 	mint, err := common.GetBackwardsCompatMint(proto.Mint)
 	if err != nil {
 		return false, "", err
