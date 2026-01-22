@@ -24,8 +24,12 @@ type VmConfig struct {
 	Mint      *Account
 }
 
-func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mint *Account) (*VmConfig, error) {
-	switch mint.PublicKey().ToBase58() {
+func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (*VmConfig, error) {
+	if !IsCoreMint(mintAccount) && !IsCoreMintUsdStableCoin() {
+		return nil, ErrUnsupportedMint
+	}
+
+	switch mintAccount.PublicKey().ToBase58() {
 	case CoreMintAccount.PublicKey().ToBase58():
 		return &VmConfig{
 			Authority: GetSubsidizer(),
@@ -50,7 +54,7 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mint *Accou
 			Authority: jeffyAuthority,
 			Vm:        jeffyVmAccount,
 			Omnibus:   jeffyVmOmnibusAccount,
-			Mint:      mint,
+			Mint:      mintAccount,
 		}, nil
 	default:
 		return nil, ErrUnsupportedMint
