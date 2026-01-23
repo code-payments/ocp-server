@@ -330,13 +330,25 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	// Build historical data points with market cap
 	var data []*currencypb.HistoricalMintData
 
-	// Add a 0 market cap value at time of currency creation if it falls within
-	// the start time
 	if startTime.Before(metadataRecord.CreatedAt) {
-		data = append(data, &currencypb.HistoricalMintData{
-			Timestamp: timestamppb.New(metadataRecord.CreatedAt),
-			MarketCap: 0,
-		})
+		if req.GetPredefinedRange() != currencypb.GetHistoricalMintDataRequest_ALL_TIME {
+			data = append(
+				data,
+				// 0 market cap value at the range start time
+				&currencypb.HistoricalMintData{
+					Timestamp: timestamppb.New(startTime),
+					MarketCap: 0,
+				},
+			)
+		}
+		data = append(
+			data,
+			// 0 market cap value at time of currency creation
+			&currencypb.HistoricalMintData{
+				Timestamp: timestamppb.New(metadataRecord.CreatedAt),
+				MarketCap: 0,
+			},
+		)
 	}
 
 	for _, reserve := range reserveHistory {
