@@ -11,6 +11,7 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
@@ -241,17 +242,42 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		return nil
 	}
 
-	fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
-	if err != nil {
-		return err
+	var currencyCode currency_lib.Code
+	var nativeAmount float64
+	switch swapRecord.FundingSource {
+	case swap.FundingSourceSubmitIntent:
+		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
+		if err != nil {
+			return err
+		}
+
+		if fundingIntentRecord.IntentType != intent.SendPublicPayment {
+			return errors.New("unexpected intent type")
+		}
+
+		currencyCode = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
+		nativeAmount = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
+	case swap.FundingSourceExternalWallet:
+		if !common.IsCoreMint(fromMint) {
+			return errors.New("unexpected source mint")
+		}
+
+		if !common.IsCoreMintUsdStableCoin() {
+			return errors.New("core mint is not a usd stable coin")
+		}
+
+		currencyCode = currency_lib.USD
+		nativeAmount = float64(swapRecord.Amount) / float64(common.GetMintQuarksPerUnit(fromMint))
+	default:
+		return errors.New("unsupported funding source")
 	}
 
-	valueReceived := fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
+	valueReceived := nativeAmount
 	if !common.IsCoreMint(fromMint) {
 		valueReceived = 0.99 * valueReceived
 	}
 
-	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetCurrencyMetadataRecord.Name, fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, valueReceived)
+	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
 }
 
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {
