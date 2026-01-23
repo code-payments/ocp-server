@@ -116,7 +116,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			reserveRecord, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), currency_util.GetLatestExchangeRateTime())
+			reserveRecord, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), time.Now())
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failed to load currency reserve record")
 				return nil, status.Error(codes.Internal, "")
