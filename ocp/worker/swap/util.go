@@ -131,13 +131,18 @@ func (p *runtime) submitTransaction(ctx context.Context, record *swap.Record) er
 	return nil
 }
 
-func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *swap.Record) (uint64, error) {
-	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord *swap.Record) (uint64, error) {
+	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
 		return 0, err
 	}
 
-	toMint, err := common.NewAccountFromPublicKeyString(record.ToMint)
+	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+	if err != nil {
+		return 0, err
+	}
+
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return 0, err
 	}
@@ -152,7 +157,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 		return 0, err
 	}
 
-	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, record.TransactionSignature)
+	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, swapRecord.TransactionSignature)
 	if err != nil {
 		return 0, err
 	}
@@ -165,15 +170,40 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 		return 0, errors.New("delta quarks into destination vm omnibus is not positive")
 	}
 
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, p.data, toMint, uint64(deltaQuarksIntoOmnibus), time.Now())
-	if err != nil {
-		return 0, err
+	var usdMarketValue float64
+	switch swapRecord.FundingSource {
+	case swap.FundingSourceSubmitIntent:
+		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
+		if err != nil {
+			return 0, err
+		}
+
+		if fundingIntentRecord.IntentType != intent.SendPublicPayment {
+			return 0, errors.New("unexpected intent type")
+		}
+
+		usdMarketValue = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
+	case swap.FundingSourceExternalWallet:
+		if !common.IsCoreMint(fromMint) {
+			return 0, errors.New("unexpected source mint")
+		}
+
+		if !common.IsCoreMintUsdStableCoin() {
+			return 0, errors.New("core mint is not a usd stable coin")
+		}
+
+		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.Amount, time.Now())
+		if err != nil {
+			return 0, err
+		}
+	default:
+		return 0, errors.New("unsupported funding source")
 	}
 
 	err = p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 		// For transaction history
 		intentRecord := &intent.Record{
-			IntentId:   getSwapDepositIntentID(record.TransactionSignature, ownerDestinationTimelockVault),
+			IntentId:   getSwapDepositIntentID(swapRecord.TransactionSignature, ownerDestinationTimelockVault),
 			IntentType: intent.ExternalDeposit,
 
 			MintAccount: toMint.PublicKey().ToBase58(),
@@ -196,7 +226,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, record *sw
 
 		// For tracking in cached balances
 		externalDepositRecord := &deposit.Record{
-			Signature:      record.TransactionSignature,
+			Signature:      swapRecord.TransactionSignature,
 			Destination:    ownerDestinationTimelockVault.PublicKey().ToBase58(),
 			Amount:         uint64(deltaQuarksIntoOmnibus),
 			UsdMarketValue: usdMarketValue,

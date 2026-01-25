@@ -313,7 +313,7 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 			return errors.Wrap(err, "invalid owner account")
 		}
 
-		usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, data, mint, uint64(deltaQuarksIntoOmnibus), time.Now())
+		usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, data, mint, uint64(deltaQuarksIntoOmnibus), time.Now())
 		if err != nil {
 			return errors.Wrap(err, "error calculating usd market value")
 		}
