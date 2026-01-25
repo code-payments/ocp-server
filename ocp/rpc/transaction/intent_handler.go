@@ -400,6 +400,7 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 	var nativeAmount float64
 	var exchangeRate float64
 	var quarks uint64
+	var usdMarketValue float64
 	switch typed := typedProtoMetadata.ExchangeData.(type) {
 	case *transactionpb.SendPublicPaymentMetadata_ClientExchangeData:
 		currencyCode = currency_lib.Code(typed.ClientExchangeData.CoreMintFiatExchangeRate.ExchangeRate.CurrencyCode)
@@ -410,18 +411,21 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 			exchangeRate = currency_util.CalculateExchangeRate(mint, typed.ClientExchangeData.Quarks, typed.ClientExchangeData.NativeAmount)
 		}
 		quarks = typed.ClientExchangeData.Quarks
+		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromFiatAmount(nativeAmount, typed.ClientExchangeData.CoreMintFiatExchangeRate.ExchangeRate.ExchangeRate)
+		if err != nil {
+			return err
+		}
 	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData: // todo: deprecate this flow
 		currencyCode = currency_lib.Code(typed.ServerExchangeData.Currency)
 		nativeAmount = typed.ServerExchangeData.NativeAmount
 		exchangeRate = typed.ServerExchangeData.ExchangeRate
 		quarks = typed.ServerExchangeData.Quarks
+		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, h.data, mint, quarks, currency_util.GetLatestExchangeRateTime())
+		if err != nil {
+			return err
+		}
 	default:
 		return NewIntentDeniedError("client exchange data not provided")
-	}
-
-	usdMarketValue, err := currency_util.CalculateUsdMarketValueFromFiatAmount(nativeAmount, exchangeRate)
-	if err != nil {
-		return err
 	}
 
 	destination, err := common.NewAccountFromProto(typedProtoMetadata.Destination)
