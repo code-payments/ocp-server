@@ -407,7 +407,7 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 		if common.IsCoreMint(mint) {
 			exchangeRate = typed.ClientExchangeData.CoreMintFiatExchangeRate.ExchangeRate.ExchangeRate
 		} else {
-			exchangeRate = currency_util.CalculateExchangeRate(mint, typed.ClientExchangeData.NativeAmount, typed.ClientExchangeData.Quarks)
+			exchangeRate = currency_util.CalculateExchangeRate(mint, typed.ClientExchangeData.Quarks, typed.ClientExchangeData.NativeAmount)
 		}
 		quarks = typed.ClientExchangeData.Quarks
 	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData: // todo: deprecate this flow
@@ -419,7 +419,7 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 		return NewIntentDeniedError("client exchange data not provided")
 	}
 
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, h.data, mint, quarks, currency_util.GetLatestExchangeRateTime())
+	usdMarketValue, err := currency_util.CalculateUsdMarketValueFromFiatAmount(nativeAmount, exchangeRate)
 	if err != nil {
 		return err
 	}
@@ -999,11 +999,6 @@ func (h *ReceivePaymentsPubliclyIntentHandler) PopulateMetadata(ctx context.Cont
 	}
 	h.cachedGiftCardIssuedIntentRecord = giftCardIssuedIntentRecord
 
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, h.data, mint, typedProtoMetadata.Quarks, currency_util.GetLatestExchangeRateTime())
-	if err != nil {
-		return err
-	}
-
 	intentRecord.IntentType = intent.ReceivePaymentsPublicly
 	intentRecord.MintAccount = mint.PublicKey().ToBase58()
 	intentRecord.ReceivePaymentsPubliclyMetadata = &intent.ReceivePaymentsPubliclyMetadata{
@@ -1018,7 +1013,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) PopulateMetadata(ctx context.Cont
 		OriginalExchangeRate:     giftCardIssuedIntentRecord.SendPublicPaymentMetadata.ExchangeRate,
 		OriginalNativeAmount:     giftCardIssuedIntentRecord.SendPublicPaymentMetadata.NativeAmount,
 
-		UsdMarketValue: usdMarketValue,
+		UsdMarketValue: giftCardIssuedIntentRecord.SendPublicPaymentMetadata.UsdMarketValue,
 	}
 
 	return nil
@@ -1332,17 +1327,12 @@ func (h *PublicDistributionIntentHandler) PopulateMetadata(ctx context.Context, 
 		totalQuarks += distribution.Quarks
 	}
 
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, h.data, mint, totalQuarks, currency_util.GetLatestExchangeRateTime())
-	if err != nil {
-		return err
-	}
-
 	intentRecord.IntentType = intent.PublicDistribution
 	intentRecord.MintAccount = mint.PublicKey().ToBase58()
 	intentRecord.PublicDistributionMetadata = &intent.PublicDistributionMetadata{
 		Source:         source.PublicKey().ToBase58(),
 		Quantity:       totalQuarks,
-		UsdMarketValue: usdMarketValue,
+		UsdMarketValue: 0, // todo: Sum USD market values of each funding into pool
 	}
 
 	destinationTokenAddresses := make([]string, len(typedProtoMetadata.Distributions))

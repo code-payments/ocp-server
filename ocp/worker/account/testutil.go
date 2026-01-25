@@ -215,7 +215,7 @@ func (e *testEnv) assertGiftCardAutoReturned(t *testing.T, giftCard *testGiftCar
 	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, historyRecord.ReceivePaymentsPubliclyMetadata.OriginalExchangeCurrency)
 	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.ExchangeRate, historyRecord.ReceivePaymentsPubliclyMetadata.OriginalExchangeRate)
 	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.NativeAmount, historyRecord.ReceivePaymentsPubliclyMetadata.OriginalNativeAmount)
-	assert.Equal(t, 1234.5, historyRecord.ReceivePaymentsPubliclyMetadata.UsdMarketValue)
+	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.UsdMarketValue, historyRecord.ReceivePaymentsPubliclyMetadata.UsdMarketValue)
 	assert.Equal(t, intent.StateConfirmed, historyRecord.State)
 }
 
