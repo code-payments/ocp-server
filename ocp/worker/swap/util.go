@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"math/big"
 	"slices"
 	"time"
 
@@ -170,7 +171,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 		return 0, errors.New("delta quarks into destination vm omnibus is not positive")
 	}
 
-	var usdMarketValue float64
+	var usdMarketValueWithoutFees float64
 	switch swapRecord.FundingSource {
 	case swap.FundingSourceSubmitIntent:
 		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
@@ -182,7 +183,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 			return 0, errors.New("unexpected intent type")
 		}
 
-		usdMarketValue = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
+		usdMarketValueWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
 	case swap.FundingSourceExternalWallet:
 		if !common.IsCoreMint(fromMint) {
 			return 0, errors.New("unexpected source mint")
@@ -192,12 +193,20 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 			return 0, errors.New("core mint is not a usd stable coin")
 		}
 
-		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.Amount, time.Now())
+		usdMarketValueWithoutFees, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.Amount, time.Now())
 		if err != nil {
 			return 0, err
 		}
 	default:
 		return 0, errors.New("unsupported funding source")
+	}
+
+	usdMarketValue := usdMarketValueWithoutFees
+	if !common.IsCoreMint(fromMint) {
+		usdMarketValue, _ = new(big.Float).Mul(
+			big.NewFloat(0.99).SetPrec(128),
+			big.NewFloat(usdMarketValue).SetPrec(128),
+		).Float64()
 	}
 
 	err = p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
@@ -304,7 +313,10 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 
 	valueReceived := nativeAmount
 	if !common.IsCoreMint(fromMint) {
-		valueReceived = 0.99 * valueReceived
+		valueReceived, _ = new(big.Float).Mul(
+			big.NewFloat(0.99).SetPrec(128),
+			big.NewFloat(valueReceived).SetPrec(128),
+		).Float64()
 	}
 
 	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
