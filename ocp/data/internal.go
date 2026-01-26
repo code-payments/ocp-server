@@ -144,7 +144,6 @@ type DatabaseData interface {
 	GetExternalDeposit(ctx context.Context, signature, destination string) (*deposit.Record, error)
 	GetTotalExternalDepositedAmountInQuarks(ctx context.Context, account string) (uint64, error)
 	GetTotalExternalDepositedAmountInQuarksBatch(ctx context.Context, accounts ...string) (map[string]uint64, error)
-	GetTotalExternalDepositedAmountInUsd(ctx context.Context, account string) (float64, error)
 
 	// Fulfillments
 	// --------------------------------------------------------------------------------
@@ -549,9 +548,6 @@ func (dp *DatabaseProvider) GetTotalExternalDepositedAmountInQuarks(ctx context.
 }
 func (dp *DatabaseProvider) GetTotalExternalDepositedAmountInQuarksBatch(ctx context.Context, accounts ...string) (map[string]uint64, error) {
 	return dp.deposits.GetQuarkAmountBatch(ctx, accounts...)
-}
-func (dp *DatabaseProvider) GetTotalExternalDepositedAmountInUsd(ctx context.Context, account string) (float64, error) {
-	return dp.deposits.GetUsdAmount(ctx, account)
 }
 
 // Fulfillments
