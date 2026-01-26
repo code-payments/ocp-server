@@ -205,7 +205,7 @@ func (s *transactionServer) airdrop(ctx context.Context, intentId string, owner 
 		additionalQuarks = 1
 	}
 
-	exchangeRateRecord, err := s.data.GetExchangeRate(ctx, currencyCode, currency_util.GetLatestExchangeRateTime())
+	exchangeRateRecord, err := s.data.GetExchangeRate(ctx, currencyCode, time.Now())
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting other rate")
 		return nil, err
