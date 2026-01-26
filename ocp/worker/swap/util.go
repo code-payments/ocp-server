@@ -172,7 +172,6 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 	}
 
 	var exchangeCurrency currency_lib.Code
-	var exchangeRate float64
 	var nativeAmountWithoutFees float64
 	var usdMarketValueWithoutFees float64
 	switch swapRecord.FundingSource {
@@ -187,7 +186,6 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 		}
 
 		exchangeCurrency = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
-		exchangeRate = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeRate
 		nativeAmountWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
 		usdMarketValueWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
 	case swap.FundingSourceExternalWallet:
@@ -205,7 +203,6 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 			return 0, err
 		}
 		nativeAmountWithoutFees = usdMarketValueWithoutFees
-		exchangeRate = currency_util.CalculateExchangeRate(common.CoreMintAccount, swapRecord.Amount, usdMarketValueWithoutFees)
 	default:
 		return 0, errors.New("unsupported funding source")
 	}
@@ -222,6 +219,8 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 			big.NewFloat(usdMarketValueWithoutFees).SetPrec(128),
 		).Float64()
 	}
+
+	exchangeRate := currency_util.CalculateExchangeRate(toMint, uint64(deltaQuarksIntoOmnibus), nativeAmount)
 
 	err = p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 		// For transaction history
