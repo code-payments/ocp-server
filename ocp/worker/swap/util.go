@@ -148,6 +148,13 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 		return 0, err
 	}
 
+	if !common.IsCoreMintUsdStableCoin() {
+		return 0, errors.New("core mint is not a usd stable coin")
+	}
+	if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
+		return 0, errors.New("core mint must be involved in swap")
+	}
+
 	destinationVmConfig, err := common.GetVmConfigForMint(ctx, p.data, toMint)
 	if err != nil {
 		return 0, err
@@ -188,13 +195,21 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 		exchangeCurrency = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
 		nativeAmountWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
 		usdMarketValueWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
+
+		if common.IsCoreMint(toMint) {
+			usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, uint64(deltaQuarksIntoOmnibus), time.Now())
+			if err != nil {
+				return 0, err
+			}
+
+			usdMarketValueWithoutFees, _ = new(big.Float).Quo(
+				big.NewFloat(usdMarketValue).SetPrec(128),
+				big.NewFloat(0.99).SetPrec(128),
+			).Float64()
+		}
 	case swap.FundingSourceExternalWallet:
 		if !common.IsCoreMint(fromMint) {
 			return 0, errors.New("unexpected source mint")
-		}
-
-		if !common.IsCoreMintUsdStableCoin() {
-			return 0, errors.New("core mint is not a usd stable coin")
 		}
 
 		exchangeCurrency = currency_lib.USD
