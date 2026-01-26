@@ -34,6 +34,8 @@ import (
 const (
 	streamPingDelay          = 5 * time.Second
 	streamInitialRecvTimeout = 250 * time.Millisecond
+
+	timePerHistoricalUpdate = 5 * time.Minute
 )
 
 type currencyServer struct {
@@ -275,8 +277,8 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	}
 
 	// Determine the time range and interval based on the predefined range.
-	// endTime is GetLatestExchangeRateTime() which is used in cache keys to
-	// invalidate entries when new market data is generated (every 15 minutes).
+	// endTime is getLatestHistoricalTime, which is used in cache keys to
+	// invalidate entries when new market data is generated.
 	startTime, endTime, interval := getTimeRangeForPredefinedRange(req.GetPredefinedRange())
 
 	// Get reserve history (cached by mint + range)
@@ -364,9 +366,9 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		})
 	}
 
-	// Always include a latest data point based on GetLatestExchangeRateTime
+	// Always include a latest data point based on getLatestHistoricalTime
 	// if it's newer than the last historical point
-	latestTime := currency_util.GetLatestExchangeRateTime()
+	latestTime := getLatestHistoricalTime()
 	if len(data) == 0 || data[len(data)-1].Timestamp.AsTime().Before(latestTime) {
 		latestReserve, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), latestTime)
 		if err != nil {
@@ -494,7 +496,7 @@ func calculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 
 // getTimeRangeForPredefinedRange returns the start time and appropriate interval
 // for the given predefined range.
 func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange) (time.Time, time.Time, query.Interval) {
-	now := currency_util.GetLatestExchangeRateTime()
+	now := getLatestHistoricalTime()
 
 	switch predefinedRange {
 	case currencypb.GetHistoricalMintDataRequest_LAST_DAY:
@@ -511,6 +513,13 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMint
 		// For all time, go back 100 years with daily intervals
 		return now.Add(-100 * 365 * 24 * time.Hour), now, query.IntervalDay
 	}
+}
+
+func getLatestHistoricalTime() time.Time {
+	secondsInUpdateInterval := int64(timePerHistoricalUpdate / time.Second)
+	queryTimeUnix := time.Now().Unix()
+	queryTimeUnix = queryTimeUnix - (queryTimeUnix % secondsInUpdateInterval)
+	return time.Unix(queryTimeUnix, 0)
 }
 
 func (s *currencyServer) StreamLiveMintData(
