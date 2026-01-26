@@ -457,6 +457,11 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 	}
 
+	usdCostBasis := 100.00 // todo: Mock test data
+	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
+		usdCostBasis = float64(prefetchedBalanceMetadata.value) / float64(common.CoreMintQuarksPerUnit)
+	}
+
 	return &accountpb.TokenAccountInfo{
 		Address:              tokenAccount.ToProto(),
 		Owner:                ownerAccount.ToProto(),
@@ -465,6 +470,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		Index:                records.General.Index,
 		BalanceSource:        prefetchedBalanceMetadata.source,
 		Balance:              prefetchedBalanceMetadata.value,
+		UsdCostBasis:         usdCostBasis,
 		ManagementState:      managementState,
 		BlockchainState:      blockchainState,
 		ClaimState:           claimState,
