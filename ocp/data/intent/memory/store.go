@@ -364,3 +364,44 @@ func (s *store) GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, o
 	items = s.filterByWithdrawalFlag(items, false)
 	return sumQuarkAmount(items), sumUsdMarketValue(items), nil
 }
+
+func (s *store) GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var costBasis float64
+
+	for _, item := range s.records {
+		if item.MintAccount != mint {
+			continue
+		}
+
+		if item.State == intent.StateRevoked {
+			continue
+		}
+
+		switch item.IntentType {
+		case intent.ExternalDeposit:
+			// Owner is destination, add USD
+			if item.InitiatorOwnerAccount == owner {
+				costBasis += item.ExternalDepositMetadata.UsdMarketValue
+			}
+		case intent.ReceivePaymentsPublicly:
+			// Owner is destination, add USD
+			if item.InitiatorOwnerAccount == owner {
+				costBasis += item.ReceivePaymentsPubliclyMetadata.UsdMarketValue
+			}
+		case intent.SendPublicPayment:
+			// Owner as initiator is source, subtract USD
+			if item.InitiatorOwnerAccount == owner {
+				costBasis -= item.SendPublicPaymentMetadata.UsdMarketValue
+			}
+			// Owner as destination_owner is destination, add USD
+			if item.SendPublicPaymentMetadata.DestinationOwnerAccount == owner {
+				costBasis += item.SendPublicPaymentMetadata.UsdMarketValue
+			}
+		}
+	}
+
+	return costBasis, nil
+}

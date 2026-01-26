@@ -94,3 +94,8 @@ func (s *store) GetGiftCardClaimedIntent(ctx context.Context, giftCardVault stri
 func (s *store) GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, owner string, since time.Time) (uint64, float64, error) {
 	return dbGetTransactedAmountForAntiMoneyLaundering(ctx, s.db, owner, since)
 }
+
+// GetUsdCostBasis gets the net USD market value for an owner account and mint.
+func (s *store) GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error) {
+	return dbGetUsdCostBasis(ctx, s.db, owner, mint)
+}
