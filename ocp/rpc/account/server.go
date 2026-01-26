@@ -457,9 +457,20 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 	}
 
-	usdCostBasis := 100.00 // todo: Mock test data
+	var usdCostBasis float64
 	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
 		usdCostBasis = float64(prefetchedBalanceMetadata.value) / float64(common.CoreMintQuarksPerUnit)
+	} else {
+		switch records.General.AccountType {
+		case commonpb.AccountType_PRIMARY:
+			// todo: Assumes the structure that each user has exactly one primary account per mint
+			usdCostBasis, err = s.data.GetUsdCostBasis(ctx, ownerAccount.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+		default:
+			usdCostBasis = 0 // Account type not supported
+		}
 	}
 
 	return &accountpb.TokenAccountInfo{

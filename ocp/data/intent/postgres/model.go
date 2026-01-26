@@ -574,3 +574,42 @@ func dbGetTransactedAmountForAntiMoneyLaundering(ctx context.Context, db *sqlx.D
 	}
 	return uint64(res.TotalQuarkValue.Int64), res.TotalUsdMarketValue.Float64, nil
 }
+
+func dbGetUsdCostBasis(ctx context.Context, db *sqlx.DB, owner string, mint string) (float64, error) {
+	var res sql.NullFloat64
+
+	// For backwards compatibility, the mint column is NULL for core mint
+	var mintFilter string
+	var params []any
+	if mint == config.CoreMintPublicKeyString {
+		mintFilter = "mint IS NULL"
+		params = []any{owner, intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment}
+	} else {
+		mintFilter = "mint = $6"
+		params = []any{owner, intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, mint}
+	}
+
+	// USD received as destination:
+	//   - ExternalDeposit, ReceivePaymentsPublicly where owner is initiator
+	//   - SendPublicPayment where owner is destination_owner
+	// USD sent as source:
+	//   - SendPublicPayment where owner is initiator
+	query := fmt.Sprintf(`SELECT
+		(SELECT COALESCE(SUM(usd_market_value), 0) FROM %s WHERE owner = $1 AND %s AND state != $2 AND intent_type IN ($3, $4)) +
+		(SELECT COALESCE(SUM(usd_market_value), 0) FROM %s WHERE destination_owner = $1 AND %s AND state != $2 AND intent_type = $5) -
+		(SELECT COALESCE(SUM(usd_market_value), 0) FROM %s WHERE owner = $1 AND %s AND state != $2 AND intent_type = $5);`,
+		intentTableName, mintFilter,
+		intentTableName, mintFilter,
+		intentTableName, mintFilter,
+	)
+
+	err := db.GetContext(ctx, &res, query, params...)
+	if err != nil {
+		return 0, err
+	}
+
+	if !res.Valid {
+		return 0, nil
+	}
+	return res.Float64, nil
+}

@@ -26,6 +26,7 @@ func RunTests(t *testing.T, s intent.Store, teardown func()) {
 		testGetGiftCardClaimedIntent,
 		testGetTransactedAmountForAntiMoneyLaundering,
 		testGetByOwner,
+		testGetUsdCostBasis,
 	} {
 		tf(t, s)
 		teardown()
@@ -607,5 +608,57 @@ func testGetByOwner(t *testing.T, s intent.Store) {
 		for i, record := range expected {
 			assert.Equal(t, record.IntentId, actual[len(actual)-i-1].IntentId)
 		}
+	})
+}
+
+func testGetUsdCostBasis(t *testing.T, s intent.Store) {
+	t.Run("testGetUsdCostBasis", func(t *testing.T) {
+		ctx := context.Background()
+
+		// No intents results in zero cost basis
+		costBasis, err := s.GetUsdCostBasis(ctx, "o1", "mint")
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, costBasis)
+
+		records := []*intent.Record{
+			// ExternalDeposit: o1 receives +100 USD
+			{IntentId: "t1", IntentType: intent.ExternalDeposit, InitiatorOwnerAccount: "o1", ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a1", Quantity: 1000, ExchangeCurrency: currency.USD, ExchangeRate: 0.1, NativeAmount: 100, UsdMarketValue: 100}, MintAccount: "mint", State: intent.StateConfirmed},
+			// ReceivePaymentsPublicly: o1 receives +50 USD
+			{IntentId: "t2", IntentType: intent.ReceivePaymentsPublicly, InitiatorOwnerAccount: "o1", ReceivePaymentsPubliclyMetadata: &intent.ReceivePaymentsPubliclyMetadata{Source: "s1", Quantity: 500, OriginalExchangeCurrency: currency.USD, OriginalExchangeRate: 0.1, OriginalNativeAmount: 50, UsdMarketValue: 50}, MintAccount: "mint", State: intent.StateConfirmed},
+			// SendPublicPayment: o1 sends -30 USD to o2
+			{IntentId: "t3", IntentType: intent.SendPublicPayment, InitiatorOwnerAccount: "o1", SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{DestinationOwnerAccount: "o2", DestinationTokenAccount: "a2", Quantity: 300, ExchangeCurrency: currency.USD, ExchangeRate: 0.1, NativeAmount: 30, UsdMarketValue: 30}, MintAccount: "mint", State: intent.StateConfirmed},
+			// SendPublicPayment: o2 sends to o1, o1 receives +20 USD
+			{IntentId: "t4", IntentType: intent.SendPublicPayment, InitiatorOwnerAccount: "o2", SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{DestinationOwnerAccount: "o1", DestinationTokenAccount: "a1", Quantity: 200, ExchangeCurrency: currency.USD, ExchangeRate: 0.1, NativeAmount: 20, UsdMarketValue: 20}, MintAccount: "mint", State: intent.StateConfirmed},
+			// Revoked intent should be ignored
+			{IntentId: "t5", IntentType: intent.ExternalDeposit, InitiatorOwnerAccount: "o1", ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a1", Quantity: 10000, ExchangeCurrency: currency.USD, ExchangeRate: 0.1, NativeAmount: 1000, UsdMarketValue: 1000}, MintAccount: "mint", State: intent.StateRevoked},
+			// Different mint should not be included
+			{IntentId: "t6", IntentType: intent.ExternalDeposit, InitiatorOwnerAccount: "o1", ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a1", Quantity: 5000, ExchangeCurrency: currency.USD, ExchangeRate: 0.1, NativeAmount: 500, UsdMarketValue: 500}, MintAccount: "other_mint", State: intent.StateConfirmed},
+			// SendPublicPayment to self: o1 sends and receives, net 0 for this transaction
+			{IntentId: "t7", IntentType: intent.SendPublicPayment, InitiatorOwnerAccount: "o1", SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{DestinationOwnerAccount: "o1", DestinationTokenAccount: "a1", Quantity: 100, ExchangeCurrency: currency.USD, ExchangeRate: 0.1, NativeAmount: 10, UsdMarketValue: 10}, MintAccount: "mint", State: intent.StateConfirmed},
+		}
+
+		for _, record := range records {
+			require.NoError(t, s.Save(ctx, record))
+		}
+
+		// o1 cost basis: +100 (deposit) +50 (receive) -30 (send to o2) +20 (receive from o2) -10 (send to self) +10 (receive from self) = 140
+		costBasis, err = s.GetUsdCostBasis(ctx, "o1", "mint")
+		require.NoError(t, err)
+		assert.EqualValues(t, 140, costBasis)
+
+		// o2 cost basis: +30 (receive from o1) -20 (send to o1) = 10
+		costBasis, err = s.GetUsdCostBasis(ctx, "o2", "mint")
+		require.NoError(t, err)
+		assert.EqualValues(t, 10, costBasis)
+
+		// o1 cost basis for other_mint: +500
+		costBasis, err = s.GetUsdCostBasis(ctx, "o1", "other_mint")
+		require.NoError(t, err)
+		assert.EqualValues(t, 500, costBasis)
+
+		// Unknown owner has zero cost basis
+		costBasis, err = s.GetUsdCostBasis(ctx, "unknown", "mint")
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, costBasis)
 	})
 }
