@@ -22,7 +22,6 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
-	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/protoutil"
@@ -33,6 +32,8 @@ import (
 const (
 	streamPingDelay          = 5 * time.Second
 	streamInitialRecvTimeout = 250 * time.Millisecond
+
+	timePerHistoricalUpdate = 5 * time.Minute
 )
 
 type currencyServer struct {
@@ -233,8 +234,8 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	}
 
 	// Determine the time range and interval based on the predefined range.
-	// endTime is GetLatestExchangeRateTime() which is used in cache keys to
-	// invalidate entries when new market data is generated (every 15 minutes).
+	// endTime is getLatestHistoricalTime, which is used in cache keys to
+	// invalidate entries when new market data is generated.
 	startTime, endTime, interval := getTimeRangeForPredefinedRange(req.GetPredefinedRange())
 
 	// Get reserve history (cached by mint + range)
@@ -288,13 +289,25 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	// Build historical data points with market cap
 	var data []*currencypb.HistoricalMintData
 
-	// Add a 0 market cap value at time of currency creation if it falls within
-	// the start time
 	if startTime.Before(metadataRecord.CreatedAt) {
-		data = append(data, &currencypb.HistoricalMintData{
-			Timestamp: timestamppb.New(metadataRecord.CreatedAt),
-			MarketCap: 0,
-		})
+		if req.GetPredefinedRange() != currencypb.GetHistoricalMintDataRequest_ALL_TIME {
+			data = append(
+				data,
+				// 0 market cap value at the range start time
+				&currencypb.HistoricalMintData{
+					Timestamp: timestamppb.New(startTime),
+					MarketCap: 0,
+				},
+			)
+		}
+		data = append(
+			data,
+			// 0 market cap value at time of currency creation
+			&currencypb.HistoricalMintData{
+				Timestamp: timestamppb.New(metadataRecord.CreatedAt),
+				MarketCap: 0,
+			},
+		)
 	}
 
 	for _, reserve := range reserveHistory {
@@ -310,9 +323,9 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		})
 	}
 
-	// Always include a latest data point based on GetLatestExchangeRateTime
+	// Always include a latest data point based on getLatestHistoricalTime
 	// if it's newer than the last historical point
-	latestTime := currency_util.GetLatestExchangeRateTime()
+	latestTime := getLatestHistoricalTime()
 	if len(data) == 0 || data[len(data)-1].Timestamp.AsTime().Before(latestTime) {
 		latestReserve, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), latestTime)
 		if err != nil {
@@ -440,7 +453,7 @@ func calculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 
 // getTimeRangeForPredefinedRange returns the start time and appropriate interval
 // for the given predefined range.
 func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange) (time.Time, time.Time, query.Interval) {
-	now := currency_util.GetLatestExchangeRateTime()
+	now := getLatestHistoricalTime()
 
 	switch predefinedRange {
 	case currencypb.GetHistoricalMintDataRequest_LAST_DAY:
@@ -457,6 +470,13 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMint
 		// For all time, go back 100 years with daily intervals
 		return now.Add(-100 * 365 * 24 * time.Hour), now, query.IntervalDay
 	}
+}
+
+func getLatestHistoricalTime() time.Time {
+	secondsInUpdateInterval := int64(timePerHistoricalUpdate / time.Second)
+	queryTimeUnix := time.Now().Unix()
+	queryTimeUnix = queryTimeUnix - (queryTimeUnix % secondsInUpdateInterval)
+	return time.Unix(queryTimeUnix, 0)
 }
 
 func (s *currencyServer) StreamLiveMintData(

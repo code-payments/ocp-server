@@ -774,10 +774,9 @@ func getDefaultTestAccountRecords(t *testing.T, ownerAccount, authorityAccount *
 
 func setupCachedBalance(t *testing.T, env testEnv, accountRecords *common.AccountRecords, balance uint64) {
 	depositRecord := &deposit.Record{
-		Signature:      fmt.Sprintf("txn%d", rand.Uint64()),
-		Destination:    accountRecords.General.TokenAccount,
-		Amount:         balance,
-		UsdMarketValue: 1,
+		Signature:   fmt.Sprintf("txn%d", rand.Uint64()),
+		Destination: accountRecords.General.TokenAccount,
+		Amount:      balance,
 
 		ConfirmationState: transaction.ConfirmationFinalized,
 		Slot:              12345,

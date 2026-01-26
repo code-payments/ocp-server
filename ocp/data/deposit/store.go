@@ -16,10 +16,9 @@ var (
 type Record struct {
 	Id uint64
 
-	Signature      string
-	Destination    string
-	Amount         uint64
-	UsdMarketValue float64
+	Signature   string
+	Destination string
+	Amount      uint64
 
 	Slot              uint64
 	ConfirmationState transaction.Confirmation
@@ -40,10 +39,6 @@ type Store interface {
 
 	// GetQuarkAmountBatch is like GetQuarkAmount but for a batch of accounts
 	GetQuarkAmountBatch(ctx context.Context, accounts ...string) (map[string]uint64, error)
-
-	// GetUsdAmount gets the total deposited USD amount to an account for finalized
-	// transactions
-	GetUsdAmount(ctx context.Context, account string) (float64, error)
 }
 
 func (r *Record) Validate() error {
@@ -57,10 +52,6 @@ func (r *Record) Validate() error {
 
 	if r.Amount == 0 {
 		return errors.New("amount is required")
-	}
-
-	if r.UsdMarketValue <= 0 {
-		return errors.New("usd market value must be positive")
 	}
 
 	if r.ConfirmationState == transaction.ConfirmationUnknown {
@@ -78,10 +69,9 @@ func (r *Record) Clone() Record {
 	return Record{
 		Id: r.Id,
 
-		Signature:      r.Signature,
-		Destination:    r.Destination,
-		Amount:         r.Amount,
-		UsdMarketValue: r.UsdMarketValue,
+		Signature:   r.Signature,
+		Destination: r.Destination,
+		Amount:      r.Amount,
 
 		Slot:              r.Slot,
 		ConfirmationState: r.ConfirmationState,
@@ -96,7 +86,6 @@ func (r *Record) CopyTo(dst *Record) {
 	dst.Signature = r.Signature
 	dst.Destination = r.Destination
 	dst.Amount = r.Amount
-	dst.UsdMarketValue = r.UsdMarketValue
 
 	dst.Slot = r.Slot
 	dst.ConfirmationState = r.ConfirmationState

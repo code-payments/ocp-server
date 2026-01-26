@@ -14,6 +14,7 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/cache"
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
@@ -313,7 +314,7 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 			return errors.Wrap(err, "invalid owner account")
 		}
 
-		usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, data, mint, uint64(deltaQuarksIntoOmnibus), time.Now())
+		usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, data, mint, uint64(deltaQuarksIntoOmnibus), time.Now())
 		if err != nil {
 			return errors.Wrap(err, "error calculating usd market value")
 		}
@@ -331,6 +332,9 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 				ExternalDepositMetadata: &intent.ExternalDepositMetadata{
 					DestinationTokenAccount: userVirtualTimelockVaultAccount.PublicKey().ToBase58(),
 					Quantity:                uint64(deltaQuarksIntoOmnibus),
+					ExchangeCurrency:        currency_lib.USD,
+					NativeAmount:            usdMarketValue,
+					ExchangeRate:            currency_util.CalculateExchangeRate(mint, uint64(deltaQuarksIntoOmnibus), usdMarketValue),
 					UsdMarketValue:          usdMarketValue,
 				},
 
@@ -344,10 +348,9 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 
 			// For tracking in cached balances
 			externalDepositRecord := &deposit.Record{
-				Signature:      signature,
-				Destination:    userVirtualTimelockVaultAccount.PublicKey().ToBase58(),
-				Amount:         uint64(deltaQuarksIntoOmnibus),
-				UsdMarketValue: usdMarketValue,
+				Signature:   signature,
+				Destination: userVirtualTimelockVaultAccount.PublicKey().ToBase58(),
+				Amount:      uint64(deltaQuarksIntoOmnibus),
 
 				Slot:              tokenBalances.Slot,
 				ConfirmationState: transaction.ConfirmationFinalized,

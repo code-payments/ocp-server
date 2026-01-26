@@ -17,7 +17,6 @@ import (
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
-	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
@@ -309,11 +308,6 @@ func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, g
 		return err
 	}
 
-	usdMarketValue, _, err := currency_util.CalculateUsdMarketValue(ctx, data, mintAccount, giftCardIssuedIntent.SendPublicPaymentMetadata.Quantity, time.Now())
-	if err != nil {
-		return err
-	}
-
 	// We need to insert a faked completed public receive intent so it can appear
 	// as a return in the user's payment history. Think of it as a server-initiated
 	// intent on behalf of the user based on pre-approved conditional actions.
@@ -337,7 +331,7 @@ func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, g
 			OriginalExchangeRate:     giftCardIssuedIntent.SendPublicPaymentMetadata.ExchangeRate,
 			OriginalNativeAmount:     giftCardIssuedIntent.SendPublicPaymentMetadata.NativeAmount,
 
-			UsdMarketValue: usdMarketValue,
+			UsdMarketValue: giftCardIssuedIntent.SendPublicPaymentMetadata.UsdMarketValue,
 		},
 
 		State: intent.StateConfirmed,

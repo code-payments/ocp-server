@@ -12,6 +12,8 @@ const (
 // GetLatestExchangeRateTime gets the latest time for fetching an exchange rate.
 // By synchronizing on a time, we can eliminate the amount of perceived volatility
 // over short time spans.
+//
+// Deprecated: Use real-time data and favour volatility
 func GetLatestExchangeRateTime() time.Time {
 	// Standardize to concrete 15 minute intervals to reduce perceived volatility.
 	// Notably, don't fall exactly on the 15 minute interval, so we remove 1 second.

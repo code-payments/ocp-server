@@ -25,7 +25,6 @@ const (
 			signature TEXT NOT NULL,
 			destination TEXT NOT NULL,
 			amount BIGINT NOT NULL CHECK (amount > 0),
-			usd_market_value NUMERIC(18, 9) NOT NULL,
 
 			slot BIGINT NOT NULL,
 			confirmation_state INTEGER NOT NULL,

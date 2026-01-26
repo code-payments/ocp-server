@@ -144,6 +144,10 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
 	}
 
+	if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("swap must involve core mint"))
+	}
+
 	if bytes.Equal(fromMint.PublicKey().ToBytes(), toMint.PublicKey().ToBytes()) {
 		return handleStatefulSwapError(streamer, NewSwapValidationError("must swap between two different mints"))
 	}

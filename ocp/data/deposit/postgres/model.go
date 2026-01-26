@@ -9,9 +9,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	pgutil "github.com/code-payments/ocp-server/database/postgres"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
-	pgutil "github.com/code-payments/ocp-server/database/postgres"
 )
 
 const (
@@ -21,10 +21,9 @@ const (
 type model struct {
 	Id sql.NullInt64 `db:"id"`
 
-	Signature      string  `db:"signature"`
-	Destination    string  `db:"destination"`
-	Amount         uint64  `db:"amount"`
-	UsdMarketValue float64 `db:"usd_market_value"`
+	Signature   string `db:"signature"`
+	Destination string `db:"destination"`
+	Amount      uint64 `db:"amount"`
 
 	Slot              uint64 `db:"slot"`
 	ConfirmationState int    `db:"confirmation_state"`
@@ -38,10 +37,9 @@ func toModel(obj *deposit.Record) (*model, error) {
 	}
 
 	return &model{
-		Signature:      obj.Signature,
-		Destination:    obj.Destination,
-		Amount:         obj.Amount,
-		UsdMarketValue: obj.UsdMarketValue,
+		Signature:   obj.Signature,
+		Destination: obj.Destination,
+		Amount:      obj.Amount,
 
 		Slot:              obj.Slot,
 		ConfirmationState: int(obj.ConfirmationState),
@@ -54,10 +52,9 @@ func fromModel(obj *model) *deposit.Record {
 	return &deposit.Record{
 		Id: uint64(obj.Id.Int64),
 
-		Signature:      obj.Signature,
-		Destination:    obj.Destination,
-		Amount:         obj.Amount,
-		UsdMarketValue: obj.UsdMarketValue,
+		Signature:   obj.Signature,
+		Destination: obj.Destination,
+		Amount:      obj.Amount,
 
 		Slot:              obj.Slot,
 		ConfirmationState: transaction.Confirmation(obj.ConfirmationState),
@@ -68,15 +65,15 @@ func fromModel(obj *model) *deposit.Record {
 
 func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 	query := `INSERT INTO ` + tableName + `
-		(signature, destination, amount, usd_market_value, slot, confirmation_state, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		(signature, destination, amount, slot, confirmation_state, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 
 		ON CONFLICT(signature, destination)
 		DO UPDATE
-			SET slot = $5, confirmation_state = $6
+			SET slot = $4, confirmation_state = $5
 			WHERE ` + tableName + `.signature = $1 AND ` + tableName + `.destination = $2
 
-		RETURNING id, signature, destination, amount, usd_market_value, slot, confirmation_state, created_at`
+		RETURNING id, signature, destination, amount, slot, confirmation_state, created_at`
 
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = time.Now()
@@ -88,7 +85,6 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 		m.Signature,
 		m.Destination,
 		m.Amount,
-		m.UsdMarketValue,
 		m.Slot,
 		m.ConfirmationState,
 		m.CreatedAt,
@@ -98,7 +94,7 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 func dbGet(ctx context.Context, db *sqlx.DB, signature, account string) (*model, error) {
 	var res model
 
-	query := `SELECT id, signature, destination, amount, usd_market_value, slot, confirmation_state, created_at FROM ` + tableName + `
+	query := `SELECT id, signature, destination, amount, slot, confirmation_state, created_at FROM ` + tableName + `
 		WHERE signature = $1 AND destination = $2
 	`
 
@@ -166,24 +162,4 @@ func dbGetQuarkAmountBatch(ctx context.Context, db *sqlx.DB, accounts ...string)
 		res[row.Destination] = uint64(row.Amount)
 	}
 	return res, nil
-}
-
-func dbGetUsdAmount(ctx context.Context, db *sqlx.DB, account string) (float64, error) {
-	var res sql.NullFloat64
-
-	query := `SELECT SUM(usd_market_value) FROM ` + tableName + `
-		WHERE destination = $1 AND confirmation_state = $2
-	`
-
-	err := pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
-		return db.GetContext(ctx, &res, query, account, transaction.ConfirmationFinalized)
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	if !res.Valid {
-		return 0, nil
-	}
-	return res.Float64, nil
 }

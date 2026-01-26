@@ -85,24 +85,10 @@ func (s *store) GetQuarkAmountBatch(_ context.Context, accounts ...string) (map[
 	return res, nil
 }
 
-// GetUsdAmount implements deposit.Store.GetUsdAmount
-func (s *store) GetUsdAmount(ctx context.Context, account string) (float64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.getUsdAmount(account), nil
-}
-
 func (s *store) getQuarkAmount(account string) uint64 {
 	items := s.findByDestination(account)
 	items = s.filterFinalized(items)
 	return s.sumAmounts(items)
-}
-
-func (s *store) getUsdAmount(account string) float64 {
-	items := s.findByDestination(account)
-	items = s.filterFinalized(items)
-	return s.sumUsd(items)
 }
 
 func (s *store) find(data *deposit.Record) *deposit.Record {
@@ -151,14 +137,6 @@ func (s *store) sumAmounts(items []*deposit.Record) uint64 {
 	var res uint64
 	for _, item := range items {
 		res += item.Amount
-	}
-	return res
-}
-
-func (s *store) sumUsd(items []*deposit.Record) float64 {
-	var res float64
-	for _, item := range items {
-		res += item.UsdMarketValue
 	}
 	return res
 }
