@@ -11,9 +11,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/config"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
-	"github.com/code-payments/ocp-server/currency"
 
 	pgutil "github.com/code-payments/ocp-server/database/postgres"
 	q "github.com/code-payments/ocp-server/database/query"
@@ -39,10 +39,10 @@ type intentModel struct {
 	NativeAmount            float64        `db:"native_amount"`
 	UsdMarketValue          float64        `db:"usd_market_value"`
 	IsWithdrawal            bool           `db:"is_withdraw"`
-	IsDeposit               bool           `db:"is_deposit"`
 	IsRemoteSend            bool           `db:"is_remote_send"`
 	IsReturned              bool           `db:"is_returned"`
 	IsIssuerVoidingGiftCard bool           `db:"is_issuer_voiding_gift_card"`
+	IsSwap                  bool           `db:"is_swap"`
 	State                   uint           `db:"state"`
 	Version                 int64          `db:"version"`
 	CreatedAt               time.Time      `db:"created_at"`
@@ -82,7 +82,13 @@ func toIntentModel(obj *intent.Record) (*intentModel, error) {
 	case intent.ExternalDeposit:
 		m.DestinationTokenAccount = obj.ExternalDepositMetadata.DestinationTokenAccount
 		m.Quantity = obj.ExternalDepositMetadata.Quantity
+
+		m.ExchangeCurrency = string(obj.ExternalDepositMetadata.ExchangeCurrency)
+		m.ExchangeRate = obj.ExternalDepositMetadata.ExchangeRate
+		m.NativeAmount = obj.ExternalDepositMetadata.NativeAmount
 		m.UsdMarketValue = obj.ExternalDepositMetadata.UsdMarketValue
+
+		m.IsSwap = obj.ExternalDepositMetadata.IsSwapBuy
 	case intent.SendPublicPayment:
 		m.DestinationOwnerAccount = obj.SendPublicPaymentMetadata.DestinationOwnerAccount
 		m.DestinationTokenAccount = obj.SendPublicPaymentMetadata.DestinationTokenAccount
@@ -95,6 +101,7 @@ func toIntentModel(obj *intent.Record) (*intentModel, error) {
 
 		m.IsWithdrawal = obj.SendPublicPaymentMetadata.IsWithdrawal
 		m.IsRemoteSend = obj.SendPublicPaymentMetadata.IsRemoteSend
+		m.IsSwap = obj.SendPublicPaymentMetadata.IsSwapSell
 	case intent.ReceivePaymentsPublicly:
 		m.Source = obj.ReceivePaymentsPubliclyMetadata.Source
 		m.Quantity = obj.ReceivePaymentsPubliclyMetadata.Quantity
@@ -148,7 +155,18 @@ func fromIntentModel(obj *intentModel) *intent.Record {
 		record.ExternalDepositMetadata = &intent.ExternalDepositMetadata{
 			DestinationTokenAccount: obj.DestinationTokenAccount,
 			Quantity:                obj.Quantity,
-			UsdMarketValue:          obj.UsdMarketValue,
+
+			ExchangeCurrency: currency.Code(obj.ExchangeCurrency),
+			ExchangeRate:     obj.ExchangeRate,
+			NativeAmount:     obj.NativeAmount,
+			UsdMarketValue:   obj.UsdMarketValue,
+
+			IsSwapBuy: obj.IsSwap,
+		}
+
+		if len(record.ExternalDepositMetadata.ExchangeCurrency) == 0 {
+			record.ExternalDepositMetadata.ExchangeCurrency = currency.USD
+			record.ExternalDepositMetadata.NativeAmount = record.ExternalDepositMetadata.UsdMarketValue
 		}
 	case intent.SendPublicPayment:
 		record.SendPublicPaymentMetadata = &intent.SendPublicPaymentMetadata{
@@ -163,6 +181,7 @@ func fromIntentModel(obj *intentModel) *intent.Record {
 
 			IsWithdrawal: obj.IsWithdrawal,
 			IsRemoteSend: obj.IsRemoteSend,
+			IsSwapSell:   obj.IsSwap,
 		}
 	case intent.ReceivePaymentsPublicly:
 		record.ReceivePaymentsPubliclyMetadata = &intent.ReceivePaymentsPubliclyMetadata{
@@ -199,7 +218,7 @@ func (m *intentModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		query := `INSERT INTO ` + intentTableName + `
-			(intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at)
+			(intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19 + 1, $20)
 
 			ON CONFLICT (intent_id)
@@ -208,7 +227,7 @@ func (m *intentModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 				WHERE ` + intentTableName + `.intent_id = $1 AND ` + intentTableName + `.version = $19
 
 			RETURNING
-				id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at`
+				id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at`
 
 		err := tx.QueryRowxContext(
 			ctx,
@@ -226,10 +245,10 @@ func (m *intentModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.NativeAmount,
 			m.UsdMarketValue,
 			m.IsWithdrawal,
-			m.IsDeposit,
 			m.IsRemoteSend,
 			m.IsReturned,
 			m.IsIssuerVoidingGiftCard,
+			m.IsSwap,
 			m.State,
 			m.Version,
 			m.CreatedAt,
@@ -355,7 +374,7 @@ func dbGetAccounts(ctx context.Context, db *sqlx.DB, intentType intent.Type, pag
 func dbGetIntentByIntentID(ctx context.Context, db *sqlx.DB, intentID string) (*intentModel, error) {
 	res := &intentModel{}
 
-	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at
+	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at
 		FROM ` + intentTableName + `
 		WHERE intent_id = $1
 		LIMIT 1`
@@ -375,7 +394,7 @@ func dbGetIntentByIntentID(ctx context.Context, db *sqlx.DB, intentID string) (*
 func dbGetIntentByID(ctx context.Context, db *sqlx.DB, id int64) (*intentModel, error) {
 	res := &intentModel{}
 
-	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at
+	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at
 		FROM ` + intentTableName + `
 		WHERE id = $1
 		LIMIT 1`
@@ -398,7 +417,7 @@ func dbGetAllByOwner(ctx context.Context, db *sqlx.DB, owner string, cursor q.Cu
 	models := []*intentModel{}
 
 	opts := []any{owner}
-	query1 := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at
+	query1 := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at
 		FROM ` + intentTableName + `
 		WHERE (owner = $1 OR destination_owner = $1)
 	`
@@ -467,7 +486,7 @@ func dbGetAllByOwner(ctx context.Context, db *sqlx.DB, owner string, cursor q.Cu
 func dbGetOriginalGiftCardIssuedIntent(ctx context.Context, db *sqlx.DB, giftCardVault string) (*intentModel, error) {
 	res := []*intentModel{}
 
-	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at
+	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at
 		FROM ` + intentTableName + `
 		WHERE destination = $1 and intent_type = $2 AND state != $3 AND is_remote_send IS TRUE
 		LIMIT 2
@@ -499,7 +518,7 @@ func dbGetOriginalGiftCardIssuedIntent(ctx context.Context, db *sqlx.DB, giftCar
 func dbGetGiftCardClaimedIntent(ctx context.Context, db *sqlx.DB, giftCardVault string) (*intentModel, error) {
 	res := []*intentModel{}
 
-	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_deposit, is_remote_send, is_returned, is_issuer_voiding_gift_card, state, version, created_at
+	query := `SELECT id, intent_id, intent_type, mint, owner, source, destination_owner, destination, quantity, exchange_currency, exchange_rate, native_amount, usd_market_value, is_withdraw, is_remote_send, is_returned, is_issuer_voiding_gift_card, is_swap, state, version, created_at
 		FROM ` + intentTableName + `
 		WHERE source = $1 and intent_type = $2 AND state != $3 AND is_remote_send IS TRUE
 		LIMIT 2

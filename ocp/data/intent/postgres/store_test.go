@@ -40,10 +40,10 @@ const (
 			usd_market_value NUMERIC(18, 9) NULL,
 
 			is_withdraw BOOL NOT NULL,
-			is_deposit BOOL NOT NULL,
 			is_remote_send BOOL NOT NULL,
 			is_returned BOOL NOT NULL,
 			is_issuer_voiding_gift_card BOOL NOT NULL,
+			is_swap BOOL NOT NULL,
 
 			state INTEGER NOT NULL,
 

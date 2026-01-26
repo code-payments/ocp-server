@@ -58,7 +58,13 @@ type OpenAccountsMetadata struct {
 type ExternalDepositMetadata struct {
 	DestinationTokenAccount string
 	Quantity                uint64
-	UsdMarketValue          float64
+
+	ExchangeCurrency currency.Code
+	ExchangeRate     float64
+	NativeAmount     float64
+	UsdMarketValue   float64
+
+	IsSwapBuy bool
 }
 
 type SendPublicPaymentMetadata struct {
@@ -73,6 +79,7 @@ type SendPublicPaymentMetadata struct {
 
 	IsWithdrawal bool
 	IsRemoteSend bool
+	IsSwapSell   bool
 }
 
 type ReceivePaymentsPubliclyMetadata struct {
@@ -275,14 +282,26 @@ func (m *ExternalDepositMetadata) Clone() ExternalDepositMetadata {
 	return ExternalDepositMetadata{
 		DestinationTokenAccount: m.DestinationTokenAccount,
 		Quantity:                m.Quantity,
-		UsdMarketValue:          m.UsdMarketValue,
+
+		ExchangeCurrency: m.ExchangeCurrency,
+		ExchangeRate:     m.ExchangeRate,
+		NativeAmount:     m.NativeAmount,
+		UsdMarketValue:   m.UsdMarketValue,
+
+		IsSwapBuy: m.IsSwapBuy,
 	}
 }
 
 func (m *ExternalDepositMetadata) CopyTo(dst *ExternalDepositMetadata) {
 	dst.DestinationTokenAccount = m.DestinationTokenAccount
 	dst.Quantity = m.Quantity
+
+	dst.ExchangeCurrency = m.ExchangeCurrency
+	dst.ExchangeRate = m.ExchangeRate
+	dst.NativeAmount = m.NativeAmount
 	dst.UsdMarketValue = m.UsdMarketValue
+
+	dst.IsSwapBuy = m.IsSwapBuy
 }
 
 func (m *ExternalDepositMetadata) Validate() error {
@@ -294,8 +313,20 @@ func (m *ExternalDepositMetadata) Validate() error {
 		return errors.New("quantity is required")
 	}
 
-	if m.UsdMarketValue <= 0 {
-		return errors.New("usd market value is required")
+	if len(m.ExchangeCurrency) == 0 {
+		return errors.New("exchange currency is required")
+	}
+
+	if m.ExchangeRate == 0 {
+		return errors.New("exchange rate cannot be zero")
+	}
+
+	if m.NativeAmount == 0 {
+		return errors.New("native amount cannot be zero")
+	}
+
+	if m.UsdMarketValue == 0 {
+		return errors.New("usd market value cannot be zero")
 	}
 
 	return nil
@@ -311,8 +342,10 @@ func (m *SendPublicPaymentMetadata) Clone() SendPublicPaymentMetadata {
 		ExchangeRate:     m.ExchangeRate,
 		NativeAmount:     m.NativeAmount,
 		UsdMarketValue:   m.UsdMarketValue,
-		IsWithdrawal:     m.IsWithdrawal,
-		IsRemoteSend:     m.IsRemoteSend,
+
+		IsWithdrawal: m.IsWithdrawal,
+		IsRemoteSend: m.IsRemoteSend,
+		IsSwapSell:   m.IsSwapSell,
 	}
 }
 
@@ -328,6 +361,7 @@ func (m *SendPublicPaymentMetadata) CopyTo(dst *SendPublicPaymentMetadata) {
 
 	dst.IsWithdrawal = m.IsWithdrawal
 	dst.IsRemoteSend = m.IsRemoteSend
+	dst.IsSwapSell = m.IsSwapSell
 }
 
 func (m *SendPublicPaymentMetadata) Validate() error {

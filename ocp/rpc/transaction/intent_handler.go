@@ -462,6 +462,13 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 			return err
 		}
 		intentRecord.SendPublicPaymentMetadata.DestinationOwnerAccount = destinationOwner.PublicKey().ToBase58()
+
+		_, err = h.data.GetTimelockBySwapPda(ctx, destinationOwner.PublicKey().ToBase58())
+		if err == nil {
+			intentRecord.SendPublicPaymentMetadata.IsSwapSell = true
+		} else if err != timelock.ErrTimelockNotFound {
+			return err
+		}
 	}
 
 	return nil

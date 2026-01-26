@@ -56,8 +56,3 @@ func (s *store) GetQuarkAmount(ctx context.Context, account string) (uint64, err
 func (s *store) GetQuarkAmountBatch(ctx context.Context, accounts ...string) (map[string]uint64, error) {
 	return dbGetQuarkAmountBatch(ctx, s.db, accounts...)
 }
-
-// GetUsdAmount implements deposit.Store.GetUsdAmount
-func (s *store) GetUsdAmount(ctx context.Context, account string) (float64, error) {
-	return dbGetUsdAmount(ctx, s.db, account)
-}

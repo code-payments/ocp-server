@@ -11,6 +11,7 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
@@ -18,7 +19,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
-	currency_lib "github.com/code-payments/ocp-server/currency"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/testutil"
 )
@@ -436,10 +436,9 @@ func setupBalanceTestData(t *testing.T, env balanceTestEnv, data *balanceTestDat
 		// There's no intent, so we have an external deposit
 		if len(txn.intentID) == 0 && txn.transactionState != transaction.ConfirmationUnknown {
 			depositRecord := &deposit.Record{
-				Signature:      fmt.Sprintf("txn%d", i),
-				Destination:    txn.destination.PublicKey().ToBase58(),
-				Amount:         txn.quantity,
-				UsdMarketValue: 1.0,
+				Signature:   fmt.Sprintf("txn%d", i),
+				Destination: txn.destination.PublicKey().ToBase58(),
+				Amount:      txn.quantity,
 
 				Slot:              12345,
 				ConfirmationState: txn.transactionState,

@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/intent"
 )
 
 func RunTests(t *testing.T, s intent.Store, teardown func()) {
@@ -87,7 +87,13 @@ func testExternalDepositRoundTrip(t *testing.T, s intent.Store) {
 			ExternalDepositMetadata: &intent.ExternalDepositMetadata{
 				DestinationTokenAccount: "test_destination_token",
 				Quantity:                12345,
-				UsdMarketValue:          1.2345,
+
+				ExchangeCurrency: currency.CAD,
+				ExchangeRate:     0.00073,
+				NativeAmount:     0.00073 * 12345,
+				UsdMarketValue:   0.00042,
+
+				IsSwapBuy: true,
 			},
 			State:     intent.StateUnknown,
 			CreatedAt: time.Now(),
@@ -107,7 +113,11 @@ func testExternalDepositRoundTrip(t *testing.T, s intent.Store) {
 		require.NotNil(t, actual.ExternalDepositMetadata)
 		assert.Equal(t, cloned.ExternalDepositMetadata.DestinationTokenAccount, actual.ExternalDepositMetadata.DestinationTokenAccount)
 		assert.Equal(t, cloned.ExternalDepositMetadata.Quantity, actual.ExternalDepositMetadata.Quantity)
+		assert.Equal(t, cloned.ExternalDepositMetadata.ExchangeCurrency, actual.ExternalDepositMetadata.ExchangeCurrency)
+		assert.Equal(t, cloned.ExternalDepositMetadata.ExchangeRate, actual.ExternalDepositMetadata.ExchangeRate)
+		assert.Equal(t, cloned.ExternalDepositMetadata.NativeAmount, actual.ExternalDepositMetadata.NativeAmount)
 		assert.Equal(t, cloned.ExternalDepositMetadata.UsdMarketValue, actual.ExternalDepositMetadata.UsdMarketValue)
+		assert.Equal(t, cloned.ExternalDepositMetadata.IsSwapBuy, actual.ExternalDepositMetadata.IsSwapBuy)
 		assert.Equal(t, cloned.State, actual.State)
 		assert.Equal(t, cloned.CreatedAt.Unix(), actual.CreatedAt.Unix())
 		assert.EqualValues(t, 1, actual.Id)
@@ -141,6 +151,7 @@ func testSendPublicPaymentRoundTrip(t *testing.T, s intent.Store) {
 
 				IsWithdrawal: true,
 				IsRemoteSend: true,
+				IsSwapSell:   true,
 			},
 			State:     intent.StateUnknown,
 			CreatedAt: time.Now(),
@@ -167,6 +178,7 @@ func testSendPublicPaymentRoundTrip(t *testing.T, s intent.Store) {
 		assert.Equal(t, cloned.SendPublicPaymentMetadata.UsdMarketValue, actual.SendPublicPaymentMetadata.UsdMarketValue)
 		assert.Equal(t, cloned.SendPublicPaymentMetadata.IsWithdrawal, actual.SendPublicPaymentMetadata.IsWithdrawal)
 		assert.Equal(t, cloned.SendPublicPaymentMetadata.IsRemoteSend, actual.SendPublicPaymentMetadata.IsRemoteSend)
+		assert.Equal(t, cloned.SendPublicPaymentMetadata.IsSwapSell, actual.SendPublicPaymentMetadata.IsSwapSell)
 		assert.Equal(t, cloned.State, actual.State)
 		assert.Equal(t, cloned.CreatedAt.Unix(), actual.CreatedAt.Unix())
 		assert.EqualValues(t, 1, actual.Id)
@@ -395,7 +407,7 @@ func testGetOriginalGiftCardIssuedIntent(t *testing.T, s intent.Store) {
 
 			{IntentId: "i2", IntentType: intent.SendPublicPayment, SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{IsRemoteSend: true, DestinationTokenAccount: "a2", DestinationOwnerAccount: "o2", Quantity: 1, ExchangeCurrency: currency.USD, ExchangeRate: 1, NativeAmount: 1, UsdMarketValue: 1}, MintAccount: "mint", InitiatorOwnerAccount: "user", State: intent.StateConfirmed},
 			{IntentId: "i3", IntentType: intent.SendPublicPayment, SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{IsRemoteSend: false, DestinationTokenAccount: "a2", DestinationOwnerAccount: "o2", Quantity: 1, ExchangeCurrency: currency.USD, ExchangeRate: 1, NativeAmount: 1, UsdMarketValue: 1}, MintAccount: "mint", InitiatorOwnerAccount: "user", State: intent.StateConfirmed},
-			{IntentId: "i4", IntentType: intent.ExternalDeposit, ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a2", Quantity: 1, UsdMarketValue: 1}, MintAccount: "mint", InitiatorOwnerAccount: "user", State: intent.StateConfirmed},
+			{IntentId: "i4", IntentType: intent.ExternalDeposit, ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a2", ExchangeCurrency: currency.USD, ExchangeRate: 1, NativeAmount: 1, Quantity: 1, UsdMarketValue: 1}, MintAccount: "mint", InitiatorOwnerAccount: "user", State: intent.StateConfirmed},
 
 			{IntentId: "i5", IntentType: intent.SendPublicPayment, SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{IsRemoteSend: true, DestinationTokenAccount: "a3", DestinationOwnerAccount: "o3", Quantity: 1, ExchangeCurrency: currency.USD, ExchangeRate: 1, NativeAmount: 1, UsdMarketValue: 1}, MintAccount: "mint", InitiatorOwnerAccount: "user", State: intent.StateConfirmed},
 			{IntentId: "i6", IntentType: intent.SendPublicPayment, SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{IsRemoteSend: true, DestinationTokenAccount: "a3", DestinationOwnerAccount: "o3", Quantity: 1, ExchangeCurrency: currency.USD, ExchangeRate: 1, NativeAmount: 1, UsdMarketValue: 1}, MintAccount: "mint", InitiatorOwnerAccount: "user", State: intent.StateConfirmed},
@@ -484,7 +496,7 @@ func testGetTransactedAmountForAntiMoneyLaundering(t *testing.T, s intent.Store)
 			{IntentId: "t4", IntentType: intent.SendPublicPayment, InitiatorOwnerAccount: "o1", SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{DestinationOwnerAccount: "o4", DestinationTokenAccount: "a4", Quantity: 1000, ExchangeCurrency: currency.USD, ExchangeRate: 2, NativeAmount: 2000, UsdMarketValue: 2000}, State: intent.StateFailed, MintAccount: "mint", CreatedAt: time.Now().Add(-4 * time.Minute)},
 			{IntentId: "t5", IntentType: intent.SendPublicPayment, InitiatorOwnerAccount: "o1", SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{DestinationOwnerAccount: "o5", DestinationTokenAccount: "a5", Quantity: 10000, ExchangeCurrency: currency.USD, ExchangeRate: 2, NativeAmount: 20000, UsdMarketValue: 20000}, State: intent.StateRevoked, MintAccount: "mint", CreatedAt: time.Now().Add(-5 * time.Minute)},
 			{IntentId: "t6", IntentType: intent.ReceivePaymentsPublicly, InitiatorOwnerAccount: "o1", ReceivePaymentsPubliclyMetadata: &intent.ReceivePaymentsPubliclyMetadata{Source: "a6", Quantity: 100000, UsdMarketValue: 200000, OriginalExchangeCurrency: currency.USD, OriginalExchangeRate: 2, OriginalNativeAmount: 200000}, State: intent.StateConfirmed, MintAccount: "mint", CreatedAt: time.Now()},
-			{IntentId: "t7", IntentType: intent.ExternalDeposit, InitiatorOwnerAccount: "o1", ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a7", Quantity: 1000000, UsdMarketValue: 20000}, MintAccount: "mint", State: intent.StateConfirmed, CreatedAt: time.Now()},
+			{IntentId: "t7", IntentType: intent.ExternalDeposit, InitiatorOwnerAccount: "o1", ExternalDepositMetadata: &intent.ExternalDepositMetadata{DestinationTokenAccount: "a7", ExchangeCurrency: currency.USD, ExchangeRate: 1000000, NativeAmount: 1000000, Quantity: 1000000, UsdMarketValue: 20000}, MintAccount: "mint", State: intent.StateConfirmed, CreatedAt: time.Now()},
 			{IntentId: "t8", IntentType: intent.SendPublicPayment, InitiatorOwnerAccount: "o1", SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{DestinationOwnerAccount: "o8", DestinationTokenAccount: "a8", Quantity: 10000000, ExchangeCurrency: currency.USD, ExchangeRate: 2, NativeAmount: 2000000, UsdMarketValue: 2000000, IsWithdrawal: true}, State: intent.StateConfirmed, MintAccount: "mint", CreatedAt: time.Now()},
 		}
 
