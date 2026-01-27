@@ -321,12 +321,12 @@ func (s *server) fetchBalances(ctx context.Context, owner *common.Account, allAc
 			continue
 		}
 
-		pendingBalance, ok := pendingSwapBalances[accountRecords.General.MintAccount]
+		pendingSwapBalance, ok := pendingSwapBalances[accountRecords.General.MintAccount]
 		if !ok {
 			continue
 		}
 
-		balanceMetadataByTokenAccount[accountRecords.General.TokenAccount].additionalPendingValue = pendingBalance
+		balanceMetadataByTokenAccount[accountRecords.General.TokenAccount].additionalPendingValue = pendingSwapBalance.DeltaQuarks
 	}
 
 	// Any accounts that aren't Timelock can be deferred to the blockchain
@@ -481,7 +481,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 	// todo: Add USD market value to cost basis for pending balances to result
 	var usdCostBasis float64
 	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
-		usdCostBasis = float64(prefetchedBalanceMetadata.realValue) / float64(common.CoreMintQuarksPerUnit)
+		usdCostBasis = float64(prefetchedBalanceMetadata.realValue+prefetchedBalanceMetadata.additionalPendingValue) / float64(common.CoreMintQuarksPerUnit)
 	} else {
 		switch records.General.AccountType {
 		case commonpb.AccountType_PRIMARY:

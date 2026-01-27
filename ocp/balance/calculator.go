@@ -392,14 +392,21 @@ func (s Source) String() string {
 	return "unknown"
 }
 
-// GetDeltaQuarksFromPendingSwaps returns a mapping of mint to delta quarks that
+// PendingSwapBalance represents the pending balance and the swaps used to compute it.
+type PendingSwapBalance struct {
+	TargetMint  *common.Account
+	DeltaQuarks uint64
+	Swaps       []*swap.Record
+}
+
+// GetDeltaQuarksFromPendingSwaps returns a mapping of mint to pending swap balance that
 // represents the simulated result of executing pending swaps for an owner account.
 // Only swaps funded via SubmitIntent in the Funding, Funded, or Submitting states
 // are included.
 //
 // The returned deltas represent the expected output amounts for each ToMint,
 // calculated by simulating each swap execution using the current reserve state.
-func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider, owner string) (map[string]uint64, error) {
+func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider, owner string) (map[string]*PendingSwapBalance, error) {
 	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "GetDeltaQuarksFromPendingSwaps")
 	tracer.AddAttribute("owner", owner)
 	defer tracer.End()
@@ -412,7 +419,7 @@ func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider,
 		swap.StateSubmitting,
 	)
 	if err == swap.ErrNotFound {
-		return make(map[string]uint64), nil
+		return make(map[string]*PendingSwapBalance), nil
 	} else if err != nil {
 		tracer.OnError(err)
 		return nil, errors.Wrap(err, "error getting pending swaps")
@@ -466,7 +473,7 @@ func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider,
 	}
 
 	// Simulate each swap and accumulate output by destination mint
-	deltaByMint := make(map[string]uint64)
+	deltaByMint := make(map[string]*PendingSwapBalance)
 	for _, swapRecord := range pendingSwaps {
 		if swapRecord.FundingSource != swap.FundingSourceSubmitIntent {
 			continue
@@ -478,7 +485,18 @@ func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider,
 			return nil, errors.Wrap(err, "error simulating swap output")
 		}
 
-		deltaByMint[swapRecord.ToMint] += outputQuarks
+		if deltaByMint[swapRecord.ToMint] == nil {
+			toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+			if err != nil {
+				tracer.OnError(err)
+				return nil, err
+			}
+			deltaByMint[swapRecord.ToMint] = &PendingSwapBalance{
+				TargetMint: toMint,
+			}
+		}
+		deltaByMint[swapRecord.ToMint].DeltaQuarks += outputQuarks
+		deltaByMint[swapRecord.ToMint].Swaps = append(deltaByMint[swapRecord.ToMint].Swaps, swapRecord)
 	}
 
 	return deltaByMint, nil

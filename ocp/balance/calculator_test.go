@@ -586,7 +586,11 @@ func TestGetDeltaQuarksFromPendingSwaps_BuySwap(t *testing.T) {
 		ValueMintDecimals:     uint8(common.CoreMintDecimals),
 	})
 
-	assert.Equal(t, expectedOutput, deltaByMint[launchpadMint.PublicKey().ToBase58()])
+	pendingBalance := deltaByMint[launchpadMint.PublicKey().ToBase58()]
+	assert.Equal(t, expectedOutput, pendingBalance.DeltaQuarks)
+	assert.Equal(t, launchpadMint.PublicKey().ToBase58(), pendingBalance.TargetMint.PublicKey().ToBase58())
+	require.Len(t, pendingBalance.Swaps, 1)
+	assert.Equal(t, swapRecord.SwapId, pendingBalance.Swaps[0].SwapId)
 }
 
 func TestGetDeltaQuarksFromPendingSwaps_SellSwap(t *testing.T) {
@@ -634,7 +638,11 @@ func TestGetDeltaQuarksFromPendingSwaps_SellSwap(t *testing.T) {
 		SellFeeBps:            currencycreator.DefaultSellFeeBps,
 	})
 
-	assert.Equal(t, expectedOutput, deltaByMint[common.CoreMintAccount.PublicKey().ToBase58()])
+	pendingBalance := deltaByMint[common.CoreMintAccount.PublicKey().ToBase58()]
+	assert.Equal(t, expectedOutput, pendingBalance.DeltaQuarks)
+	assert.Equal(t, common.CoreMintAccount.PublicKey().ToBase58(), pendingBalance.TargetMint.PublicKey().ToBase58())
+	require.Len(t, pendingBalance.Swaps, 1)
+	assert.Equal(t, swapRecord.SwapId, pendingBalance.Swaps[0].SwapId)
 }
 
 func TestGetDeltaQuarksFromPendingSwaps_BuySellSwap(t *testing.T) {
@@ -693,7 +701,11 @@ func TestGetDeltaQuarksFromPendingSwaps_BuySellSwap(t *testing.T) {
 		ValueMintDecimals:     uint8(common.CoreMintDecimals),
 	})
 
-	assert.Equal(t, expectedOutput, deltaByMint[launchpadMintB.PublicKey().ToBase58()])
+	pendingBalance := deltaByMint[launchpadMintB.PublicKey().ToBase58()]
+	assert.Equal(t, expectedOutput, pendingBalance.DeltaQuarks)
+	assert.Equal(t, launchpadMintB.PublicKey().ToBase58(), pendingBalance.TargetMint.PublicKey().ToBase58())
+	require.Len(t, pendingBalance.Swaps, 1)
+	assert.Equal(t, swapRecord.SwapId, pendingBalance.Swaps[0].SwapId)
 }
 
 func TestGetDeltaQuarksFromPendingSwaps_MultipleSwapsSameDestination(t *testing.T) {
@@ -745,7 +757,10 @@ func TestGetDeltaQuarksFromPendingSwaps_MultipleSwapsSameDestination(t *testing.
 
 	// Total should be 3x the single swap output
 	expectedTotal := singleSwapOutput * 3
-	assert.Equal(t, expectedTotal, deltaByMint[launchpadMint.PublicKey().ToBase58()])
+	pendingBalance := deltaByMint[launchpadMint.PublicKey().ToBase58()]
+	assert.Equal(t, expectedTotal, pendingBalance.DeltaQuarks)
+	assert.Equal(t, launchpadMint.PublicKey().ToBase58(), pendingBalance.TargetMint.PublicKey().ToBase58())
+	require.Len(t, pendingBalance.Swaps, 3)
 }
 
 func TestGetDeltaQuarksFromPendingSwaps_MultipleDestinations(t *testing.T) {
@@ -819,6 +834,15 @@ func TestGetDeltaQuarksFromPendingSwaps_MultipleDestinations(t *testing.T) {
 		ValueMintDecimals:     uint8(common.CoreMintDecimals),
 	})
 
-	assert.Equal(t, expectedOutputA, deltaByMint[launchpadMintA.PublicKey().ToBase58()])
-	assert.Equal(t, expectedOutputB, deltaByMint[launchpadMintB.PublicKey().ToBase58()])
+	pendingBalanceA := deltaByMint[launchpadMintA.PublicKey().ToBase58()]
+	assert.Equal(t, expectedOutputA, pendingBalanceA.DeltaQuarks)
+	assert.Equal(t, launchpadMintA.PublicKey().ToBase58(), pendingBalanceA.TargetMint.PublicKey().ToBase58())
+	require.Len(t, pendingBalanceA.Swaps, 1)
+	assert.Equal(t, swapRecordA.SwapId, pendingBalanceA.Swaps[0].SwapId)
+
+	pendingBalanceB := deltaByMint[launchpadMintB.PublicKey().ToBase58()]
+	assert.Equal(t, expectedOutputB, pendingBalanceB.DeltaQuarks)
+	assert.Equal(t, launchpadMintB.PublicKey().ToBase58(), pendingBalanceB.TargetMint.PublicKey().ToBase58())
+	require.Len(t, pendingBalanceB.Swaps, 1)
+	assert.Equal(t, swapRecordB.SwapId, pendingBalanceB.Swaps[0].SwapId)
 }
