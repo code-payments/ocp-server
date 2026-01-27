@@ -16,9 +16,12 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/testutil"
 )
@@ -448,4 +451,374 @@ func setupBalanceTestData(t *testing.T, env balanceTestEnv, data *balanceTestDat
 			require.NoError(t, env.data.SaveExternalDeposit(env.ctx, depositRecord))
 		}
 	}
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_NoPendingSwaps(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	assert.Empty(t, deltaByMint)
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_FiltersByFundingSource(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMint := testutil.NewRandomAccount(t)
+
+	// Create reserve for the launchpad mint
+	reserveRecord := &currency.ReserveRecord{
+		Mint:              launchpadMint.PublicKey().ToBase58(),
+		SupplyFromBonding: 1_000_000_000_000, // 100 tokens at 10 decimals
+		Time:              time.Now(),
+	}
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, reserveRecord))
+
+	// Create swap with ExternalWallet funding source (should be filtered out)
+	swapRecord := &swap.Record{
+		SwapId:               "swap1",
+		Owner:                owner.PublicKey().ToBase58(),
+		FromMint:             common.CoreMintAccount.PublicKey().ToBase58(),
+		ToMint:               launchpadMint.PublicKey().ToBase58(),
+		Amount:               1_000_000, // 1 core mint unit
+		FundingId:            "funding1",
+		FundingSource:        swap.FundingSourceExternalWallet,
+		Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Blockhash:            "blockhash1",
+		ProofSignature:       "proofsig1",
+		TransactionSignature: "txsig1",
+		State:                swap.StateFunding,
+	}
+	require.NoError(t, env.data.SaveSwap(env.ctx, swapRecord))
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	assert.Empty(t, deltaByMint)
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_FiltersByState(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMint := testutil.NewRandomAccount(t)
+
+	// Create reserve for the launchpad mint
+	reserveRecord := &currency.ReserveRecord{
+		Mint:              launchpadMint.PublicKey().ToBase58(),
+		SupplyFromBonding: 1_000_000_000_000,
+		Time:              time.Now(),
+	}
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, reserveRecord))
+
+	// Create swaps in non-pending states (should not be included)
+	nonPendingStates := []swap.State{
+		swap.StateCreated,
+		swap.StateFinalized,
+		swap.StateFailed,
+		swap.StateCancelling,
+		swap.StateCancelled,
+	}
+
+	for i, state := range nonPendingStates {
+		swapRecord := &swap.Record{
+			SwapId:               fmt.Sprintf("swap%d", i),
+			Owner:                owner.PublicKey().ToBase58(),
+			FromMint:             common.CoreMintAccount.PublicKey().ToBase58(),
+			ToMint:               launchpadMint.PublicKey().ToBase58(),
+			Amount:               1_000_000,
+			FundingId:            fmt.Sprintf("funding%d", i),
+			FundingSource:        swap.FundingSourceSubmitIntent,
+			Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+			Blockhash:            fmt.Sprintf("blockhash%d", i),
+			ProofSignature:       fmt.Sprintf("proofsig%d", i),
+			TransactionSignature: fmt.Sprintf("txsig%d", i),
+			State:                state,
+		}
+		require.NoError(t, env.data.SaveSwap(env.ctx, swapRecord))
+	}
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	assert.Empty(t, deltaByMint)
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_BuySwap(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMint := testutil.NewRandomAccount(t)
+
+	supplyFromBonding := uint64(1_000_000_000_000) // 100 tokens
+	coreMintAmount := uint64(1_000_000)            // 1 core mint unit
+
+	// Create reserve for the launchpad mint
+	reserveRecord := &currency.ReserveRecord{
+		Mint:              launchpadMint.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyFromBonding,
+		Time:              time.Now(),
+	}
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, reserveRecord))
+
+	// Create buy swap: core mint -> launchpad currency
+	swapRecord := &swap.Record{
+		SwapId:               "swap1",
+		Owner:                owner.PublicKey().ToBase58(),
+		FromMint:             common.CoreMintAccount.PublicKey().ToBase58(),
+		ToMint:               launchpadMint.PublicKey().ToBase58(),
+		Amount:               coreMintAmount,
+		FundingId:            "funding1",
+		FundingSource:        swap.FundingSourceSubmitIntent,
+		Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Blockhash:            "blockhash1",
+		ProofSignature:       "proofsig1",
+		TransactionSignature: "txsig1",
+		State:                swap.StateFunding,
+	}
+	require.NoError(t, env.data.SaveSwap(env.ctx, swapRecord))
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	require.Len(t, deltaByMint, 1)
+
+	// Calculate expected output
+	expectedOutput := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
+		CurrentSupplyInQuarks: supplyFromBonding,
+		BuyAmountInQuarks:     coreMintAmount,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	})
+
+	assert.Equal(t, expectedOutput, deltaByMint[launchpadMint.PublicKey().ToBase58()])
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_SellSwap(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMint := testutil.NewRandomAccount(t)
+
+	supplyFromBonding := uint64(1_000_000_000_000) // 100 tokens
+	sellAmount := uint64(10_000_000_000)          // 1 token
+
+	// Create reserve for the launchpad mint
+	reserveRecord := &currency.ReserveRecord{
+		Mint:              launchpadMint.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyFromBonding,
+		Time:              time.Now(),
+	}
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, reserveRecord))
+
+	// Create sell swap: launchpad currency -> core mint
+	swapRecord := &swap.Record{
+		SwapId:               "swap1",
+		Owner:                owner.PublicKey().ToBase58(),
+		FromMint:             launchpadMint.PublicKey().ToBase58(),
+		ToMint:               common.CoreMintAccount.PublicKey().ToBase58(),
+		Amount:               sellAmount,
+		FundingId:            "funding1",
+		FundingSource:        swap.FundingSourceSubmitIntent,
+		Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Blockhash:            "blockhash1",
+		ProofSignature:       "proofsig1",
+		TransactionSignature: "txsig1",
+		State:                swap.StateFunded,
+	}
+	require.NoError(t, env.data.SaveSwap(env.ctx, swapRecord))
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	require.Len(t, deltaByMint, 1)
+
+	// Calculate expected output (with fees)
+	expectedOutput, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
+		CurrentSupplyInQuarks: supplyFromBonding,
+		SellAmountInQuarks:    sellAmount,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+		SellFeeBps:            currencycreator.DefaultSellFeeBps,
+	})
+
+	assert.Equal(t, expectedOutput, deltaByMint[common.CoreMintAccount.PublicKey().ToBase58()])
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_BuySellSwap(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMintA := testutil.NewRandomAccount(t)
+	launchpadMintB := testutil.NewRandomAccount(t)
+
+	supplyA := uint64(1_000_000_000_000) // 100 tokens
+	supplyB := uint64(2_000_000_000_000) // 200 tokens
+	sellAmount := uint64(10_000_000_000) // 1 token
+
+	// Create reserves for both launchpad mints
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, &currency.ReserveRecord{
+		Mint:              launchpadMintA.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyA,
+		Time:              time.Now(),
+	}))
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, &currency.ReserveRecord{
+		Mint:              launchpadMintB.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyB,
+		Time:              time.Now(),
+	}))
+
+	// Create buy-sell swap: launchpad A -> launchpad B
+	swapRecord := &swap.Record{
+		SwapId:               "swap1",
+		Owner:                owner.PublicKey().ToBase58(),
+		FromMint:             launchpadMintA.PublicKey().ToBase58(),
+		ToMint:               launchpadMintB.PublicKey().ToBase58(),
+		Amount:               sellAmount,
+		FundingId:            "funding1",
+		FundingSource:        swap.FundingSourceSubmitIntent,
+		Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Blockhash:            "blockhash1",
+		ProofSignature:       "proofsig1",
+		TransactionSignature: "txsig1",
+		State:                swap.StateSubmitting,
+	}
+	require.NoError(t, env.data.SaveSwap(env.ctx, swapRecord))
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	require.Len(t, deltaByMint, 1)
+
+	// Calculate expected output: sell A -> core mint -> buy B
+	coreMintQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
+		CurrentSupplyInQuarks: supplyA,
+		SellAmountInQuarks:    sellAmount,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+		SellFeeBps:            currencycreator.DefaultSellFeeBps,
+	})
+	expectedOutput := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
+		CurrentSupplyInQuarks: supplyB,
+		BuyAmountInQuarks:     coreMintQuarks,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	})
+
+	assert.Equal(t, expectedOutput, deltaByMint[launchpadMintB.PublicKey().ToBase58()])
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_MultipleSwapsSameDestination(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMint := testutil.NewRandomAccount(t)
+
+	supplyFromBonding := uint64(1_000_000_000_000)
+	coreMintAmount := uint64(1_000_000)
+
+	// Create reserve for the launchpad mint
+	reserveRecord := &currency.ReserveRecord{
+		Mint:              launchpadMint.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyFromBonding,
+		Time:              time.Now(),
+	}
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, reserveRecord))
+
+	// Create multiple buy swaps to the same destination
+	pendingStates := []swap.State{swap.StateFunding, swap.StateFunded, swap.StateSubmitting}
+	for i, state := range pendingStates {
+		swapRecord := &swap.Record{
+			SwapId:               fmt.Sprintf("swap%d", i),
+			Owner:                owner.PublicKey().ToBase58(),
+			FromMint:             common.CoreMintAccount.PublicKey().ToBase58(),
+			ToMint:               launchpadMint.PublicKey().ToBase58(),
+			Amount:               coreMintAmount,
+			FundingId:            fmt.Sprintf("funding%d", i),
+			FundingSource:        swap.FundingSourceSubmitIntent,
+			Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+			Blockhash:            fmt.Sprintf("blockhash%d", i),
+			ProofSignature:       fmt.Sprintf("proofsig%d", i),
+			TransactionSignature: fmt.Sprintf("txsig%d", i),
+			State:                state,
+		}
+		require.NoError(t, env.data.SaveSwap(env.ctx, swapRecord))
+	}
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	require.Len(t, deltaByMint, 1)
+
+	// Calculate expected output for a single swap
+	singleSwapOutput := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
+		CurrentSupplyInQuarks: supplyFromBonding,
+		BuyAmountInQuarks:     coreMintAmount,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	})
+
+	// Total should be 3x the single swap output
+	expectedTotal := singleSwapOutput * 3
+	assert.Equal(t, expectedTotal, deltaByMint[launchpadMint.PublicKey().ToBase58()])
+}
+
+func TestGetDeltaQuarksFromPendingSwaps_MultipleDestinations(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	owner := testutil.NewRandomAccount(t)
+	launchpadMintA := testutil.NewRandomAccount(t)
+	launchpadMintB := testutil.NewRandomAccount(t)
+
+	supplyA := uint64(1_000_000_000_000)
+	supplyB := uint64(2_000_000_000_000)
+	coreMintAmount := uint64(1_000_000)
+
+	// Create reserves for both launchpad mints
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, &currency.ReserveRecord{
+		Mint:              launchpadMintA.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyA,
+		Time:              time.Now(),
+	}))
+	require.NoError(t, env.data.PutCurrencyReserve(env.ctx, &currency.ReserveRecord{
+		Mint:              launchpadMintB.PublicKey().ToBase58(),
+		SupplyFromBonding: supplyB,
+		Time:              time.Now(),
+	}))
+
+	// Create buy swap to mint A
+	swapRecordA := &swap.Record{
+		SwapId:               "swapA",
+		Owner:                owner.PublicKey().ToBase58(),
+		FromMint:             common.CoreMintAccount.PublicKey().ToBase58(),
+		ToMint:               launchpadMintA.PublicKey().ToBase58(),
+		Amount:               coreMintAmount,
+		FundingId:            "fundingA",
+		FundingSource:        swap.FundingSourceSubmitIntent,
+		Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Blockhash:            "blockhashA",
+		ProofSignature:       "proofsigA",
+		TransactionSignature: "txsigA",
+		State:                swap.StateFunding,
+	}
+	require.NoError(t, env.data.SaveSwap(env.ctx, swapRecordA))
+
+	// Create buy swap to mint B
+	swapRecordB := &swap.Record{
+		SwapId:               "swapB",
+		Owner:                owner.PublicKey().ToBase58(),
+		FromMint:             common.CoreMintAccount.PublicKey().ToBase58(),
+		ToMint:               launchpadMintB.PublicKey().ToBase58(),
+		Amount:               coreMintAmount,
+		FundingId:            "fundingB",
+		FundingSource:        swap.FundingSourceSubmitIntent,
+		Nonce:                testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Blockhash:            "blockhashB",
+		ProofSignature:       "proofsigB",
+		TransactionSignature: "txsigB",
+		State:                swap.StateFunded,
+	}
+	require.NoError(t, env.data.SaveSwap(env.ctx, swapRecordB))
+
+	deltaByMint, err := GetDeltaQuarksFromPendingSwaps(env.ctx, env.data, owner.PublicKey().ToBase58())
+	require.NoError(t, err)
+	require.Len(t, deltaByMint, 2)
+
+	expectedOutputA := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
+		CurrentSupplyInQuarks: supplyA,
+		BuyAmountInQuarks:     coreMintAmount,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	})
+	expectedOutputB := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
+		CurrentSupplyInQuarks: supplyB,
+		BuyAmountInQuarks:     coreMintAmount,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	})
+
+	assert.Equal(t, expectedOutputA, deltaByMint[launchpadMintA.PublicKey().ToBase58()])
+	assert.Equal(t, expectedOutputB, deltaByMint[launchpadMintB.PublicKey().ToBase58()])
 }
