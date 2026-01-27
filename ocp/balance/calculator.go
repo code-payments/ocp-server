@@ -2,16 +2,20 @@ package balance
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
-	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/solana"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
 type Source uint8
@@ -387,4 +391,222 @@ func (s Source) String() string {
 		return "blockchain"
 	}
 	return "unknown"
+}
+
+// PendingSwapBalance represents the pending balance and the swaps used to compute it.
+type PendingSwapBalance struct {
+	TargetMint  *common.Account
+	DeltaQuarks uint64
+	Swaps       []*swap.Record
+}
+
+// Assumes a USD stable coin core mint that must be involved in each swap
+func (b *PendingSwapBalance) GetUsdMarketValue() float64 {
+	// Selling a launchpad currency for a USD stable coin
+	coreMintQuarksPerUnitBig := big.NewFloat(float64(common.GetMintQuarksPerUnit(common.CoreMintAccount))).SetPrec(128)
+	if common.IsCoreMint(b.TargetMint) {
+		deltaQuarksBig := big.NewFloat(float64(b.DeltaQuarks)).SetPrec(128)
+		usdMarketValue, _ := new(big.Float).Quo(deltaQuarksBig, coreMintQuarksPerUnitBig).Float64()
+		return usdMarketValue
+	}
+
+	// Buying a launchpad currency with a USD stable coin
+	var coreMintQuarksUsedInBuys uint64
+	for _, swap := range b.Swaps {
+		coreMintQuarksUsedInBuys += swap.Amount
+	}
+	coreMintQuarksUsedInBuysBig := big.NewFloat(float64(coreMintQuarksUsedInBuys)).SetPrec(128)
+	usdMarketValue, _ := new(big.Float).Quo(coreMintQuarksUsedInBuysBig, coreMintQuarksPerUnitBig).Float64()
+	return usdMarketValue
+}
+
+// GetDeltaQuarksFromPendingSwaps returns a mapping of mint to pending swap balance that
+// represents the simulated result of executing pending swaps for an owner account.
+// Only swaps funded via SubmitIntent in the Funding, Funded, or Submitting states
+// are included.
+//
+// The returned deltas represent the expected output amounts for each ToMint,
+// calculated by simulating each swap execution using the current reserve state.
+func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider, owner string) (map[string]*PendingSwapBalance, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "GetDeltaQuarksFromPendingSwaps")
+	tracer.AddAttribute("owner", owner)
+	defer tracer.End()
+
+	if !common.IsCoreMintUsdStableCoin() {
+		return nil, errors.New("core mint must be a usd stable coin")
+	}
+
+	pendingSwaps, err := data.GetAllSwapsByOwnerAndStates(
+		ctx,
+		owner,
+		swap.StateFunding,
+		swap.StateFunded,
+		swap.StateSubmitting,
+	)
+	if err == swap.ErrNotFound {
+		return make(map[string]*PendingSwapBalance), nil
+	} else if err != nil {
+		tracer.OnError(err)
+		return nil, errors.Wrap(err, "error getting pending swaps")
+	}
+
+	// Collect all unique launchpad mints that need reserve state
+	launchpadMints := make(map[string]struct{})
+	for _, swapRecord := range pendingSwaps {
+		if swapRecord.FundingSource != swap.FundingSourceSubmitIntent {
+			continue
+		}
+
+		fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+		toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+
+		if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
+			return nil, errors.New("core mint must be involved in swap")
+		}
+
+		if !common.IsCoreMint(fromMint) {
+			launchpadMints[swapRecord.FromMint] = struct{}{}
+		}
+		if !common.IsCoreMint(toMint) {
+			launchpadMints[swapRecord.ToMint] = struct{}{}
+		}
+	}
+
+	// Fetch all reserve states upfront
+	reserveByMint := make(map[string]*currency.ReserveRecord)
+	now := time.Now()
+	for mint := range launchpadMints {
+		reserveRecord, err := data.GetCurrencyReserveAtTime(ctx, mint, now)
+		if err == currency.ErrNotFound {
+			// If the reserve cannot be found, try something a bit further in the past.
+			//
+			// todo: Fix bug in Postgres implementation
+			reserveRecord, err = data.GetCurrencyReserveAtTime(ctx, mint, now.Add(-15*time.Minute))
+			if err != nil {
+				tracer.OnError(err)
+				return nil, errors.Wrapf(err, "error getting reserve for mint %s", mint)
+			}
+		} else if err != nil {
+			tracer.OnError(err)
+			return nil, errors.Wrapf(err, "error getting reserve for mint %s", mint)
+		}
+		reserveByMint[mint] = reserveRecord
+	}
+
+	// Simulate each swap and accumulate output by destination mint
+	deltaByMint := make(map[string]*PendingSwapBalance)
+	for _, swapRecord := range pendingSwaps {
+		if swapRecord.FundingSource != swap.FundingSourceSubmitIntent {
+			continue
+		}
+
+		outputQuarks, err := simulateSwapOutput(swapRecord, reserveByMint)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, errors.Wrap(err, "error simulating swap output")
+		}
+
+		if deltaByMint[swapRecord.ToMint] == nil {
+			toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+			if err != nil {
+				tracer.OnError(err)
+				return nil, err
+			}
+			deltaByMint[swapRecord.ToMint] = &PendingSwapBalance{
+				TargetMint: toMint,
+			}
+		}
+		deltaByMint[swapRecord.ToMint].DeltaQuarks += outputQuarks
+		deltaByMint[swapRecord.ToMint].Swaps = append(deltaByMint[swapRecord.ToMint].Swaps, swapRecord)
+	}
+
+	return deltaByMint, nil
+}
+
+// simulateSwapOutput calculates the expected output amount for a swap by simulating
+// its execution using the provided reserve states.
+func simulateSwapOutput(swapRecord *swap.Record, reserveByMint map[string]*currency.ReserveRecord) (uint64, error) {
+	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+	if err != nil {
+		return 0, err
+	}
+
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return 0, err
+	}
+
+	isFromCoreMint := common.IsCoreMint(fromMint)
+	isToCoreMint := common.IsCoreMint(toMint)
+
+	switch {
+	case isFromCoreMint && !isToCoreMint:
+		// Buy: core mint -> launchpad currency
+		outputQuarks, err := simulateBuy(reserveByMint[swapRecord.ToMint], swapRecord.Amount)
+		if err != nil {
+			return 0, errors.Wrapf(err, "failed to simulate buy for mint %s", swapRecord.ToMint)
+		}
+		return outputQuarks, nil
+
+	case !isFromCoreMint && isToCoreMint:
+		// Sell: launchpad currency -> core mint
+		outputQuarks, err := simulateSell(reserveByMint[swapRecord.FromMint], swapRecord.Amount)
+		if err != nil {
+			return 0, errors.Wrapf(err, "failed to simulate sell for mint %s", swapRecord.FromMint)
+		}
+		return outputQuarks, nil
+
+	case !isFromCoreMint && !isToCoreMint:
+		// Buy-Sell: launchpad currency -> launchpad currency
+		// First sell FromMint to get core mint, then buy ToMint
+		coreMintQuarks, err := simulateSell(reserveByMint[swapRecord.FromMint], swapRecord.Amount)
+		if err != nil {
+			return 0, errors.Wrapf(err, "failed to simulate sell for mint %s", swapRecord.FromMint)
+		}
+		outputQuarks, err := simulateBuy(reserveByMint[swapRecord.ToMint], coreMintQuarks)
+		if err != nil {
+			return 0, errors.Wrapf(err, "failed to simulate buy for mint %s", swapRecord.ToMint)
+		}
+		return outputQuarks, nil
+
+	default:
+		// core mint -> core mint is not a valid swap
+		return 0, errors.New("invalid swap: both mints are core mint")
+	}
+}
+
+// simulateBuy simulates buying a launchpad currency with core mint quarks.
+func simulateBuy(reserveRecord *currency.ReserveRecord, coreMintQuarks uint64) (uint64, error) {
+	if reserveRecord == nil {
+		return 0, errors.New("reserve record is nil")
+	}
+
+	return currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
+		CurrentSupplyInQuarks: reserveRecord.SupplyFromBonding,
+		BuyAmountInQuarks:     coreMintQuarks,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	}), nil
+}
+
+// simulateSell simulates selling a launchpad currency for core mint quarks.
+func simulateSell(reserveRecord *currency.ReserveRecord, sellQuarks uint64) (uint64, error) {
+	if reserveRecord == nil {
+		return 0, errors.New("reserve record is nil")
+	}
+
+	outputQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
+		CurrentSupplyInQuarks: reserveRecord.SupplyFromBonding,
+		SellAmountInQuarks:    sellQuarks,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+		SellFeeBps:            currencycreator.DefaultSellFeeBps,
+	})
+	return outputQuarks, nil
 }

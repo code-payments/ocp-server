@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -155,14 +157,21 @@ func dbGetByFundingId(ctx context.Context, db *sqlx.DB, fundingId string) (*mode
 	return res, nil
 }
 
-func dbGetAllByOwnerAndState(ctx context.Context, db *sqlx.DB, owner string, state swap.State) ([]*model, error) {
+func dbGetAllByOwnerAndStates(ctx context.Context, db *sqlx.DB, owner string, states []swap.State) ([]*model, error) {
 	res := []*model{}
 
-	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
-		FROM ` + tableName + `
-		WHERE owner = $1 AND state = $2`
+	stateStrings := make([]string, len(states))
+	for i, s := range states {
+		stateStrings[i] = fmt.Sprintf("%d", s)
+	}
 
-	err := db.SelectContext(ctx, &res, query, owner, state)
+	query := fmt.Sprintf(`SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+		FROM `+tableName+`
+		WHERE owner = $1 AND state IN (%s)`,
+		strings.Join(stateStrings, ", "),
+	)
+
+	err := db.SelectContext(ctx, &res, query, owner)
 	if err != nil {
 		return nil, pgutil.CheckNoRows(err, swap.ErrNotFound)
 	}

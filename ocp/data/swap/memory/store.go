@@ -87,12 +87,12 @@ func (s *store) GetByFundingId(_ context.Context, fundingId string) (*swap.Recor
 	return &cloned, nil
 }
 
-func (s *store) GetAllByOwnerAndState(_ context.Context, owner string, state swap.State) ([]*swap.Record, error) {
+func (s *store) GetAllByOwnerAndStates(_ context.Context, owner string, states ...swap.State) ([]*swap.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	items := s.findByOwner(owner)
-	items = s.filterByState(items, state)
+	items = s.filterByStates(items, states)
 
 	if len(items) == 0 {
 		return nil, swap.ErrNotFound
@@ -207,10 +207,15 @@ func (s *store) filter(items []*swap.Record, cursor query.Cursor, limit uint64, 
 	return res
 }
 
-func (s *store) filterByState(items []*swap.Record, state swap.State) []*swap.Record {
+func (s *store) filterByStates(items []*swap.Record, states []swap.State) []*swap.Record {
+	stateSet := make(map[swap.State]struct{}, len(states))
+	for _, state := range states {
+		stateSet[state] = struct{}{}
+	}
+
 	var res []*swap.Record
 	for _, item := range items {
-		if item.State == state {
+		if _, ok := stateSet[item.State]; ok {
 			res = append(res, item)
 		}
 	}
