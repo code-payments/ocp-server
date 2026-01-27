@@ -581,7 +581,7 @@ func (s *transactionServer) GetPendingSwaps(ctx context.Context, req *transactio
 	}
 
 	// Swap is created, but requires client to initiate the funding
-	createdSwaps, err := s.data.GetAllSwapsByOwnerAndState(ctx, owner.PublicKey().ToBase58(), swap.StateCreated)
+	createdSwaps, err := s.data.GetAllSwapsByOwnerAndStates(ctx, owner.PublicKey().ToBase58(), swap.StateCreated)
 	if err != nil && err != swap.ErrNotFound {
 		log.With(zap.Error(err)).Warn("failure getting swaps in CREATED state")
 		return nil, status.Error(codes.Internal, "")

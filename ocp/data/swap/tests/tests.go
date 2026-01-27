@@ -18,7 +18,7 @@ func RunTests(t *testing.T, s swap.Store, teardown func()) {
 		testRoundTrip,
 		testUpdateHappyPath,
 		testUpdateStaleRecord,
-		testGetAllByOwnerAndState,
+		testGetAllByOwnerAndStates,
 		testGetAllByState,
 	} {
 		tf(t, s)
@@ -185,11 +185,11 @@ func testUpdateStaleRecord(t *testing.T, s swap.Store) {
 	})
 }
 
-func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
-	t.Run("testGetAllByOwnerAndState", func(t *testing.T) {
+func testGetAllByOwnerAndStates(t *testing.T, s swap.Store) {
+	t.Run("testGetAllByOwnerAndStates", func(t *testing.T) {
 		ctx := context.Background()
 
-		_, err := s.GetAllByOwnerAndState(ctx, "test_owner_0", swap.StateFinalized)
+		_, err := s.GetAllByOwnerAndStates(ctx, "test_owner_0", swap.StateFinalized)
 		assert.Equal(t, swap.ErrNotFound, err)
 
 		var records []*swap.Record
@@ -223,9 +223,10 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 			records = append(records, record)
 		}
 
+		// Test with single state
 		for _, owner := range []string{"test_owner_0", "test_owner_1"} {
 			for state := range swap.StateCancelled + 1 {
-				allActual, err := s.GetAllByOwnerAndState(ctx, owner, state)
+				allActual, err := s.GetAllByOwnerAndStates(ctx, owner, state)
 				require.NoError(t, err)
 				require.NotEmpty(t, allActual)
 
@@ -244,6 +245,25 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 				}
 			}
 		}
+
+		// Test with multiple states
+		allActual, err := s.GetAllByOwnerAndStates(ctx, "test_owner_0", swap.StateCreated, swap.StateFunding, swap.StateFunded)
+		require.NoError(t, err)
+		require.NotEmpty(t, allActual)
+
+		for _, actual := range allActual {
+			assert.Equal(t, "test_owner_0", actual.Owner)
+			assert.True(t, actual.State == swap.StateCreated || actual.State == swap.StateFunding || actual.State == swap.StateFunded)
+		}
+
+		// Verify count matches expected records
+		expectedCount := 0
+		for _, record := range records {
+			if record.Owner == "test_owner_0" && (record.State == swap.StateCreated || record.State == swap.StateFunding || record.State == swap.StateFunded) {
+				expectedCount++
+			}
+		}
+		assert.Len(t, allActual, expectedCount)
 	})
 }
 

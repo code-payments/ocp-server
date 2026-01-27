@@ -203,7 +203,7 @@ type DatabaseData interface {
 	SaveSwap(ctx context.Context, record *swap.Record) error
 	GetSwapById(ctx context.Context, id string) (*swap.Record, error)
 	GetSwapByFundingId(ctx context.Context, fundingId string) (*swap.Record, error)
-	GetAllSwapsByOwnerAndState(ctx context.Context, owner string, state swap.State) ([]*swap.Record, error)
+	GetAllSwapsByOwnerAndStates(ctx context.Context, owner string, states ...swap.State) ([]*swap.Record, error)
 	GetAllSwapsByState(ctx context.Context, state swap.State, opts ...query.Option) ([]*swap.Record, error)
 	GetSwapCountByState(ctx context.Context, state swap.State) (uint64, error)
 
@@ -711,8 +711,8 @@ func (dp *DatabaseProvider) GetSwapById(ctx context.Context, id string) (*swap.R
 func (dp *DatabaseProvider) GetSwapByFundingId(ctx context.Context, fundingId string) (*swap.Record, error) {
 	return dp.swaps.GetByFundingId(ctx, fundingId)
 }
-func (dp *DatabaseProvider) GetAllSwapsByOwnerAndState(ctx context.Context, owner string, state swap.State) ([]*swap.Record, error) {
-	return dp.swaps.GetAllByOwnerAndState(ctx, owner, state)
+func (dp *DatabaseProvider) GetAllSwapsByOwnerAndStates(ctx context.Context, owner string, states ...swap.State) ([]*swap.Record, error) {
+	return dp.swaps.GetAllByOwnerAndStates(ctx, owner, states...)
 }
 func (dp *DatabaseProvider) GetAllSwapsByState(ctx context.Context, state swap.State, opts ...query.Option) ([]*swap.Record, error) {
 	req, err := query.DefaultPaginationHandler(opts...)
