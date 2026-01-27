@@ -117,9 +117,15 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			reserveRecord, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), time.Now())
+			err = s.liveMintStateWorker.waitForData(ctx)
 			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to load currency reserve record")
+				log.With(zap.Error(err)).Warn("failed to wait for live mint data")
+				return nil, status.Error(codes.Internal, "")
+			}
+
+			liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
 				return nil, status.Error(codes.Internal, "")
 			}
 
@@ -180,7 +186,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 					Authority:         currencyAuthorityAccount.ToProto(),
 					MintVault:         mintVaultAccount.ToProto(),
 					CoreMintVault:     coreMintVaultAccount.ToProto(),
-					SupplyFromBonding: reserveRecord.SupplyFromBonding,
+					SupplyFromBonding: liveReserveState.SupplyFromBonding,
 					SellFeeBps:        uint32(metadataRecord.SellFeeBps),
 				},
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
