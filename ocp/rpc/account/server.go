@@ -31,9 +31,9 @@ var (
 )
 
 type balanceMetadata struct {
-	realValue              uint64 // The real value of a token account's balance
-	additionalPendingValue uint64 // Estimated additional pending value of a token account's balance
-	source                 accountpb.TokenAccountInfo_BalanceSource
+	realValue                  uint64                      // The real value of a token account's balance
+	additionalPendingSwapValue *balance.PendingSwapBalance // Estimated additional pending value of a token account's balance from swaps
+	source                     accountpb.TokenAccountInfo_BalanceSource
 }
 
 type server struct {
@@ -326,7 +326,7 @@ func (s *server) fetchBalances(ctx context.Context, owner *common.Account, allAc
 			continue
 		}
 
-		balanceMetadataByTokenAccount[accountRecords.General.TokenAccount].additionalPendingValue = pendingSwapBalance.DeltaQuarks
+		balanceMetadataByTokenAccount[accountRecords.General.TokenAccount].additionalPendingSwapValue = pendingSwapBalance
 	}
 
 	// Any accounts that aren't Timelock can be deferred to the blockchain
@@ -477,11 +477,15 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 	}
 
+	totalPendingBalance := prefetchedBalanceMetadata.realValue
+	if prefetchedBalanceMetadata.additionalPendingSwapValue != nil {
+		totalPendingBalance += prefetchedBalanceMetadata.additionalPendingSwapValue.DeltaQuarks
+	}
+
 	// todo: USD cost basis requires tests
-	// todo: Add USD market value to cost basis for pending balances to result
 	var usdCostBasis float64
 	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
-		usdCostBasis = float64(prefetchedBalanceMetadata.realValue+prefetchedBalanceMetadata.additionalPendingValue) / float64(common.CoreMintQuarksPerUnit)
+		usdCostBasis = float64(totalPendingBalance) / float64(common.CoreMintQuarksPerUnit)
 	} else {
 		switch records.General.AccountType {
 		case commonpb.AccountType_PRIMARY:
@@ -491,8 +495,8 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 				return nil, err
 			}
 
-			if prefetchedBalanceMetadata.additionalPendingValue > 0 {
-
+			if prefetchedBalanceMetadata.additionalPendingSwapValue != nil {
+				usdCostBasis += prefetchedBalanceMetadata.additionalPendingSwapValue.GetUsdMarketValue()
 			}
 		default:
 			usdCostBasis = 0 // Account type not supported
@@ -506,7 +510,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		AccountType:          records.General.AccountType,
 		Index:                records.General.Index,
 		BalanceSource:        prefetchedBalanceMetadata.source,
-		Balance:              prefetchedBalanceMetadata.realValue + prefetchedBalanceMetadata.additionalPendingValue,
+		Balance:              totalPendingBalance,
 		UsdCostBasis:         usdCostBasis,
 		ManagementState:      managementState,
 		BlockchainState:      blockchainState,
