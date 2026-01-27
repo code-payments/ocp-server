@@ -38,6 +38,7 @@ const (
 			exchange_rate NUMERIC(18, 9) NULL,
 			native_amount NUMERIC(18, 9) NULL,
 			usd_market_value NUMERIC(18, 9) NULL,
+			original_usd_market_value NUMERIC(18, 9) NULL,
 
 			is_withdraw BOOL NOT NULL,
 			is_remote_send BOOL NOT NULL,
