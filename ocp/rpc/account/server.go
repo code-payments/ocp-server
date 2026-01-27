@@ -31,8 +31,9 @@ var (
 )
 
 type balanceMetadata struct {
-	value  uint64
-	source accountpb.TokenAccountInfo_BalanceSource
+	realValue              uint64 // The real value of a token account's balance
+	additionalPendingValue uint64 // Estimated additional pending value of a token account's balance
+	source                 accountpb.TokenAccountInfo_BalanceSource
 }
 
 type server struct {
@@ -231,9 +232,9 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	}
 
 	// Fetch balances
-	balanceMetadataByTokenAccount, err := s.fetchBalances(ctx, filteredRecords)
+	balanceMetadataByTokenAccount, err := s.fetchBalances(ctx, owner, filteredRecords)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure fetching balances")
+		log.With(zap.Error(err)).Warn("failure getting balances")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -282,9 +283,10 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 
 // fetchBalances optimally routes and batches balance calculations for a set of
 // account records.
-func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.AccountRecords) (map[string]*balanceMetadata, error) {
+func (s *server) fetchBalances(ctx context.Context, owner *common.Account, allAccountRecords []*common.AccountRecords) (map[string]*balanceMetadata, error) {
 	balanceMetadataByTokenAccount := make(map[string]*balanceMetadata)
 
+	// Fetch cached balances
 	var mangedByCodeRecords []*common.AccountRecords
 	for _, accountRecords := range allAccountRecords {
 		if accountRecords.IsManagedByCode(ctx) {
@@ -293,8 +295,8 @@ func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.
 			// Don't calculate a balance for now, since the caching strategy
 			// is not possible.
 			balanceMetadataByTokenAccount[accountRecords.General.TokenAccount] = &balanceMetadata{
-				value:  0,
-				source: accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN,
+				realValue: 0,
+				source:    accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN,
 			}
 		}
 	}
@@ -304,9 +306,27 @@ func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.
 	}
 	for tokenAccount, quarks := range balancesByTokenAccount {
 		balanceMetadataByTokenAccount[tokenAccount] = &balanceMetadata{
-			value:  quarks,
-			source: accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE,
+			realValue: quarks,
+			source:    accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE,
 		}
+	}
+
+	// Fetch and add any pending balances from swaps
+	pendingSwapBalances, err := balance.GetDeltaQuarksFromPendingSwaps(ctx, s.data, owner.PublicKey().ToBase58())
+	if err != nil {
+		return nil, err
+	}
+	for _, accountRecords := range mangedByCodeRecords {
+		if accountRecords.General.AccountType != commonpb.AccountType_PRIMARY {
+			continue
+		}
+
+		pendingBalance, ok := pendingSwapBalances[accountRecords.General.MintAccount]
+		if !ok {
+			continue
+		}
+
+		balanceMetadataByTokenAccount[accountRecords.General.TokenAccount].additionalPendingValue = pendingBalance
 	}
 
 	// Any accounts that aren't Timelock can be deferred to the blockchain
@@ -336,8 +356,8 @@ func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.
 			protoBalanceSource = accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN
 		}
 		balanceMetadataByTokenAccount[tokenAccount.PublicKey().ToBase58()] = &balanceMetadata{
-			value:  quarks,
-			source: protoBalanceSource,
+			realValue: quarks,
+			source:    protoBalanceSource,
 		}
 	}
 
@@ -417,7 +437,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 
 		// Otherwise, check whether it looks like the gift card was claimed.
-		if prefetchedBalanceMetadata.source == accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE && prefetchedBalanceMetadata.value == 0 {
+		if prefetchedBalanceMetadata.source == accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE && prefetchedBalanceMetadata.realValue == 0 {
 			claimState = accountpb.TokenAccountInfo_CLAIM_STATE_CLAIMED
 		} else if records.Timelock.IsClosed() {
 			claimState = accountpb.TokenAccountInfo_CLAIM_STATE_CLAIMED
@@ -445,7 +465,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		// If the gift card account is claimed or expired, force the balance to zero.
 		if claimState == accountpb.TokenAccountInfo_CLAIM_STATE_CLAIMED || claimState == accountpb.TokenAccountInfo_CLAIM_STATE_EXPIRED {
 			prefetchedBalanceMetadata.source = accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE
-			prefetchedBalanceMetadata.value = 0
+			prefetchedBalanceMetadata.realValue = 0
 		}
 	}
 
@@ -457,9 +477,11 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 	}
 
+	// todo: USD cost basis requires tests
+	// todo: Add USD market value to cost basis for pending balances to result
 	var usdCostBasis float64
 	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
-		usdCostBasis = float64(prefetchedBalanceMetadata.value) / float64(common.CoreMintQuarksPerUnit)
+		usdCostBasis = float64(prefetchedBalanceMetadata.realValue) / float64(common.CoreMintQuarksPerUnit)
 	} else {
 		switch records.General.AccountType {
 		case commonpb.AccountType_PRIMARY:
@@ -467,6 +489,10 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 			usdCostBasis, err = s.data.GetUsdCostBasis(ctx, ownerAccount.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58())
 			if err != nil {
 				return nil, err
+			}
+
+			if prefetchedBalanceMetadata.additionalPendingValue > 0 {
+
 			}
 		default:
 			usdCostBasis = 0 // Account type not supported
@@ -480,7 +506,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		AccountType:          records.General.AccountType,
 		Index:                records.General.Index,
 		BalanceSource:        prefetchedBalanceMetadata.source,
-		Balance:              prefetchedBalanceMetadata.value,
+		Balance:              prefetchedBalanceMetadata.realValue + prefetchedBalanceMetadata.additionalPendingValue,
 		UsdCostBasis:         usdCostBasis,
 		ManagementState:      managementState,
 		BlockchainState:      blockchainState,
