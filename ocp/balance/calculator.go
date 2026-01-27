@@ -2,6 +2,7 @@ package balance
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/pkg/errors"
@@ -397,6 +398,26 @@ type PendingSwapBalance struct {
 	TargetMint  *common.Account
 	DeltaQuarks uint64
 	Swaps       []*swap.Record
+}
+
+// Assumes a USD stable coin core mint that must be involved in each swap
+func (b *PendingSwapBalance) GetUsdMarketValue() float64 {
+	// Selling a launchpad currency for a USD stable coin
+	coreMintQuarksPerUnitBig := big.NewFloat(float64(common.GetMintQuarksPerUnit(common.CoreMintAccount))).SetPrec(128)
+	if common.IsCoreMint(b.TargetMint) {
+		deltaQuarksBig := big.NewFloat(float64(b.DeltaQuarks)).SetPrec(128)
+		usdMarketValue, _ := new(big.Float).Quo(deltaQuarksBig, coreMintQuarksPerUnitBig).Float64()
+		return usdMarketValue
+	}
+
+	// Buying a launchpad currency with a USD stable coin
+	var coreMintQuarksUsedInBuys uint64
+	for _, swap := range b.Swaps {
+		coreMintQuarksUsedInBuys += swap.Amount
+	}
+	coreMintQuarksUsedInBuysBig := big.NewFloat(float64(coreMintQuarksUsedInBuys)).SetPrec(128)
+	usdMarketValue, _ := new(big.Float).Quo(coreMintQuarksUsedInBuysBig, coreMintQuarksPerUnitBig).Float64()
+	return usdMarketValue
 }
 
 // GetDeltaQuarksFromPendingSwaps returns a mapping of mint to pending swap balance that
