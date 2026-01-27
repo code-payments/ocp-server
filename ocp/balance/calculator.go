@@ -411,6 +411,10 @@ func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider,
 	tracer.AddAttribute("owner", owner)
 	defer tracer.End()
 
+	if !common.IsCoreMintUsdStableCoin() {
+		return nil, errors.New("core mint must be a usd stable coin")
+	}
+
 	pendingSwaps, err := data.GetAllSwapsByOwnerAndStates(
 		ctx,
 		owner,
@@ -441,6 +445,10 @@ func GetDeltaQuarksFromPendingSwaps(ctx context.Context, data ocp_data.Provider,
 		if err != nil {
 			tracer.OnError(err)
 			return nil, err
+		}
+
+		if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
+			return nil, errors.New("core mint must be involved in swap")
 		}
 
 		if !common.IsCoreMint(fromMint) {

@@ -599,7 +599,7 @@ func TestGetDeltaQuarksFromPendingSwaps_SellSwap(t *testing.T) {
 	launchpadMint := testutil.NewRandomAccount(t)
 
 	supplyFromBonding := uint64(1_000_000_000_000) // 100 tokens
-	sellAmount := uint64(10_000_000_000)          // 1 token
+	sellAmount := uint64(10_000_000_000)           // 1 token
 
 	// Create reserve for the launchpad mint
 	reserveRecord := &currency.ReserveRecord{
@@ -646,6 +646,8 @@ func TestGetDeltaQuarksFromPendingSwaps_SellSwap(t *testing.T) {
 }
 
 func TestGetDeltaQuarksFromPendingSwaps_BuySellSwap(t *testing.T) {
+	t.Skip("cross-token swaps not supported")
+
 	env := setupBalanceTestEnv(t)
 	owner := testutil.NewRandomAccount(t)
 	launchpadMintA := testutil.NewRandomAccount(t)
