@@ -477,15 +477,15 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 	}
 
-	totalPendingBalance := prefetchedBalanceMetadata.realValue
+	estimatedTotalBalance := prefetchedBalanceMetadata.realValue
 	if prefetchedBalanceMetadata.additionalPendingSwapValue != nil {
-		totalPendingBalance += prefetchedBalanceMetadata.additionalPendingSwapValue.DeltaQuarks
+		estimatedTotalBalance += prefetchedBalanceMetadata.additionalPendingSwapValue.DeltaQuarks
 	}
 
 	// todo: USD cost basis requires tests
 	var usdCostBasis float64
 	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
-		usdCostBasis = float64(totalPendingBalance) / float64(common.CoreMintQuarksPerUnit)
+		usdCostBasis = float64(estimatedTotalBalance) / float64(common.CoreMintQuarksPerUnit)
 	} else {
 		switch records.General.AccountType {
 		case commonpb.AccountType_PRIMARY:
@@ -510,7 +510,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		AccountType:          records.General.AccountType,
 		Index:                records.General.Index,
 		BalanceSource:        prefetchedBalanceMetadata.source,
-		Balance:              totalPendingBalance,
+		Balance:              estimatedTotalBalance,
 		UsdCostBasis:         usdCostBasis,
 		ManagementState:      managementState,
 		BlockchainState:      blockchainState,
