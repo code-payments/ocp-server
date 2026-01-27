@@ -206,6 +206,14 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 				big.NewFloat(usdMarketValue).SetPrec(128),
 				big.NewFloat(0.99).SetPrec(128),
 			).Float64()
+
+			// Update funding intent record with actual USD market value for
+			// consistent USD cost basis
+			fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue = usdMarketValueWithoutFees
+			err = p.data.SaveIntent(ctx, fundingIntentRecord)
+			if err != nil {
+				return 0, err
+			}
 		}
 	case swap.FundingSourceExternalWallet:
 		if !common.IsCoreMint(fromMint) {
