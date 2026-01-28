@@ -415,15 +415,6 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 		if err != nil {
 			return err
 		}
-	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData: // todo: deprecate this flow
-		currencyCode = currency_lib.Code(typed.ServerExchangeData.Currency)
-		nativeAmount = typed.ServerExchangeData.NativeAmount
-		exchangeRate = typed.ServerExchangeData.ExchangeRate
-		quarks = typed.ServerExchangeData.Quarks
-		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, h.data, mint, quarks, currency_util.GetLatestExchangeRateTime())
-		if err != nil {
-			return err
-		}
 	default:
 		return NewIntentDeniedError("client exchange data not provided")
 	}
@@ -619,10 +610,8 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 		if err := validateExchangeDataWithinIntent(typedMetadata.Mint, typed.ClientExchangeData); err != nil {
 			return err
 		}
-	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData:
-		if err := validateLegacyExchangeDataWithinIntent(ctx, h.log, h.data, typedMetadata.Mint, typed.ServerExchangeData); err != nil {
-			return err
-		}
+	default:
+		return NewIntentDeniedError("client exchange data not provided")
 	}
 
 	//
@@ -688,8 +677,8 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	switch typed := metadata.ExchangeData.(type) {
 	case *transactionpb.SendPublicPaymentMetadata_ClientExchangeData:
 		quarks = typed.ClientExchangeData.Quarks
-	case *transactionpb.SendPublicPaymentMetadata_ServerExchangeData:
-		quarks = typed.ServerExchangeData.Quarks
+	default:
+		return NewIntentDeniedError("client exchange data not provided")
 	}
 
 	//
@@ -1829,33 +1818,6 @@ func validateExchangeDataWithinIntent(intentMint *commonpb.SolanaAccountId, prot
 
 	isValid, message := currency_util.ValidateClientExchangeData(proto)
 	if !isValid {
-		if strings.Contains(message, "stale") {
-			return NewStaleStateError(message)
-		}
-		return NewIntentValidationError(message)
-	}
-	return nil
-}
-
-func validateLegacyExchangeDataWithinIntent(ctx context.Context, log *zap.Logger, data ocp_data.Provider, intentMint *commonpb.SolanaAccountId, proto *transactionpb.ExchangeData) error {
-	intentMintAccount, err := common.GetBackwardsCompatMint(intentMint)
-	if err != nil {
-		return err
-	}
-
-	exchangeMintAccount, err := common.GetBackwardsCompatMint(proto.Mint)
-	if err != nil {
-		return err
-	}
-
-	if !bytes.Equal(intentMintAccount.PublicKey().ToBytes(), exchangeMintAccount.PublicKey().ToBytes()) {
-		return NewIntentValidationErrorf("expected exchange data mint to be %s", intentMintAccount.PublicKey().ToBase58())
-	}
-
-	isValid, message, err := currency_util.ValidateLegacyClientExchangeData(ctx, log, data, proto)
-	if err != nil {
-		return err
-	} else if !isValid {
 		if strings.Contains(message, "stale") {
 			return NewStaleStateError(message)
 		}

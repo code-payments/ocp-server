@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,7 +22,6 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
-	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/protoutil"
@@ -67,47 +65,6 @@ func NewCurrencyServer(
 
 		liveMintStateWorker: liveMintStateWorker,
 	}
-}
-
-func (s *currencyServer) GetAllRates(ctx context.Context, req *currencypb.GetAllRatesRequest) (resp *currencypb.GetAllRatesResponse, err error) {
-	log := s.log.With(zap.String("method", "GetAllRates"))
-	log = client.InjectLoggingMetadata(ctx, log)
-
-	var record *currency.MultiRateRecord
-	if req.Timestamp != nil && req.Timestamp.AsTime().Before(time.Now().Add(-15*time.Minute)) {
-		record, err = s.loadExchangeRatesForTime(ctx, req.Timestamp.AsTime())
-	} else if req.Timestamp == nil || req.Timestamp.AsTime().Sub(time.Now()) < time.Hour {
-		record, err = s.loadExchangeRatesLatest(ctx)
-	} else {
-		return nil, status.Error(codes.InvalidArgument, "timestamp too far in the future")
-	}
-
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failed to load latest rate")
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	protoTime := timestamppb.New(record.Time)
-	return &currencypb.GetAllRatesResponse{
-		AsOf:  protoTime,
-		Rates: record.Rates,
-	}, nil
-}
-
-func (s *currencyServer) loadExchangeRatesForTime(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error) {
-	record, err := s.data.GetAllExchangeRates(ctx, t)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get price record by date")
-	}
-	return record, nil
-}
-
-func (s *currencyServer) loadExchangeRatesLatest(ctx context.Context) (*currency.MultiRateRecord, error) {
-	latest, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get latest price record")
-	}
-	return latest, nil
 }
 
 func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsRequest) (*currencypb.GetMintsResponse, error) {
@@ -160,9 +117,15 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			reserveRecord, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), currency_util.GetLatestExchangeRateTime())
+			err = s.liveMintStateWorker.waitForData(ctx)
 			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to load currency reserve record")
+				log.With(zap.Error(err)).Warn("failed to wait for live mint data")
+				return nil, status.Error(codes.Internal, "")
+			}
+
+			liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
 				return nil, status.Error(codes.Internal, "")
 			}
 
@@ -223,7 +186,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 					Authority:         currencyAuthorityAccount.ToProto(),
 					MintVault:         mintVaultAccount.ToProto(),
 					CoreMintVault:     coreMintVaultAccount.ToProto(),
-					SupplyFromBonding: reserveRecord.SupplyFromBonding,
+					SupplyFromBonding: liveReserveState.SupplyFromBonding,
 					SellFeeBps:        uint32(metadataRecord.SellFeeBps),
 				},
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),

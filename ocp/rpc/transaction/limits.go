@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -34,7 +35,7 @@ func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.Ge
 		return nil, err
 	}
 
-	multiRateRecord, err := s.data.GetAllExchangeRates(ctx, currency_util.GetLatestExchangeRateTime())
+	multiRateRecord, err := s.data.GetAllExchangeRates(ctx, time.Now())
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting current exchange rates")
 		return nil, status.Error(codes.Internal, "")
