@@ -83,6 +83,7 @@ func (p *exchangeRateRuntime) GetCurrentExchangeRates(ctx context.Context) error
 	delete(data.Rates, string(currency_lib.LSL))
 	delete(data.Rates, string(currency_lib.LTL))
 	delete(data.Rates, string(currency_lib.LVL))
+	delete(data.Rates, string(currency_lib.SLL))
 	delete(data.Rates, string(currency_lib.STD))
 	delete(data.Rates, string(currency_lib.SVC))
 	delete(data.Rates, string(currency_lib.XAU))
