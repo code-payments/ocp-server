@@ -207,6 +207,9 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 				big.NewFloat(0.99).SetPrec(128),
 			).Float64()
 
+			exchangeCurrency = currency_lib.USD
+			nativeAmountWithoutFees = usdMarketValueWithoutFees
+
 			// Update funding intent record with actual USD market value for
 			// consistent USD cost basis
 			fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue = usdMarketValueWithoutFees
