@@ -9,5 +9,5 @@ import (
 
 // Integration allows for notifications based on events processed by the swap worker
 type Integration interface {
-	OnSwapFinalized(ctx context.Context, owner *common.Account, isBuy bool, currencyName string, region currency.Code, valueReceived float64) error
+	OnSwapFinalized(ctx context.Context, owner *common.Account, isBuy bool, mint *common.Account, currencyName string, region currency.Code, valueReceived float64) error
 }

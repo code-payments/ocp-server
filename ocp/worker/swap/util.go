@@ -361,7 +361,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		).Float64()
 	}
 
-	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
+	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetMint, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
 }
 
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {
