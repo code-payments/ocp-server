@@ -333,8 +333,8 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 					DestinationTokenAccount: userVirtualTimelockVaultAccount.PublicKey().ToBase58(),
 					Quantity:                uint64(deltaQuarksIntoOmnibus),
 					ExchangeCurrency:        currency_lib.USD,
-					NativeAmount:            usdMarketValue,
 					ExchangeRate:            currency_util.CalculateExchangeRate(mint, uint64(deltaQuarksIntoOmnibus), usdMarketValue),
+					NativeAmount:            usdMarketValue,
 					UsdMarketValue:          usdMarketValue,
 				},
 

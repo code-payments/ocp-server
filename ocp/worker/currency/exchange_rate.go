@@ -11,6 +11,7 @@ import (
 	"github.com/code-payments/ocp-server/retry"
 	"github.com/code-payments/ocp-server/retry/backoff"
 
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
@@ -71,6 +72,26 @@ func (p *exchangeRateRuntime) GetCurrentExchangeRates(ctx context.Context) error
 	if err != nil {
 		return errors.Wrap(err, "failed to get current rate data")
 	}
+
+	delete(data.Rates, string(currency_lib.BTC))
+	delete(data.Rates, string(currency_lib.BYR))
+	delete(data.Rates, string(currency_lib.CLF))
+	delete(data.Rates, string(currency_lib.CUC))
+	delete(data.Rates, string(currency_lib.GGP))
+	delete(data.Rates, string(currency_lib.IMP))
+	delete(data.Rates, string(currency_lib.JEP))
+	delete(data.Rates, string(currency_lib.LSL))
+	delete(data.Rates, string(currency_lib.LTL))
+	delete(data.Rates, string(currency_lib.LVL))
+	delete(data.Rates, string(currency_lib.SLL))
+	delete(data.Rates, string(currency_lib.STD))
+	delete(data.Rates, string(currency_lib.SVC))
+	delete(data.Rates, string(currency_lib.XAU))
+	delete(data.Rates, string(currency_lib.XAG))
+	delete(data.Rates, string(currency_lib.XCD))
+	delete(data.Rates, string(currency_lib.XDR))
+	delete(data.Rates, string(currency_lib.ZMK))
+	delete(data.Rates, string(currency_lib.ZWL))
 
 	if err = p.data.ImportExchangeRates(ctx, data); err != nil {
 		return errors.Wrap(err, "failed to store rate data")

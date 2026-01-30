@@ -39,4 +39,9 @@ type Store interface {
 	// GetTransactedAmountForAntiMoneyLaundering gets the total transacted core mint quarks and the
 	// corresponding USD market value for an owner since a timestamp.
 	GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, owner string, since time.Time) (uint64, float64, error)
+
+	// GetUsdCostBasis gets the net USD market value for an owner account and mint.
+	// The USD market value is subtracted if the owner is the source, and it is added
+	// if the owner is the destination.
+	GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error)
 }
