@@ -22,7 +22,6 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
-	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
@@ -70,7 +69,7 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 	subsidizer := testutil.SetupRandomSubsidizer(t, data)
 
 	require.NoError(t, data.ImportExchangeRates(context.Background(), &currency.MultiRateRecord{
-		Time: currency_util.GetLatestExchangeRateTime(),
+		Time: time.Now(),
 		Rates: map[string]float64{
 			"usd": 0.1,
 		},

@@ -1,6 +1,7 @@
 package currency
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
+	"github.com/pkg/errors"
 
 	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
@@ -129,7 +131,7 @@ func (m *liveMintStateWorker) unregisterStream(id string) {
 	}
 }
 
-// WaitForData blocks until initial data is loaded or context is cancelled
+// waitForData blocks until initial data is loaded or context is cancelled
 func (m *liveMintStateWorker) waitForData(ctx context.Context) error {
 	select {
 	case <-m.dataReady:
@@ -139,7 +141,7 @@ func (m *liveMintStateWorker) waitForData(ctx context.Context) error {
 	}
 }
 
-// GetExchangeRates returns the current pre-signed exchange rate data
+// getExchangeRates returns the current pre-signed exchange rate data
 func (m *liveMintStateWorker) getExchangeRates() *liveExchangeRateData {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
@@ -147,7 +149,7 @@ func (m *liveMintStateWorker) getExchangeRates() *liveExchangeRateData {
 	return m.exchangeRates
 }
 
-// GetReserveStates returns all current pre-signed launchpad currency reserve states
+// getReserveStates returns all current pre-signed launchpad currency reserve states
 func (m *liveMintStateWorker) getReserveStates() []*liveReserveStateData {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
@@ -157,6 +159,19 @@ func (m *liveMintStateWorker) getReserveStates() []*liveReserveStateData {
 		result = append(result, data)
 	}
 	return result
+}
+
+// getReserveState returns a current pre-signed launchpad currency reserve state for a mint
+func (m *liveMintStateWorker) getReserveState(mint *common.Account) (*liveReserveStateData, error) {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	for _, data := range m.launchpadReserves {
+		if bytes.Equal(mint.PublicKey().ToBytes(), data.Mint.PublicKey().ToBytes()) {
+			return data, nil
+		}
+	}
+	return nil, errors.New("not found")
 }
 
 func (m *liveMintStateWorker) tryMarkDataReady() {
