@@ -810,22 +810,27 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 			}
 
 			// Check whether the destination account is a token account of the same mint that's
-			// been created on the blockchain. If not, a fee is likely required
-			err = validateExternalTokenAccountWithinIntent(ctx, h.data, destination, intentMint)
-			switch err {
-			case nil:
-			default:
-				if !strings.Contains(strings.ToLower(err.Error()), "doesn't exist on the blockchain") {
-					return err
-				}
+			// been created on the blockchain. If not, a fee is likely required.
+			//
+			// Note: We can skip these checks for VM swap ATAs because the account is already
+			// validated, and no fee payment is required.
+			if !isVmSwapPda {
+				err = validateExternalTokenAccountWithinIntent(ctx, h.data, destination, intentMint)
+				switch err {
+				case nil:
+				default:
+					if !strings.Contains(strings.ToLower(err.Error()), "doesn't exist on the blockchain") {
+						return err
+					}
 
-				if metadata.DestinationOwner == nil {
-					return NewIntentValidationError("destination owner account is required to derive ata")
-				}
+					if metadata.DestinationOwner == nil {
+						return NewIntentValidationError("destination owner account is required to derive ata")
+					}
 
-				// Only VM swap PDAs are subsidized by server
-				if !simResult.HasAnyFeePayments() && !isVmSwapPda {
-					return NewIntentValidationErrorf("%s fee payment is required", transactionpb.FeePaymentAction_CREATE_ON_SEND_WITHDRAWAL.String())
+					// Only VM swap PDAs are subsidized by server
+					if !simResult.HasAnyFeePayments() && !isVmSwapPda {
+						return NewIntentValidationErrorf("%s fee payment is required", transactionpb.FeePaymentAction_CREATE_ON_SEND_WITHDRAWAL.String())
+					}
 				}
 			}
 
