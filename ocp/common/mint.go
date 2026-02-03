@@ -22,7 +22,12 @@ var (
 
 	ErrUnsupportedMint = errors.New("unsupported mint")
 
-	jeffyMintAccount, _ = NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+	bitsMintAccount, _       = NewAccountFromPublicKeyString(config.BitsMintPublicKey)
+	bogeyMintAccount, _      = NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
+	floatMintAccount, _      = NewAccountFromPublicKeyString(config.FloatMintPublicKey)
+	jeffyMintAccount, _      = NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+	marketCoinMintAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
+	xpMintAccount, _         = NewAccountFromPublicKeyString(config.XpMintPublicKey)
 )
 
 func GetBackwardsCompatMint(protoMint *commonpb.SolanaAccountId) (*Account, error) {

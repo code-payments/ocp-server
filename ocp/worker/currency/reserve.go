@@ -71,22 +71,112 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 // todo: Don't hardcode Jeffy and other Flipcash currencies
 func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) error {
 	err1 := func() error {
+		bitsMintAccount, _ := common.NewAccountFromPublicKeyString(config.BitsMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, bitsMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              bitsMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err2 := func() error {
+		bogeyMintAccount, _ := common.NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, bogeyMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              bogeyMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err3 := func() error {
+		floatMintAccount, _ := common.NewAccountFromPublicKeyString(config.FloatMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, floatMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              floatMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err4 := func() error {
 		jeffyMintAccount, _ := common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
 
-		jeffyCirculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, jeffyMintAccount)
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, jeffyMintAccount)
 		if err != nil {
 			return err
 		}
 
 		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
 			Mint:              jeffyMintAccount.PublicKey().ToBase58(),
-			SupplyFromBonding: jeffyCirculatingSupply,
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err5 := func() error {
+		marketCoinMintAccount, _ := common.NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, marketCoinMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              marketCoinMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err6 := func() error {
+		xpMintAccount, _ := common.NewAccountFromPublicKeyString(config.XpMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, xpMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              xpMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
 			Time:              ts,
 		})
 	}()
 
 	if err1 != nil {
 		return err1
+	}
+	if err2 != nil {
+		return err2
+	}
+	if err3 != nil {
+		return err3
+	}
+	if err4 != nil {
+		return err4
+	}
+	if err5 != nil {
+		return err5
+	}
+	if err6 != nil {
+		return err6
 	}
 
 	return nil

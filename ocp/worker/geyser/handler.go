@@ -84,7 +84,13 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 	switch mintAccount.PublicKey().ToBase58() {
 
 	// todo: Don't hardcode Jeffy and other Flipcash currencies
-	case common.CoreMintAccount.PublicKey().ToBase58(), config.JeffyMintPublicKey:
+	case common.CoreMintAccount.PublicKey().ToBase58(),
+		config.BitsMintPublicKey,
+		config.BogeyMintPublicKey,
+		config.FloatMintPublicKey,
+		config.JeffyMintPublicKey,
+		config.MarketCoinMintPublicKey,
+		config.XpMintPublicKey:
 		// Not an ATA, so filter it out. It cannot be a VM deposit ATA
 		if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
 			return nil
