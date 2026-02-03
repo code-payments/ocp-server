@@ -23,13 +23,23 @@ import (
 )
 
 var (
-	jeffyMintAccount, _ = common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+	bitsMintAccount, _       = common.NewAccountFromPublicKeyString(config.BitsMintPublicKey)
+	bogeyMintAccount, _      = common.NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
+	floatMintAccount, _      = common.NewAccountFromPublicKeyString(config.FloatMintPublicKey)
+	jeffyMintAccount, _      = common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+	marketCoinMintAccount, _ = common.NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
+	xpMintAccount, _         = common.NewAccountFromPublicKeyString(config.XpMintPublicKey)
 )
 
 // trackedLaunchpadMints is the hardcoded set of launchpad mints to track
 // (excludes core mint as it only has exchange rate data)
 var trackedLaunchpadMints = []*common.Account{
+	bitsMintAccount,
+	bogeyMintAccount,
+	floatMintAccount,
 	jeffyMintAccount,
+	marketCoinMintAccount,
+	xpMintAccount,
 }
 
 // liveExchangeRateData represents live exchange rate data with its pre-signed response
