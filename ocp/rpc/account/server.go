@@ -219,17 +219,6 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 		filteredRecords = allRecords
 	}
 
-	// Trigger a deposit sync with the blockchain for the primary account, if it exists
-	for _, records := range filteredRecords {
-		if records.General.AccountType == commonpb.AccountType_PRIMARY && !records.General.RequiresDepositSync {
-			records.General.RequiresDepositSync = true
-			err = s.data.UpdateAccountInfo(ctx, records.General)
-			if err != nil {
-				log.With(zap.Error(err), zap.String("token_account", records.General.TokenAccount)).Warn("failure marking primary account for deposit sync")
-			}
-		}
-	}
-
 	// Fetch balances
 	balanceMetadataByTokenAccount, err := s.fetchBalances(ctx, filteredRecords)
 	if err != nil {
@@ -277,6 +266,23 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 		log.With(zap.Error(err)).Warn("failure adding requesting owner metadata")
 		return nil, status.Error(codes.Internal, "")
 	}
+
+	go func() {
+		// Trigger a deposit sync with the blockchain for the primary account, if it exists
+		for _, records := range filteredRecords {
+			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+			defer cancel()
+
+			if records.General.AccountType == commonpb.AccountType_PRIMARY && !records.General.RequiresDepositSync {
+				records.General.RequiresDepositSync = true
+				err = s.data.UpdateAccountInfo(ctx, records.General)
+				if err != nil {
+					log.With(zap.Error(err), zap.String("token_account", records.General.TokenAccount)).Warn("failure marking primary account for deposit sync")
+				}
+			}
+		}
+	}()
+
 	return resp, nil
 }
 
