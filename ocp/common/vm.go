@@ -13,6 +13,10 @@ var (
 
 	// todo: DB store to track VM per mint
 
+	badBoysAuthority, _        = NewAccountFromPublicKeyString(config.BadBoysAuthorityPublicKey)
+	badBoysVmAccount, _        = NewAccountFromPublicKeyString(config.BadBoysVmAccountPublicKey)
+	badBoysVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.BadBoysVmOmnibusPublicKey)
+
 	bitsAuthority, _        = NewAccountFromPublicKeyString(config.BitsAuthorityPublicKey)
 	bitsVmAccount, _        = NewAccountFromPublicKeyString(config.BitsVmAccountPublicKey)
 	bitsVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.BitsVmOmnibusPublicKey)
@@ -32,6 +36,10 @@ var (
 	marketCoinAuthority, _        = NewAccountFromPublicKeyString(config.MarketCoinAuthorityPublicKey)
 	marketCoinVmAccount, _        = NewAccountFromPublicKeyString(config.MarketCoinVmAccountPublicKey)
 	marketCoinVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinVmOmnibusPublicKey)
+
+	testAuthority, _        = NewAccountFromPublicKeyString(config.TestAuthorityPublicKey)
+	testVmAccount, _        = NewAccountFromPublicKeyString(config.TestVmAccountPublicKey)
+	testVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.TestVmOmnibusPublicKey)
 
 	xpAuthority, _        = NewAccountFromPublicKeyString(config.XpAuthorityPublicKey)
 	xpVmAccount, _        = NewAccountFromPublicKeyString(config.XpVmAccountPublicKey)
@@ -57,6 +65,25 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 			Vm:        CoreMintVmAccount,
 			Omnibus:   CoreMintVmOmnibusAccount,
 			Mint:      CoreMintAccount,
+		}, nil
+	case badBoysMintAccount.PublicKey().ToBase58():
+		if badBoysAuthority.PrivateKey() == nil {
+			vaultRecord, err := data.GetKey(ctx, badBoysAuthority.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+
+			badBoysAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &VmConfig{
+			Authority: badBoysAuthority,
+			Vm:        badBoysVmAccount,
+			Omnibus:   badBoysVmOmnibusAccount,
+			Mint:      mintAccount,
 		}, nil
 	case bitsMintAccount.PublicKey().ToBase58():
 		if bitsAuthority.PrivateKey() == nil {
@@ -151,6 +178,25 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 			Authority: marketCoinAuthority,
 			Vm:        marketCoinVmAccount,
 			Omnibus:   marketCoinVmOmnibusAccount,
+			Mint:      mintAccount,
+		}, nil
+	case testMintAccount.PublicKey().ToBase58():
+		if testAuthority.PrivateKey() == nil {
+			vaultRecord, err := data.GetKey(ctx, testAuthority.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+
+			testAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &VmConfig{
+			Authority: testAuthority,
+			Vm:        testVmAccount,
+			Omnibus:   testVmOmnibusAccount,
 			Mint:      mintAccount,
 		}, nil
 	case xpMintAccount.PublicKey().ToBase58():

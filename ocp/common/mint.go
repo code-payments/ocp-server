@@ -22,11 +22,13 @@ var (
 
 	ErrUnsupportedMint = errors.New("unsupported mint")
 
+	badBoysMintAccount, _    = NewAccountFromPublicKeyString(config.BadBoysMintPublicKey)
 	bitsMintAccount, _       = NewAccountFromPublicKeyString(config.BitsMintPublicKey)
 	bogeyMintAccount, _      = NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
 	floatMintAccount, _      = NewAccountFromPublicKeyString(config.FloatMintPublicKey)
 	jeffyMintAccount, _      = NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
 	marketCoinMintAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
+	testMintAccount, _       = NewAccountFromPublicKeyString(config.TestMintPublicKey)
 	xpMintAccount, _         = NewAccountFromPublicKeyString(config.XpMintPublicKey)
 )
 

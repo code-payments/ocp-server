@@ -23,22 +23,26 @@ import (
 )
 
 var (
+	badBoysMintAccount, _    = common.NewAccountFromPublicKeyString(config.BadBoysMintPublicKey)
 	bitsMintAccount, _       = common.NewAccountFromPublicKeyString(config.BitsMintPublicKey)
 	bogeyMintAccount, _      = common.NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
 	floatMintAccount, _      = common.NewAccountFromPublicKeyString(config.FloatMintPublicKey)
 	jeffyMintAccount, _      = common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
 	marketCoinMintAccount, _ = common.NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
+	testMintAccount, _       = common.NewAccountFromPublicKeyString(config.TestMintPublicKey)
 	xpMintAccount, _         = common.NewAccountFromPublicKeyString(config.XpMintPublicKey)
 )
 
 // trackedLaunchpadMints is the hardcoded set of launchpad mints to track
 // (excludes core mint as it only has exchange rate data)
 var trackedLaunchpadMints = []*common.Account{
+	badBoysMintAccount,
 	bitsMintAccount,
 	bogeyMintAccount,
 	floatMintAccount,
 	jeffyMintAccount,
 	marketCoinMintAccount,
+	testMintAccount,
 	xpMintAccount,
 }
 

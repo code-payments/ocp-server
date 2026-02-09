@@ -160,6 +160,36 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 		})
 	}()
 
+	err7 := func() error {
+		badBoysMintAccount, _ := common.NewAccountFromPublicKeyString(config.BadBoysMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, badBoysMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              badBoysMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err8 := func() error {
+		testMintAccount, _ := common.NewAccountFromPublicKeyString(config.TestMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, testMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              testMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
 	if err1 != nil {
 		return err1
 	}
@@ -177,6 +207,12 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 	}
 	if err6 != nil {
 		return err6
+	}
+	if err7 != nil {
+		return err7
+	}
+	if err8 != nil {
+		return err8
 	}
 
 	return nil
