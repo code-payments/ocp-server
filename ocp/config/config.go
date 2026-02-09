@@ -25,6 +25,11 @@ const (
 
 	// todo: DB store to track VM per mint
 
+	BadBoysMintPublicKey      = "64dkhPKhdjc2xg3NLyDjC14wiXHLnGXHHUxJnqZVugJt"
+	BadBoysAuthorityPublicKey = "bbVCosXYRMBTbcmLsRXqHSzaUDJpSStYRqTstcpVxwx"
+	BadBoysVmAccountPublicKey = "9EpU4RGoe7zfJdLjLyXWLpza6RZHqN6QV73z1gfNKCJa"
+	BadBoysVmOmnibusPublicKey = "7pQkiRaXdMW3bLJK6D1huP175AF5wD6gXNPBsvQ8bJZ3"
+
 	BitsMintPublicKey      = "A3e8dzb1y4gqGP2cnCS3UU8dm5YNrFpZBpjjdoZdtfnB"
 	BitsAuthorityPublicKey = "bit8rCyAcstm1ZiwLq22FHdz8wAigKU46hmtrigrGub"
 	BitsVmAccountPublicKey = "5zDzL3CHb3wFxs7xnkxmWMGMR1gjNtYgV46PTBgSHmsJ"
@@ -49,6 +54,11 @@ const (
 	MarketCoinAuthorityPublicKey = "mrkthxqn4rKCZw1pDxhJTpCrvUBtK9m6aLvCeY3PyWR"
 	MarketCoinVmAccountPublicKey = "AeJ6x6mtwdjUM2AqppQ7zG6m89sx5c8qegfFPzjmD2x6"
 	MarketCoinVmOmnibusPublicKey = "CQMdG8AKtLP9JCU4GAzKunKnsfpXVFdMcSwQd3Hd5oZg"
+
+	TestMintPublicKey      = "2psDP3LAvbNzfvBYNMs9ieMpsD8PVzyQsKNfZrjEKoDN"
+	TestAuthorityPublicKey = "tstBCPtzNDycsM7rAd2CxzdgKh1gWrMULzrDHuGVXAW"
+	TestVmAccountPublicKey = "CYtzE732LQ7YP9sngSPUQhCCTQ8GY14dmjWX2hXP16Np"
+	TestVmOmnibusPublicKey = "65Ghp2FFPmdB3FLkC2NCKkBQ3RuXgmjZ56DDGZLVAZZa"
 
 	XpMintPublicKey      = "6oZnhB1FPrUaDfhRCVZnbVWNKVx9wgj84vKGH7eMpzXL"
 	XpAuthorityPublicKey = "xpTXV7BNXwsdvCaFKfeT4h6rSnKck2Bv5iBAFFS5Uwk"
