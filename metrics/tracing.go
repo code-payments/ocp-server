@@ -36,6 +36,14 @@ type Span interface {
 	End()
 }
 
+// ContextEnricher is an optional interface that traces can implement to add
+// provider-specific data to the context. This is used by instrumentation
+// libraries (e.g., nrpgx) that look for transactions using their own context keys.
+type ContextEnricher interface {
+	// EnrichContext adds provider-specific data to the context
+	EnrichContext(ctx context.Context) context.Context
+}
+
 // TraceMethodCall traces a method call with a given struct/package and method names
 func TraceMethodCall(ctx context.Context, structOrPackageName, methodName string) *MethodTracer {
 	trace := TraceFromContext(ctx)
@@ -106,9 +114,15 @@ type traceContextKey struct{}
 // TraceKey is the context key for Trace
 var TraceKey = traceContextKey{}
 
-// NewContext returns a new context with the trace attached
+// NewContext returns a new context with the trace attached.
+// If the trace implements ContextEnricher, it also enriches the context
+// with provider-specific data for automatic instrumentation libraries.
 func NewContext(ctx context.Context, trace Trace) context.Context {
-	return context.WithValue(ctx, TraceKey, trace)
+	ctx = context.WithValue(ctx, TraceKey, trace)
+	if enricher, ok := trace.(ContextEnricher); ok {
+		ctx = enricher.EnrichContext(ctx)
+	}
+	return ctx
 }
 
 // TraceFromContext retrieves the trace from context, if present
