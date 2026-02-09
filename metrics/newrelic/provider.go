@@ -1,6 +1,7 @@
 package newrelic
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"time"
@@ -102,6 +103,13 @@ func (t *Trace) End() {
 // Unwrap returns the underlying New Relic transaction for advanced use cases
 func (t *Trace) Unwrap() *newrelic.Transaction {
 	return t.txn
+}
+
+// EnrichContext implements metrics.ContextEnricher to add the New Relic
+// transaction to the context using New Relic's context key. This enables
+// automatic instrumentation by libraries like nrpgx.
+func (t *Trace) EnrichContext(ctx context.Context) context.Context {
+	return newrelic.NewContext(ctx, t.txn)
 }
 
 // Span wraps a New Relic segment
