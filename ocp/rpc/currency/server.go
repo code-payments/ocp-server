@@ -117,18 +117,6 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			err = s.liveMintStateWorker.waitForData(ctx)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to wait for live mint data")
-				return nil, status.Error(codes.Internal, "")
-			}
-
-			liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
-				return nil, status.Error(codes.Internal, "")
-			}
-
 			vmConfig, err := common.GetVmConfigForMint(ctx, s.data, mintAccount)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failure getting vm config")
@@ -166,6 +154,21 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
+			err = s.liveMintStateWorker.waitForData(ctx)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed to wait for live mint data")
+				return nil, status.Error(codes.Internal, "")
+			}
+
+			liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
+				return nil, status.Error(codes.Internal, "")
+			}
+
+			spotPrice, _ := currencycreator.EstimateCurrentPrice(liveReserveState.SupplyFromBonding).Float64()
+			marketCap := calculateMarketCap(liveReserveState.SupplyFromBonding, 1.0)
+
 			protoMetadata = &currencypb.Mint{
 				Address:     protoMintAddress,
 				Decimals:    uint32(metadataRecord.Decimals),
@@ -188,6 +191,8 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 					CoreMintVault:     coreMintVaultAccount.ToProto(),
 					SupplyFromBonding: liveReserveState.SupplyFromBonding,
 					SellFeeBps:        uint32(metadataRecord.SellFeeBps),
+					Price:             spotPrice,
+					MarketCap:         marketCap,
 				},
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
 			}
