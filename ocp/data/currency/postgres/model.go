@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -214,7 +213,6 @@ func marshalSocialLinks(links []currency.SocialLink) string {
 		return "[]"
 	}
 	data, _ := json.Marshal(links)
-	fmt.Println(string(data))
 	return string(data)
 }
 
