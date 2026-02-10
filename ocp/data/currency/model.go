@@ -26,6 +26,7 @@ type MetadataRecord struct {
 	Symbol      string
 	Description string
 	ImageUrl    string
+	BillColors []string
 
 	Seed string
 
@@ -155,6 +156,7 @@ func (m *MetadataRecord) Clone() *MetadataRecord {
 		Symbol:      m.Symbol,
 		Description: m.Description,
 		ImageUrl:    m.ImageUrl,
+		BillColors: append([]string(nil), m.BillColors...),
 
 		Seed: m.Seed,
 
@@ -192,6 +194,7 @@ func (m *MetadataRecord) CopyTo(dst *MetadataRecord) {
 	dst.Symbol = m.Symbol
 	dst.Description = m.Description
 	dst.ImageUrl = m.ImageUrl
+	dst.BillColors = append([]string(nil), m.BillColors...)
 
 	dst.Seed = m.Seed
 

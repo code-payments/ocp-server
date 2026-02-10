@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -55,6 +56,7 @@ type metadataModel struct {
 	Symbol      string `db:"symbol"`
 	Description string `db:"description"`
 	ImageUrl    string `db:"image_url"`
+	BillColors string `db:"bill_colors"`
 
 	Seed string `db:"seed"`
 
@@ -96,6 +98,7 @@ func toMetadataModel(obj *currency.MetadataRecord) (*metadataModel, error) {
 		Symbol:      obj.Symbol,
 		Description: obj.Description,
 		ImageUrl:    obj.ImageUrl,
+		BillColors: strings.Join(obj.BillColors, ","),
 
 		Seed: obj.Seed,
 
@@ -127,6 +130,11 @@ func toMetadataModel(obj *currency.MetadataRecord) (*metadataModel, error) {
 }
 
 func fromMetadataModel(obj *metadataModel) *currency.MetadataRecord {
+	var billColors []string
+	if obj.BillColors != "" {
+		billColors = strings.Split(obj.BillColors, ",")
+	}
+
 	return &currency.MetadataRecord{
 		Id: uint64(obj.Id.Int64),
 
@@ -134,6 +142,7 @@ func fromMetadataModel(obj *metadataModel) *currency.MetadataRecord {
 		Symbol:      obj.Symbol,
 		Description: obj.Description,
 		ImageUrl:    obj.ImageUrl,
+		BillColors: billColors,
 
 		Seed: obj.Seed,
 
@@ -243,13 +252,14 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+metadataTableName+`
-			(name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-			RETURNING id, name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at`,
+			(name, symbol, description, image_url, bill_colors, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+			RETURNING id, name, symbol, description, image_url, bill_colors, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at`,
 			m.Name,
 			m.Symbol,
 			m.Description,
 			m.ImageUrl,
+			m.BillColors,
 			m.Seed,
 			m.Authority,
 			m.Mint,
@@ -343,7 +353,7 @@ func dbGetAllExchangeRatesForRange(ctx context.Context, db *sqlx.DB, symbol stri
 func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*metadataModel, error) {
 	res := &metadataModel{}
 	err := db.GetContext(ctx, res,
-		`SELECT id, name, symbol, description, image_url, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at
+		`SELECT id, name, symbol, description, image_url, bill_colors, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at
 		FROM `+metadataTableName+`
 		WHERE mint = $1`,
 		mint,
