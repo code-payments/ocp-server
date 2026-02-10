@@ -196,6 +196,18 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				},
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
 			}
+
+			billColors := metadataRecord.BillColors
+			if len(billColors) == 0 {
+				billColors = []string{"#AAAAAA", "#2C2C2C"}
+			}
+			var protoColors []*currencypb.Color
+			for _, hex := range billColors {
+				protoColors = append(protoColors, &currencypb.Color{Hex: hex})
+			}
+			protoMetadata.BillCustomization = &currencypb.BillCustomization{
+				Colors: protoColors,
+			}
 		}
 
 		resp.MetadataByAddress[mintAccount.PublicKey().ToBase58()] = protoMetadata
