@@ -190,6 +190,21 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 		})
 	}()
 
+	err9 := func() error {
+		moonyMintAccount, _ := common.NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, moonyMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              moonyMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
 	if err1 != nil {
 		return err1
 	}
@@ -213,6 +228,9 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 	}
 	if err8 != nil {
 		return err8
+	}
+	if err9 != nil {
+		return err9
 	}
 
 	return nil

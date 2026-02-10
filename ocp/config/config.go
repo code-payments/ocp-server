@@ -55,6 +55,11 @@ const (
 	MarketCoinVmAccountPublicKey = "AeJ6x6mtwdjUM2AqppQ7zG6m89sx5c8qegfFPzjmD2x6"
 	MarketCoinVmOmnibusPublicKey = "CQMdG8AKtLP9JCU4GAzKunKnsfpXVFdMcSwQd3Hd5oZg"
 
+	MoonyMintPublicKey      = "4muAfB6m1P7C3Znad1VUsoqYFwvGQRkWGpJ3A4vupxz6"
+	MoonyAuthorityPublicKey = "mnyXRKy3pz8WXG4XQC6inaKNbzrqq2xRJfGv5Lq9qgR"
+	MoonyVmAccountPublicKey = "FCZitKZWuMfrZ3Krcp67egUwPzFoWM9Xo913S17qdjWV"
+	MoonyVmOmnibusPublicKey = "FvhtPHhARVkRJKfkM96Wvo2WEwjtiweyLAdpAroqT646"
+
 	TestMintPublicKey      = "2psDP3LAvbNzfvBYNMs9ieMpsD8PVzyQsKNfZrjEKoDN"
 	TestAuthorityPublicKey = "tstBCPtzNDycsM7rAd2CxzdgKh1gWrMULzrDHuGVXAW"
 	TestVmAccountPublicKey = "CYtzE732LQ7YP9sngSPUQhCCTQ8GY14dmjWX2hXP16Np"

@@ -91,6 +91,7 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		config.FloatMintPublicKey,
 		config.JeffyMintPublicKey,
 		config.MarketCoinMintPublicKey,
+		config.MoonyMintPublicKey,
 		config.TestMintPublicKey,
 		config.XpMintPublicKey:
 		// Not an ATA, so filter it out. It cannot be a VM deposit ATA

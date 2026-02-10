@@ -28,6 +28,7 @@ var (
 	floatMintAccount, _      = NewAccountFromPublicKeyString(config.FloatMintPublicKey)
 	jeffyMintAccount, _      = NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
 	marketCoinMintAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
+	moonyMintAccount, _      = NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
 	testMintAccount, _       = NewAccountFromPublicKeyString(config.TestMintPublicKey)
 	xpMintAccount, _         = NewAccountFromPublicKeyString(config.XpMintPublicKey)
 )
