@@ -38,6 +38,7 @@ const (
 		description TEXT NOT NULL,
 		image_url TEXT NOT NULL,
 		bill_colors TEXT NOT NULL DEFAULT '',
+		social_links TEXT NOT NULL DEFAULT '[]',
 
 		seed TEXT UNIQUE NOT NULL,
 
