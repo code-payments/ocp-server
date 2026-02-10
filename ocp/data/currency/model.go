@@ -7,6 +7,19 @@ import (
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
+type SocialLinkType uint8
+
+const (
+	SocialLinkTypeUnknown SocialLinkType = iota
+	SocialLinkTypeWebsite
+	SocialLinkTypeX
+)
+
+type SocialLink struct {
+	Type  SocialLinkType `json:"type"`
+	Value string         `json:"value"`
+}
+
 type ExchangeRateRecord struct {
 	Id     uint64
 	Time   time.Time
@@ -26,7 +39,8 @@ type MetadataRecord struct {
 	Symbol      string
 	Description string
 	ImageUrl    string
-	BillColors []string
+	BillColors  []string
+	SocialLinks []SocialLink
 
 	Seed string
 
@@ -156,7 +170,8 @@ func (m *MetadataRecord) Clone() *MetadataRecord {
 		Symbol:      m.Symbol,
 		Description: m.Description,
 		ImageUrl:    m.ImageUrl,
-		BillColors: append([]string(nil), m.BillColors...),
+		BillColors:  append([]string(nil), m.BillColors...),
+		SocialLinks: append([]SocialLink(nil), m.SocialLinks...),
 
 		Seed: m.Seed,
 
@@ -195,6 +210,7 @@ func (m *MetadataRecord) CopyTo(dst *MetadataRecord) {
 	dst.Description = m.Description
 	dst.ImageUrl = m.ImageUrl
 	dst.BillColors = append([]string(nil), m.BillColors...)
+	dst.SocialLinks = append([]SocialLink(nil), m.SocialLinks...)
 
 	dst.Seed = m.Seed
 

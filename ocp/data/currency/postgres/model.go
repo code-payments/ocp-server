@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -56,7 +58,8 @@ type metadataModel struct {
 	Symbol      string `db:"symbol"`
 	Description string `db:"description"`
 	ImageUrl    string `db:"image_url"`
-	BillColors string `db:"bill_colors"`
+	BillColors  string `db:"bill_colors"`
+	SocialLinks string `db:"social_links"`
 
 	Seed string `db:"seed"`
 
@@ -98,7 +101,8 @@ func toMetadataModel(obj *currency.MetadataRecord) (*metadataModel, error) {
 		Symbol:      obj.Symbol,
 		Description: obj.Description,
 		ImageUrl:    obj.ImageUrl,
-		BillColors: strings.Join(obj.BillColors, ","),
+		BillColors:  strings.Join(obj.BillColors, ","),
+		SocialLinks: marshalSocialLinks(obj.SocialLinks),
 
 		Seed: obj.Seed,
 
@@ -142,7 +146,8 @@ func fromMetadataModel(obj *metadataModel) *currency.MetadataRecord {
 		Symbol:      obj.Symbol,
 		Description: obj.Description,
 		ImageUrl:    obj.ImageUrl,
-		BillColors: billColors,
+		BillColors:  billColors,
+		SocialLinks: unmarshalSocialLinks(obj.SocialLinks),
 
 		Seed: obj.Seed,
 
@@ -204,6 +209,24 @@ func fromReserveModel(obj *reserveModel) *currency.ReserveRecord {
 	}
 }
 
+func marshalSocialLinks(links []currency.SocialLink) string {
+	if len(links) == 0 {
+		return "[]"
+	}
+	data, _ := json.Marshal(links)
+	fmt.Println(string(data))
+	return string(data)
+}
+
+func unmarshalSocialLinks(data string) []currency.SocialLink {
+	if data == "" || data == "[]" {
+		return nil
+	}
+	var links []currency.SocialLink
+	_ = json.Unmarshal([]byte(data), &links)
+	return links
+}
+
 func makeTimeBasedSelectQuery(table, condition string, ordering q.Ordering) string {
 	return `SELECT * FROM ` + table + ` WHERE ` + condition + ` ORDER BY for_timestamp ` + q.FromOrderingWithFallback(ordering, "asc")
 }
@@ -252,14 +275,15 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+metadataTableName+`
-			(name, symbol, description, image_url, bill_colors, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-			RETURNING id, name, symbol, description, image_url, bill_colors, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at`,
+			(name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at`,
 			m.Name,
 			m.Symbol,
 			m.Description,
 			m.ImageUrl,
 			m.BillColors,
+			m.SocialLinks,
 			m.Seed,
 			m.Authority,
 			m.Mint,
@@ -353,7 +377,7 @@ func dbGetAllExchangeRatesForRange(ctx context.Context, db *sqlx.DB, symbol stri
 func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*metadataModel, error) {
 	res := &metadataModel{}
 	err := db.GetContext(ctx, res,
-		`SELECT id, name, symbol, description, image_url, bill_colors, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at
+		`SELECT id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at
 		FROM `+metadataTableName+`
 		WHERE mint = $1`,
 		mint,

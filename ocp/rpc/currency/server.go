@@ -197,6 +197,23 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
 			}
 
+			for _, link := range metadataRecord.SocialLinks {
+				switch link.Type {
+				case currency.SocialLinkTypeWebsite:
+					protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+						Type: &currencypb.SocialLink_Website_{
+							Website: &currencypb.SocialLink_Website{Url: link.Value},
+						},
+					})
+				case currency.SocialLinkTypeX:
+					protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+						Type: &currencypb.SocialLink_X_{
+							X: &currencypb.SocialLink_X{Username: link.Value},
+						},
+					})
+				}
+			}
+
 			billColors := metadataRecord.BillColors
 			if len(billColors) == 0 {
 				billColors = []string{"#AAAAAA", "#2C2C2C"}
