@@ -76,6 +76,7 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		config.FloatVmAccountPublicKey,
 		config.JeffyVmAccountPublicKey,
 		config.MarketCoinVmAccountPublicKey,
+		config.MoonyVmAccountPublicKey,
 		config.TestVmAccountPublicKey,
 		config.XpVmAccountPublicKey,
 	} {

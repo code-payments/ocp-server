@@ -37,6 +37,10 @@ var (
 	marketCoinVmAccount, _        = NewAccountFromPublicKeyString(config.MarketCoinVmAccountPublicKey)
 	marketCoinVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinVmOmnibusPublicKey)
 
+	moonyAuthority, _        = NewAccountFromPublicKeyString(config.MoonyAuthorityPublicKey)
+	moonyVmAccount, _        = NewAccountFromPublicKeyString(config.MoonyVmAccountPublicKey)
+	moonyVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.MoonyVmOmnibusPublicKey)
+
 	testAuthority, _        = NewAccountFromPublicKeyString(config.TestAuthorityPublicKey)
 	testVmAccount, _        = NewAccountFromPublicKeyString(config.TestVmAccountPublicKey)
 	testVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.TestVmOmnibusPublicKey)
@@ -178,6 +182,25 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 			Authority: marketCoinAuthority,
 			Vm:        marketCoinVmAccount,
 			Omnibus:   marketCoinVmOmnibusAccount,
+			Mint:      mintAccount,
+		}, nil
+	case moonyMintAccount.PublicKey().ToBase58():
+		if moonyAuthority.PrivateKey() == nil {
+			vaultRecord, err := data.GetKey(ctx, moonyAuthority.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+
+			moonyAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &VmConfig{
+			Authority: moonyAuthority,
+			Vm:        moonyVmAccount,
+			Omnibus:   moonyVmOmnibusAccount,
 			Mint:      mintAccount,
 		}, nil
 	case testMintAccount.PublicKey().ToBase58():
