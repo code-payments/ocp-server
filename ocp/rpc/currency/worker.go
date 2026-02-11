@@ -24,10 +24,12 @@ import (
 
 var (
 	badBoysMintAccount, _    = common.NewAccountFromPublicKeyString(config.BadBoysMintPublicKey)
+	bluebucksMintAccount, _  = common.NewAccountFromPublicKeyString(config.BluebucksMintPublicKey)
 	bitsMintAccount, _       = common.NewAccountFromPublicKeyString(config.BitsMintPublicKey)
 	bogeyMintAccount, _      = common.NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
 	floatMintAccount, _      = common.NewAccountFromPublicKeyString(config.FloatMintPublicKey)
 	jeffyMintAccount, _      = common.NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+	linksMintAccount, _      = common.NewAccountFromPublicKeyString(config.LinksMintPublicKey)
 	marketCoinMintAccount, _ = common.NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
 	moonyMintAccount, _      = common.NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
 	testMintAccount, _       = common.NewAccountFromPublicKeyString(config.TestMintPublicKey)
@@ -38,10 +40,12 @@ var (
 // (excludes core mint as it only has exchange rate data)
 var trackedLaunchpadMints = []*common.Account{
 	badBoysMintAccount,
+	bluebucksMintAccount,
 	bitsMintAccount,
 	bogeyMintAccount,
 	floatMintAccount,
 	jeffyMintAccount,
+	linksMintAccount,
 	marketCoinMintAccount,
 	moonyMintAccount,
 	testMintAccount,

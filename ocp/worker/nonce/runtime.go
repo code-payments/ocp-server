@@ -71,10 +71,12 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 	for _, vm := range []string{
 		common.CoreMintVmAccount.PublicKey().ToBase58(),
 		config.BadBoysVmAccountPublicKey,
+		config.BluebucksVmAccountPublicKey,
 		config.BitsVmAccountPublicKey,
 		config.BogeyVmAccountPublicKey,
 		config.FloatVmAccountPublicKey,
 		config.JeffyVmAccountPublicKey,
+		config.LinksVmAccountPublicKey,
 		config.MarketCoinVmAccountPublicKey,
 		config.MoonyVmAccountPublicKey,
 		config.TestVmAccountPublicKey,

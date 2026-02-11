@@ -205,6 +205,36 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 		})
 	}()
 
+	err10 := func() error {
+		bluebucksMintAccount, _ := common.NewAccountFromPublicKeyString(config.BluebucksMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, bluebucksMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              bluebucksMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err11 := func() error {
+		linksMintAccount, _ := common.NewAccountFromPublicKeyString(config.LinksMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, linksMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              linksMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
 	if err1 != nil {
 		return err1
 	}
@@ -231,6 +261,12 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 	}
 	if err9 != nil {
 		return err9
+	}
+	if err10 != nil {
+		return err10
+	}
+	if err11 != nil {
+		return err11
 	}
 
 	return nil
