@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -34,7 +36,14 @@ const (
 	streamInitialRecvTimeout = 250 * time.Millisecond
 
 	timePerHistoricalUpdate = 5 * time.Minute
+
+	getMintsCacheTTL = 5 * time.Minute
 )
+
+type cachedProtoMint struct {
+	mint          *currencypb.Mint
+	lastUpdatedAt time.Time
+}
 
 type currencyServer struct {
 	log  *zap.Logger
@@ -42,6 +51,9 @@ type currencyServer struct {
 
 	exchangeRateHistoryCache cache.Cache
 	reserveHistoryCache      cache.Cache
+
+	getMintsCacheMu sync.RWMutex
+	getMintsCache   map[string]*cachedProtoMint
 
 	liveMintStateWorker *liveMintStateWorker
 
@@ -63,6 +75,8 @@ func NewCurrencyServer(
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
 
+		getMintsCache: make(map[string]*cachedProtoMint),
+
 		liveMintStateWorker: liveMintStateWorker,
 	}
 }
@@ -83,6 +97,27 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 		}
 
 		log := log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
+
+		// Check cache first
+		if cached, ok := s.getCachedProtoMint(mintAccount); ok {
+			// Always overlay fresh circulating supply for launchpad currencies
+			if cached.LaunchpadMetadata != nil {
+				liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
+				if err != nil {
+					log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
+					return nil, status.Error(codes.Internal, "")
+				}
+
+				spotPrice, _ := currencycreator.EstimateCurrentPrice(liveReserveState.SupplyFromBonding).Float64()
+				marketCap := calculateMarketCap(liveReserveState.SupplyFromBonding, 1.0)
+				cached.LaunchpadMetadata.SupplyFromBonding = liveReserveState.SupplyFromBonding
+				cached.LaunchpadMetadata.Price = spotPrice
+				cached.LaunchpadMetadata.MarketCap = marketCap
+			}
+
+			resp.MetadataByAddress[mintAccount.PublicKey().ToBase58()] = cached
+			continue
+		}
 
 		var protoMetadata *currencypb.Mint
 		switch mintAccount.PublicKey().ToBase58() {
@@ -197,6 +232,18 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
 			}
 
+			billColors := metadataRecord.BillColors
+			if len(billColors) == 0 {
+				billColors = []string{"#AAAAAA", "#2C2C2C"}
+			}
+			var protoColors []*currencypb.Color
+			for _, hex := range billColors {
+				protoColors = append(protoColors, &currencypb.Color{Hex: hex})
+			}
+			protoMetadata.BillCustomization = &currencypb.BillCustomization{
+				Colors: protoColors,
+			}
+
 			for _, link := range metadataRecord.SocialLinks {
 				switch link.Type {
 				case currency.SocialLinkTypeWebsite:
@@ -213,23 +260,33 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 					})
 				}
 			}
-
-			billColors := metadataRecord.BillColors
-			if len(billColors) == 0 {
-				billColors = []string{"#AAAAAA", "#2C2C2C"}
-			}
-			var protoColors []*currencypb.Color
-			for _, hex := range billColors {
-				protoColors = append(protoColors, &currencypb.Color{Hex: hex})
-			}
-			protoMetadata.BillCustomization = &currencypb.BillCustomization{
-				Colors: protoColors,
-			}
 		}
 
+		s.setCachedProtoMint(mintAccount, protoMetadata)
 		resp.MetadataByAddress[mintAccount.PublicKey().ToBase58()] = protoMetadata
 	}
 	return resp, nil
+}
+
+func (s *currencyServer) getCachedProtoMint(mintAccount *common.Account) (*currencypb.Mint, bool) {
+	s.getMintsCacheMu.RLock()
+	defer s.getMintsCacheMu.RUnlock()
+
+	entry, ok := s.getMintsCache[mintAccount.PublicKey().ToBase58()]
+	if !ok || time.Since(entry.lastUpdatedAt) >= getMintsCacheTTL {
+		return nil, false
+	}
+	return proto.Clone(entry.mint).(*currencypb.Mint), true
+}
+
+func (s *currencyServer) setCachedProtoMint(mintAccount *common.Account, protoMint *currencypb.Mint) {
+	s.getMintsCacheMu.Lock()
+	defer s.getMintsCacheMu.Unlock()
+
+	s.getMintsCache[mintAccount.PublicKey().ToBase58()] = &cachedProtoMint{
+		mint:          proto.Clone(protoMint).(*currencypb.Mint),
+		lastUpdatedAt: time.Now(),
+	}
 }
 
 func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currencypb.GetHistoricalMintDataRequest) (*currencypb.GetHistoricalMintDataResponse, error) {
