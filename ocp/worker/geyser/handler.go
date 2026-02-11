@@ -86,10 +86,12 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 	// todo: Don't hardcode Jeffy and other Flipcash currencies
 	case common.CoreMintAccount.PublicKey().ToBase58(),
 		config.BadBoysMintPublicKey,
+		config.BluebucksMintPublicKey,
 		config.BitsMintPublicKey,
 		config.BogeyMintPublicKey,
 		config.FloatMintPublicKey,
 		config.JeffyMintPublicKey,
+		config.LinksMintPublicKey,
 		config.MarketCoinMintPublicKey,
 		config.MoonyMintPublicKey,
 		config.TestMintPublicKey,

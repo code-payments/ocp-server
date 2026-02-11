@@ -30,6 +30,11 @@ const (
 	BadBoysVmAccountPublicKey = "9EpU4RGoe7zfJdLjLyXWLpza6RZHqN6QV73z1gfNKCJa"
 	BadBoysVmOmnibusPublicKey = "7pQkiRaXdMW3bLJK6D1huP175AF5wD6gXNPBsvQ8bJZ3"
 
+	BluebucksMintPublicKey      = "4MrV36dgdC9kjkC3ibbe1LMUijXde27iJAjJByB7naSN"
+	BluebucksAuthorityPublicKey = "b1ue4ZAdQeQXw6fi8Gkn9vtmFsGmgFgARiAEwprrkBY"
+	BluebucksVmAccountPublicKey = "ED1AYFh6bfYCynvfYCiRHKrPSWvw4PfzprM7o3R954Bu"
+	BluebucksVmOmnibusPublicKey = "7EPGFrgYPNbVtHg5ovnhThSjiUST39R8jRegriadgehk"
+
 	BitsMintPublicKey      = "A3e8dzb1y4gqGP2cnCS3UU8dm5YNrFpZBpjjdoZdtfnB"
 	BitsAuthorityPublicKey = "bit8rCyAcstm1ZiwLq22FHdz8wAigKU46hmtrigrGub"
 	BitsVmAccountPublicKey = "5zDzL3CHb3wFxs7xnkxmWMGMR1gjNtYgV46PTBgSHmsJ"
@@ -49,6 +54,11 @@ const (
 	JeffyAuthorityPublicKey = "jfy1btcfsjSn2WCqLVaxiEjp4zgmemGyRsdCPbPwnZV"
 	JeffyVmAccountPublicKey = "8rwgUXsLSq1Pn51UJs4NGVA1cTkemwBgKyWPfFYgnm3B"
 	JeffyVmOmnibusPublicKey = "9XiqBPYSG2cBwpb8MqJeuFmLaQaAAr6gwikyBrPZDQ8R"
+
+	LinksMintPublicKey      = "CPBcprSXXYerwh6LE6o3yc6NJqeZvm87GRSySgjTicE5"
+	LinksAuthorityPublicKey = "1nkSmZ9VCLBiQqSuMdmv9SXQ2y5wTJVnBW5ZsESjvzd"
+	LinksVmAccountPublicKey = "2s18j1EyBjRTcie48Hn6wyiZVCD9NrmkqH1JAKchoKT2"
+	LinksVmOmnibusPublicKey = "uWfyTHepnjF5KeJSTSWG7nUYsYrcFxV2URUh7Hh8htb"
 
 	MarketCoinMintPublicKey      = "311m6Sb1814PfAxkEcqq6MNdBiVZLr8VWuAWDSC72euW"
 	MarketCoinAuthorityPublicKey = "mrkthxqn4rKCZw1pDxhJTpCrvUBtK9m6aLvCeY3PyWR"
