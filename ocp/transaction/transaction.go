@@ -58,7 +58,7 @@ func MakeOpenAccountTransaction(
 	}
 
 	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(50_000),
 		initializeInstruction,
 	}
@@ -97,7 +97,7 @@ func MakeCompressAccountTransaction(
 	)
 
 	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(200_000),
 		compressInstruction,
 	}
@@ -146,7 +146,7 @@ func MakeInternalWithdrawTransaction(
 	)
 
 	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(100_000),
 		execInstruction,
 	}
@@ -199,7 +199,7 @@ func MakeExternalWithdrawTransaction(
 	)
 
 	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(100_000),
 		execInstruction,
 	}
@@ -251,7 +251,7 @@ func MakeInternalTransferWithAuthorityTransaction(
 	)
 
 	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(100_000),
 		execInstruction,
 	}
@@ -315,7 +315,7 @@ func MakeExternalTransferWithAuthorityTransaction(
 	}
 
 	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(1_000),
+		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(uint32(computeLimit)),
 	}
 	if isCreateOnSend {

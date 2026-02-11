@@ -67,7 +67,7 @@ func NewCurrencyCreatorBuySwapHandler(
 
 		nonce:            nonce,
 		computeUnitLimit: 150_000,
-		computeUnitPrice: 1_000,
+		computeUnitPrice: 10_000,
 		memoValue:        "buy_v0",
 	}
 }
@@ -236,7 +236,7 @@ func NewCurrencyCreatorSellSwapHandler(
 
 		nonce:            nonce,
 		computeUnitLimit: 175_000,
-		computeUnitPrice: 1_000,
+		computeUnitPrice: 10_000,
 		memoValue:        "sell_v0",
 	}
 }
@@ -408,7 +408,7 @@ func NewCurrencyCreatorBuySellSwapHandler(
 
 		nonce:            nonce,
 		computeUnitLimit: 400_000,
-		computeUnitPrice: 1_000,
+		computeUnitPrice: 10_000,
 		memoValue:        "buy_sell_v0",
 	}
 }
