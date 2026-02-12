@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/pkg/errors"
@@ -95,6 +96,22 @@ func (h *RequestToGiveBillMessageHandler) Validate(ctx context.Context, rendezvo
 		return err
 	} else if !isSupportedMint {
 		return newMessageValidationError("mint account must be the core mint or a launchpad currency")
+	}
+
+	if typedMessage.ExchangeData != nil {
+		if common.IsCoreMint(mintAccount) {
+			if typedMessage.ExchangeData.LaunchpadCurrencyReserveState != nil {
+				return newMessageValidationError("reserve state cannot be provided for core mint")
+			}
+		} else {
+			if typedMessage.ExchangeData.LaunchpadCurrencyReserveState == nil {
+				return newMessageValidationError("reserve state is required for launchpad currency")
+			}
+
+			if !bytes.Equal(mintAccount.PublicKey().ToBytes(), typedMessage.ExchangeData.Mint.Value) {
+				return newMessageValidationError("reserve state mint doesn't match top-level mint")
+			}
+		}
 	}
 
 	return nil

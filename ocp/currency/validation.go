@@ -19,10 +19,10 @@ const (
 	defaultPrecision = 128
 
 	// maxVerifiedExchangeRateAge is the maximum age of a verified exchange rate
-	maxVerifiedExchangeRateAge = 15 * time.Minute
+	maxVerifiedExchangeRateAge = 10 * time.Minute
 
 	// maxVerifiedReserveStateAge is the maximum age of a verified reserve state
-	maxVerifiedReserveStateAge = 2 * time.Minute
+	maxVerifiedReserveStateAge = 10 * time.Minute
 )
 
 // ValidateVerifiedExchangeRate validates a server-signed exchange rate provided by a client.
