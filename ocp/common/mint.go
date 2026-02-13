@@ -28,10 +28,12 @@ var (
 	bogeyMintAccount, _      = NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
 	floatMintAccount, _      = NewAccountFromPublicKeyString(config.FloatMintPublicKey)
 	jeffyMintAccount, _      = NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
+	lightspeedMintAccount, _ = NewAccountFromPublicKeyString(config.LightspeedMintPublicKey)
 	linksMintAccount, _      = NewAccountFromPublicKeyString(config.LinksMintPublicKey)
 	marketCoinMintAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
 	moonyMintAccount, _      = NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
 	testMintAccount, _       = NewAccountFromPublicKeyString(config.TestMintPublicKey)
+	toshiMintAccount, _      = NewAccountFromPublicKeyString(config.ToshiMintPublicKey)
 	xpMintAccount, _         = NewAccountFromPublicKeyString(config.XpMintPublicKey)
 )
 
