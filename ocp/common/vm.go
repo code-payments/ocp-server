@@ -37,6 +37,10 @@ var (
 	jeffyVmAccount, _        = NewAccountFromPublicKeyString(config.JeffyVmAccountPublicKey)
 	jeffyVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.JeffyVmOmnibusPublicKey)
 
+	lightspeedAuthority, _        = NewAccountFromPublicKeyString(config.LightspeedAuthorityPublicKey)
+	lightspeedVmAccount, _        = NewAccountFromPublicKeyString(config.LightspeedVmAccountPublicKey)
+	lightspeedVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.LightspeedVmOmnibusPublicKey)
+
 	linksAuthority, _        = NewAccountFromPublicKeyString(config.LinksAuthorityPublicKey)
 	linksVmAccount, _        = NewAccountFromPublicKeyString(config.LinksVmAccountPublicKey)
 	linksVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.LinksVmOmnibusPublicKey)
@@ -52,6 +56,10 @@ var (
 	testAuthority, _        = NewAccountFromPublicKeyString(config.TestAuthorityPublicKey)
 	testVmAccount, _        = NewAccountFromPublicKeyString(config.TestVmAccountPublicKey)
 	testVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.TestVmOmnibusPublicKey)
+
+	toshiAuthority, _        = NewAccountFromPublicKeyString(config.ToshiAuthorityPublicKey)
+	toshiVmAccount, _        = NewAccountFromPublicKeyString(config.ToshiVmAccountPublicKey)
+	toshiVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.ToshiVmOmnibusPublicKey)
 
 	xpAuthority, _        = NewAccountFromPublicKeyString(config.XpAuthorityPublicKey)
 	xpVmAccount, _        = NewAccountFromPublicKeyString(config.XpVmAccountPublicKey)
@@ -192,6 +200,25 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 			Omnibus:   jeffyVmOmnibusAccount,
 			Mint:      mintAccount,
 		}, nil
+	case lightspeedMintAccount.PublicKey().ToBase58():
+		if lightspeedAuthority.PrivateKey() == nil {
+			vaultRecord, err := data.GetKey(ctx, lightspeedAuthority.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+
+			lightspeedAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &VmConfig{
+			Authority: lightspeedAuthority,
+			Vm:        lightspeedVmAccount,
+			Omnibus:   lightspeedVmOmnibusAccount,
+			Mint:      mintAccount,
+		}, nil
 	case linksMintAccount.PublicKey().ToBase58():
 		if linksAuthority.PrivateKey() == nil {
 			vaultRecord, err := data.GetKey(ctx, linksAuthority.PublicKey().ToBase58())
@@ -266,6 +293,25 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 			Authority: testAuthority,
 			Vm:        testVmAccount,
 			Omnibus:   testVmOmnibusAccount,
+			Mint:      mintAccount,
+		}, nil
+	case toshiMintAccount.PublicKey().ToBase58():
+		if toshiAuthority.PrivateKey() == nil {
+			vaultRecord, err := data.GetKey(ctx, toshiAuthority.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+
+			toshiAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &VmConfig{
+			Authority: toshiAuthority,
+			Vm:        toshiVmAccount,
+			Omnibus:   toshiVmOmnibusAccount,
 			Mint:      mintAccount,
 		}, nil
 	case xpMintAccount.PublicKey().ToBase58():

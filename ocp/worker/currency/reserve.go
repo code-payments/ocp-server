@@ -235,6 +235,36 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 		})
 	}()
 
+	err12 := func() error {
+		lightspeedMintAccount, _ := common.NewAccountFromPublicKeyString(config.LightspeedMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, lightspeedMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              lightspeedMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
+	err13 := func() error {
+		toshiMintAccount, _ := common.NewAccountFromPublicKeyString(config.ToshiMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, toshiMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              toshiMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
 	if err1 != nil {
 		return err1
 	}
@@ -267,6 +297,12 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 	}
 	if err11 != nil {
 		return err11
+	}
+	if err12 != nil {
+		return err12
+	}
+	if err13 != nil {
+		return err13
 	}
 
 	return nil

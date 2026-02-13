@@ -76,10 +76,12 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		config.BogeyVmAccountPublicKey,
 		config.FloatVmAccountPublicKey,
 		config.JeffyVmAccountPublicKey,
+		config.LightspeedVmAccountPublicKey,
 		config.LinksVmAccountPublicKey,
 		config.MarketCoinVmAccountPublicKey,
 		config.MoonyVmAccountPublicKey,
 		config.TestVmAccountPublicKey,
+		config.ToshiVmAccountPublicKey,
 		config.XpVmAccountPublicKey,
 	} {
 		for _, state := range []nonce.State{

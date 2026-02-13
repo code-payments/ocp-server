@@ -55,6 +55,11 @@ const (
 	JeffyVmAccountPublicKey = "8rwgUXsLSq1Pn51UJs4NGVA1cTkemwBgKyWPfFYgnm3B"
 	JeffyVmOmnibusPublicKey = "9XiqBPYSG2cBwpb8MqJeuFmLaQaAAr6gwikyBrPZDQ8R"
 
+	LightspeedMintPublicKey      = "D4Srn1tRU69JWvPeNGre1AiF2swFhw6bpUNyH18Dfag6"
+	LightspeedAuthorityPublicKey = "1spdvA8EGbo56cnGUDzt2FjWCwEWF5hY3jw6yz8BcWw"
+	LightspeedVmAccountPublicKey = "GkYnW2md9TdWV7ZmSnShaFGg3S1e62UmJMDtnYXG4gpe"
+	LightspeedVmOmnibusPublicKey = "5sBqTvFrfu6hCJPrxEcQ2PXvzLTfy4UCJjYxDoJcaP19"
+
 	LinksMintPublicKey      = "CPBcprSXXYerwh6LE6o3yc6NJqeZvm87GRSySgjTicE5"
 	LinksAuthorityPublicKey = "1nkSmZ9VCLBiQqSuMdmv9SXQ2y5wTJVnBW5ZsESjvzd"
 	LinksVmAccountPublicKey = "2s18j1EyBjRTcie48Hn6wyiZVCD9NrmkqH1JAKchoKT2"
@@ -74,6 +79,11 @@ const (
 	TestAuthorityPublicKey = "tstBCPtzNDycsM7rAd2CxzdgKh1gWrMULzrDHuGVXAW"
 	TestVmAccountPublicKey = "CYtzE732LQ7YP9sngSPUQhCCTQ8GY14dmjWX2hXP16Np"
 	TestVmOmnibusPublicKey = "65Ghp2FFPmdB3FLkC2NCKkBQ3RuXgmjZ56DDGZLVAZZa"
+
+	ToshiMintPublicKey      = "EfBCnuhon2uWSRB3WFqmWRQumiHvhZXYbUZXUcHDHNyz"
+	ToshiAuthorityPublicKey = "tshUiGXuyb4ujawe2fByjissauSdgDjuysSeGoV9Aga"
+	ToshiVmAccountPublicKey = "9VpRW29UXcyAZkXJpk4Pqcdz2HyprKPft6pyBKH6LGC1"
+	ToshiVmOmnibusPublicKey = "AmYSBrPT5ozvxjYT7Gq3B3imRHGoEoNpZ7ZDzcxJ1xKp"
 
 	XpMintPublicKey      = "6oZnhB1FPrUaDfhRCVZnbVWNKVx9wgj84vKGH7eMpzXL"
 	XpAuthorityPublicKey = "xpTXV7BNXwsdvCaFKfeT4h6rSnKck2Bv5iBAFFS5Uwk"

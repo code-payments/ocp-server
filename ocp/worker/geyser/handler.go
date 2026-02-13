@@ -91,10 +91,12 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		config.BogeyMintPublicKey,
 		config.FloatMintPublicKey,
 		config.JeffyMintPublicKey,
+		config.LightspeedMintPublicKey,
 		config.LinksMintPublicKey,
 		config.MarketCoinMintPublicKey,
 		config.MoonyMintPublicKey,
 		config.TestMintPublicKey,
+		config.ToshiMintPublicKey,
 		config.XpMintPublicKey:
 		// Not an ATA, so filter it out. It cannot be a VM deposit ATA
 		if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
