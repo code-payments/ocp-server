@@ -331,9 +331,11 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	}
 
 	// Determine the time range and interval based on the predefined range.
+	// The interval is adjusted based on the currency's age so younger
+	// currencies get finer-grained data points.
 	// endTime is getLatestHistoricalTime, which is used in cache keys to
 	// invalidate entries when new market data is generated.
-	startTime, endTime, interval := getTimeRangeForPredefinedRange(req.GetPredefinedRange())
+	startTime, endTime, interval := getTimeRangeForPredefinedRange(req.GetPredefinedRange(), metadataRecord.CreatedAt)
 
 	// Get reserve history (cached by mint + range)
 	reserveHistory, err := s.getCachedReserveHistory(
@@ -550,24 +552,46 @@ func calculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 
 }
 
 // getTimeRangeForPredefinedRange returns the start time and appropriate interval
-// for the given predefined range.
-func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange) (time.Time, time.Time, query.Interval) {
+// for the given predefined range. The interval is adjusted based on the
+// currency's age so that younger currencies get finer-grained data points.
+func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange, createdAt time.Time) (time.Time, time.Time, query.Interval) {
 	now := getLatestHistoricalTime()
+	currencyAge := now.Sub(createdAt)
 
 	switch predefinedRange {
 	case currencypb.GetHistoricalMintDataRequest_LAST_DAY:
 		return now.Add(-24 * time.Hour), now, query.IntervalMinute
 	case currencypb.GetHistoricalMintDataRequest_LAST_WEEK:
-		return now.Add(-7 * 24 * time.Hour), now, query.IntervalHour
+		interval := query.IntervalHour
+		if currencyAge < 24*time.Hour {
+			interval = query.IntervalMinute
+		}
+		return now.Add(-7 * 24 * time.Hour), now, interval
 	case currencypb.GetHistoricalMintDataRequest_LAST_MONTH:
-		return now.Add(-30 * 24 * time.Hour), now, query.IntervalHour
+		interval := query.IntervalHour
+		if currencyAge < 24*time.Hour {
+			interval = query.IntervalMinute
+		}
+		return now.Add(-30 * 24 * time.Hour), now, interval
 	case currencypb.GetHistoricalMintDataRequest_LAST_YEAR:
-		return now.Add(-365 * 24 * time.Hour), now, query.IntervalDay
+		interval := query.IntervalDay
+		if currencyAge < 24*time.Hour {
+			interval = query.IntervalMinute
+		} else if currencyAge < 7*24*time.Hour {
+			interval = query.IntervalHour
+		}
+		return now.Add(-365 * 24 * time.Hour), now, interval
 	case currencypb.GetHistoricalMintDataRequest_ALL_TIME:
 		fallthrough
 	default:
-		// For all time, go back 100 years with daily intervals
-		return now.Add(-100 * 365 * 24 * time.Hour), now, query.IntervalDay
+		interval := query.IntervalDay
+		if currencyAge < 24*time.Hour {
+			interval = query.IntervalMinute
+		} else if currencyAge < 7*24*time.Hour {
+			interval = query.IntervalHour
+		}
+		// For all time, go back 100 years
+		return now.Add(-100 * 365 * 24 * time.Hour), now, interval
 	}
 }
 
