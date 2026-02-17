@@ -383,6 +383,22 @@ func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*metada
 	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
 }
 
+func dbGetAllMints(ctx context.Context, db *sqlx.DB) ([]string, error) {
+	var res []string
+	err := db.SelectContext(ctx, &res,
+		`SELECT mint FROM `+metadataTableName,
+	)
+
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)
+	}
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	return res, nil
+}
+
 func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t time.Time, ordering q.Ordering) (*reserveModel, error) {
 	res := &reserveModel{}
 	err := db.GetContext(ctx, res,

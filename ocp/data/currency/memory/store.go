@@ -193,6 +193,22 @@ func (s *store) GetMetadata(ctx context.Context, mint string) (*currency.Metadat
 	return nil, currency.ErrNotFound
 }
 
+func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.metadataRecords) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	var mints []string
+	for _, item := range s.metadataRecords {
+		mints = append(mints, item.Mint)
+	}
+
+	return mints, nil
+}
+
 func (s *store) PutReserveRecord(ctx context.Context, data *currency.ReserveRecord) error {
 	if err := data.Validate(); err != nil {
 		return err
