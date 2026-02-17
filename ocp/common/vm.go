@@ -2,68 +2,19 @@ package common
 
 import (
 	"context"
+	"sync"
 
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 )
 
 var (
 	CoreMintVmAccount, _        = NewAccountFromPublicKeyString(config.CoreMintVmAccountPublicKey)
 	CoreMintVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.CoreMintVmOmnibusPublicKey)
 
-	// todo: DB store to track VM per mint
-
-	badBoysAuthority, _        = NewAccountFromPublicKeyString(config.BadBoysAuthorityPublicKey)
-	badBoysVmAccount, _        = NewAccountFromPublicKeyString(config.BadBoysVmAccountPublicKey)
-	badBoysVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.BadBoysVmOmnibusPublicKey)
-
-	bluebucksAuthority, _        = NewAccountFromPublicKeyString(config.BluebucksAuthorityPublicKey)
-	bluebucksVmAccount, _        = NewAccountFromPublicKeyString(config.BluebucksVmAccountPublicKey)
-	bluebucksVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.BluebucksVmOmnibusPublicKey)
-
-	bitsAuthority, _        = NewAccountFromPublicKeyString(config.BitsAuthorityPublicKey)
-	bitsVmAccount, _        = NewAccountFromPublicKeyString(config.BitsVmAccountPublicKey)
-	bitsVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.BitsVmOmnibusPublicKey)
-
-	bogeyAuthority, _        = NewAccountFromPublicKeyString(config.BogeyAuthorityPublicKey)
-	bogeyVmAccount, _        = NewAccountFromPublicKeyString(config.BogeyVmAccountPublicKey)
-	bogeyVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.BogeyVmOmnibusPublicKey)
-
-	floatAuthority, _        = NewAccountFromPublicKeyString(config.FloatAuthorityPublicKey)
-	floatVmAccount, _        = NewAccountFromPublicKeyString(config.FloatVmAccountPublicKey)
-	floatVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.FloatVmOmnibusPublicKey)
-
-	jeffyAuthority, _        = NewAccountFromPublicKeyString(config.JeffyAuthorityPublicKey)
-	jeffyVmAccount, _        = NewAccountFromPublicKeyString(config.JeffyVmAccountPublicKey)
-	jeffyVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.JeffyVmOmnibusPublicKey)
-
-	lightspeedAuthority, _        = NewAccountFromPublicKeyString(config.LightspeedAuthorityPublicKey)
-	lightspeedVmAccount, _        = NewAccountFromPublicKeyString(config.LightspeedVmAccountPublicKey)
-	lightspeedVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.LightspeedVmOmnibusPublicKey)
-
-	linksAuthority, _        = NewAccountFromPublicKeyString(config.LinksAuthorityPublicKey)
-	linksVmAccount, _        = NewAccountFromPublicKeyString(config.LinksVmAccountPublicKey)
-	linksVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.LinksVmOmnibusPublicKey)
-
-	marketCoinAuthority, _        = NewAccountFromPublicKeyString(config.MarketCoinAuthorityPublicKey)
-	marketCoinVmAccount, _        = NewAccountFromPublicKeyString(config.MarketCoinVmAccountPublicKey)
-	marketCoinVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinVmOmnibusPublicKey)
-
-	moonyAuthority, _        = NewAccountFromPublicKeyString(config.MoonyAuthorityPublicKey)
-	moonyVmAccount, _        = NewAccountFromPublicKeyString(config.MoonyVmAccountPublicKey)
-	moonyVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.MoonyVmOmnibusPublicKey)
-
-	testAuthority, _        = NewAccountFromPublicKeyString(config.TestAuthorityPublicKey)
-	testVmAccount, _        = NewAccountFromPublicKeyString(config.TestVmAccountPublicKey)
-	testVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.TestVmOmnibusPublicKey)
-
-	toshiAuthority, _        = NewAccountFromPublicKeyString(config.ToshiAuthorityPublicKey)
-	toshiVmAccount, _        = NewAccountFromPublicKeyString(config.ToshiVmAccountPublicKey)
-	toshiVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.ToshiVmOmnibusPublicKey)
-
-	xpAuthority, _        = NewAccountFromPublicKeyString(config.XpAuthorityPublicKey)
-	xpVmAccount, _        = NewAccountFromPublicKeyString(config.XpVmAccountPublicKey)
-	xpVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.XpVmOmnibusPublicKey)
+	vmConfigCacheMu sync.RWMutex
+	vmConfigCache   = make(map[string]*VmConfig)
 )
 
 type VmConfig struct {
@@ -74,266 +25,61 @@ type VmConfig struct {
 }
 
 func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (*VmConfig, error) {
-	if !IsCoreMint(mintAccount) && !IsCoreMintUsdStableCoin() {
-		return nil, ErrUnsupportedMint
-	}
-
-	switch mintAccount.PublicKey().ToBase58() {
-	case CoreMintAccount.PublicKey().ToBase58():
+	if IsCoreMint(mintAccount) {
 		return &VmConfig{
 			Authority: GetSubsidizer(),
 			Vm:        CoreMintVmAccount,
 			Omnibus:   CoreMintVmOmnibusAccount,
 			Mint:      CoreMintAccount,
 		}, nil
-	case badBoysMintAccount.PublicKey().ToBase58():
-		if badBoysAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, badBoysAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			badBoysAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: badBoysAuthority,
-			Vm:        badBoysVmAccount,
-			Omnibus:   badBoysVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case bluebucksMintAccount.PublicKey().ToBase58():
-		if bluebucksAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, bluebucksAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			bluebucksAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: bluebucksAuthority,
-			Vm:        bluebucksVmAccount,
-			Omnibus:   bluebucksVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case bitsMintAccount.PublicKey().ToBase58():
-		if bitsAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, bitsAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			bitsAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: bitsAuthority,
-			Vm:        bitsVmAccount,
-			Omnibus:   bitsVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case bogeyMintAccount.PublicKey().ToBase58():
-		if bogeyAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, bogeyAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			bogeyAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: bogeyAuthority,
-			Vm:        bogeyVmAccount,
-			Omnibus:   bogeyVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case floatMintAccount.PublicKey().ToBase58():
-		if floatAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, floatAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			floatAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: floatAuthority,
-			Vm:        floatVmAccount,
-			Omnibus:   floatVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case jeffyMintAccount.PublicKey().ToBase58():
-		if jeffyAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, jeffyAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			jeffyAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: jeffyAuthority,
-			Vm:        jeffyVmAccount,
-			Omnibus:   jeffyVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case lightspeedMintAccount.PublicKey().ToBase58():
-		if lightspeedAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, lightspeedAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			lightspeedAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: lightspeedAuthority,
-			Vm:        lightspeedVmAccount,
-			Omnibus:   lightspeedVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case linksMintAccount.PublicKey().ToBase58():
-		if linksAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, linksAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			linksAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: linksAuthority,
-			Vm:        linksVmAccount,
-			Omnibus:   linksVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case marketCoinMintAccount.PublicKey().ToBase58():
-		if marketCoinAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, marketCoinAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			marketCoinAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: marketCoinAuthority,
-			Vm:        marketCoinVmAccount,
-			Omnibus:   marketCoinVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case moonyMintAccount.PublicKey().ToBase58():
-		if moonyAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, moonyAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			moonyAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: moonyAuthority,
-			Vm:        moonyVmAccount,
-			Omnibus:   moonyVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case testMintAccount.PublicKey().ToBase58():
-		if testAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, testAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			testAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: testAuthority,
-			Vm:        testVmAccount,
-			Omnibus:   testVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case toshiMintAccount.PublicKey().ToBase58():
-		if toshiAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, toshiAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			toshiAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: toshiAuthority,
-			Vm:        toshiVmAccount,
-			Omnibus:   toshiVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	case xpMintAccount.PublicKey().ToBase58():
-		if xpAuthority.PrivateKey() == nil {
-			vaultRecord, err := data.GetKey(ctx, xpAuthority.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-
-			xpAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return &VmConfig{
-			Authority: xpAuthority,
-			Vm:        xpVmAccount,
-			Omnibus:   xpVmOmnibusAccount,
-			Mint:      mintAccount,
-		}, nil
-	default:
-		return nil, ErrUnsupportedMint
 	}
+
+	mintAddress := mintAccount.PublicKey().ToBase58()
+
+	vmConfigCacheMu.RLock()
+	cached, ok := vmConfigCache[mintAddress]
+	vmConfigCacheMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	record, err := data.GetVmMetadataByMint(ctx, mintAddress)
+	if err == vm_metadata.ErrNotFound {
+		return nil, ErrUnsupportedMint
+	} else if err != nil {
+		return nil, err
+	}
+
+	vaultRecord, err := data.GetKey(ctx, record.Authority)
+	if err != nil {
+		return nil, err
+	}
+
+	authority, err := NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	vmAccount, err := NewAccountFromPublicKeyString(record.Vm)
+	if err != nil {
+		return nil, err
+	}
+
+	omnibusAccount, err := NewAccountFromPublicKeyString(record.Omnibus)
+	if err != nil {
+		return nil, err
+	}
+
+	vmConfig := &VmConfig{
+		Authority: authority,
+		Vm:        vmAccount,
+		Omnibus:   omnibusAccount,
+		Mint:      mintAccount,
+	}
+
+	vmConfigCacheMu.Lock()
+	vmConfigCache[mintAddress] = vmConfig
+	vmConfigCacheMu.Unlock()
+
+	return vmConfig, nil
 }
