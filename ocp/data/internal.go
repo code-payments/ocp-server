@@ -34,6 +34,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
+	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	vm_ram "github.com/code-payments/ocp-server/ocp/data/vm/ram"
 	vm_storage "github.com/code-payments/ocp-server/ocp/data/vm/storage"
 
@@ -51,6 +52,7 @@ import (
 	timelock_memory_client "github.com/code-payments/ocp-server/ocp/data/timelock/memory"
 	transaction_memory_client "github.com/code-payments/ocp-server/ocp/data/transaction/memory"
 	vault_memory_client "github.com/code-payments/ocp-server/ocp/data/vault/memory"
+	vm_metadata_memory_client "github.com/code-payments/ocp-server/ocp/data/vm/metadata/memory"
 	vm_ram_memory_client "github.com/code-payments/ocp-server/ocp/data/vm/ram/memory"
 	vm_storage_memory_client "github.com/code-payments/ocp-server/ocp/data/vm/storage/memory"
 
@@ -68,6 +70,7 @@ import (
 	timelock_postgres_client "github.com/code-payments/ocp-server/ocp/data/timelock/postgres"
 	transaction_postgres_client "github.com/code-payments/ocp-server/ocp/data/transaction/postgres"
 	vault_postgres_client "github.com/code-payments/ocp-server/ocp/data/vault/postgres"
+	vm_metadata_postgres_client "github.com/code-payments/ocp-server/ocp/data/vm/metadata/postgres"
 	vm_ram_postgres_client "github.com/code-payments/ocp-server/ocp/data/vm/ram/postgres"
 	vm_storage_postgres_client "github.com/code-payments/ocp-server/ocp/data/vm/storage/postgres"
 )
@@ -239,6 +242,11 @@ type DatabaseData interface {
 	ReserveVmMemory(ctx context.Context, vm string, accountType vm.VirtualAccountType, address string) (string, uint16, error)
 	GetVmMemoryLocationByAddress(ctx context.Context, address string) (string, uint16, error)
 
+	// VM Metadata
+	// --------------------------------------------------------------------------------
+	PutVmMetadata(ctx context.Context, record *vm_metadata.Record) error
+	GetVmMetadataByMint(ctx context.Context, mint string) (*vm_metadata.Record, error)
+
 	// VM Storage
 	// --------------------------------------------------------------------------------
 	InitializeVmStorage(ctx context.Context, record *vm_storage.Record) error
@@ -269,6 +277,7 @@ type DatabaseProvider struct {
 	timelocks    timelock.Store
 	transactions transaction.Store
 	vault        vault.Store
+	vmMetadata   vm_metadata.Store
 	vmRam        vm_ram.Store
 	vmStorage    vm_storage.Store
 
@@ -314,6 +323,7 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		timelocks:    timelock_postgres_client.New(db),
 		transactions: transaction_postgres_client.New(db),
 		vault:        vault_postgres_client.New(db),
+		vmMetadata:   vm_metadata_postgres_client.New(db),
 		vmRam:        vm_ram_postgres_client.New(db),
 		vmStorage:    vm_storage_postgres_client.New(db),
 
@@ -340,6 +350,7 @@ func NewTestDatabaseProvider() DatabaseData {
 		timelocks:    timelock_memory_client.New(),
 		transactions: transaction_memory_client.New(),
 		vault:        vault_memory_client.New(),
+		vmMetadata:   vm_metadata_memory_client.New(),
 		vmRam:        vm_ram_memory_client.New(),
 		vmStorage:    vm_storage_memory_client.New(),
 
@@ -861,6 +872,15 @@ func (dp *DatabaseProvider) GetAllKeysByState(ctx context.Context, state vault.S
 }
 func (dp *DatabaseProvider) SaveKey(ctx context.Context, record *vault.Record) error {
 	return dp.vault.Save(ctx, record)
+}
+
+// VM Metadata
+// --------------------------------------------------------------------------------
+func (dp *DatabaseProvider) PutVmMetadata(ctx context.Context, record *vm_metadata.Record) error {
+	return dp.vmMetadata.Put(ctx, record)
+}
+func (dp *DatabaseProvider) GetVmMetadataByMint(ctx context.Context, mint string) (*vm_metadata.Record, error) {
+	return dp.vmMetadata.GetByMint(ctx, mint)
 }
 
 // VM RAM
