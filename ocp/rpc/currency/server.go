@@ -563,21 +563,21 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMint
 		return now.Add(-24 * time.Hour), now, query.IntervalMinute
 	case currencypb.GetHistoricalMintDataRequest_LAST_WEEK:
 		interval := query.IntervalHour
-		if currencyAge < 24*time.Hour {
+		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
 		}
 		return now.Add(-7 * 24 * time.Hour), now, interval
 	case currencypb.GetHistoricalMintDataRequest_LAST_MONTH:
 		interval := query.IntervalHour
-		if currencyAge < 24*time.Hour {
+		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
 		}
 		return now.Add(-30 * 24 * time.Hour), now, interval
 	case currencypb.GetHistoricalMintDataRequest_LAST_YEAR:
 		interval := query.IntervalDay
-		if currencyAge < 24*time.Hour {
+		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
-		} else if currencyAge < 7*24*time.Hour {
+		} else if currencyAge < 2*7*24*time.Hour {
 			interval = query.IntervalHour
 		}
 		return now.Add(-365 * 24 * time.Hour), now, interval
@@ -585,9 +585,9 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMint
 		fallthrough
 	default:
 		interval := query.IntervalDay
-		if currencyAge < 24*time.Hour {
+		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
-		} else if currencyAge < 7*24*time.Hour {
+		} else if currencyAge < 2*7*24*time.Hour {
 			interval = query.IntervalHour
 		}
 		// For all time, go back 100 years
