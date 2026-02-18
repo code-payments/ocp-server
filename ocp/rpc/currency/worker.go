@@ -33,6 +33,7 @@ var (
 	linksMintAccount, _      = common.NewAccountFromPublicKeyString(config.LinksMintPublicKey)
 	marketCoinMintAccount, _ = common.NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
 	moonyMintAccount, _      = common.NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
+	teddiesMintAccount, _    = common.NewAccountFromPublicKeyString(config.TeddiesMintPublicKey)
 	testMintAccount, _       = common.NewAccountFromPublicKeyString(config.TestMintPublicKey)
 	toshiMintAccount, _      = common.NewAccountFromPublicKeyString(config.ToshiMintPublicKey)
 	xpMintAccount, _         = common.NewAccountFromPublicKeyString(config.XpMintPublicKey)
@@ -51,6 +52,7 @@ var trackedLaunchpadMints = []*common.Account{
 	linksMintAccount,
 	marketCoinMintAccount,
 	moonyMintAccount,
+	teddiesMintAccount,
 	testMintAccount,
 	toshiMintAccount,
 	xpMintAccount,

@@ -80,6 +80,7 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		config.LinksVmAccountPublicKey,
 		config.MarketCoinVmAccountPublicKey,
 		config.MoonyVmAccountPublicKey,
+		config.TeddiesVmAccountPublicKey,
 		config.TestVmAccountPublicKey,
 		config.ToshiVmAccountPublicKey,
 		config.XpVmAccountPublicKey,

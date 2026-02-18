@@ -95,6 +95,7 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		config.LinksMintPublicKey,
 		config.MarketCoinMintPublicKey,
 		config.MoonyMintPublicKey,
+		config.TeddiesMintPublicKey,
 		config.TestMintPublicKey,
 		config.ToshiMintPublicKey,
 		config.XpMintPublicKey:

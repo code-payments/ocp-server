@@ -32,6 +32,7 @@ var (
 	linksMintAccount, _      = NewAccountFromPublicKeyString(config.LinksMintPublicKey)
 	marketCoinMintAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
 	moonyMintAccount, _      = NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
+	teddiesMintAccount, _    = NewAccountFromPublicKeyString(config.TeddiesMintPublicKey)
 	testMintAccount, _       = NewAccountFromPublicKeyString(config.TestMintPublicKey)
 	toshiMintAccount, _      = NewAccountFromPublicKeyString(config.ToshiMintPublicKey)
 	xpMintAccount, _         = NewAccountFromPublicKeyString(config.XpMintPublicKey)
