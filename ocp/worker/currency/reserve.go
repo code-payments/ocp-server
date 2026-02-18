@@ -265,6 +265,21 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 		})
 	}()
 
+	err14 := func() error {
+		teddiesMintAccount, _ := common.NewAccountFromPublicKeyString(config.TeddiesMintPublicKey)
+
+		ciculatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, teddiesMintAccount)
+		if err != nil {
+			return err
+		}
+
+		return p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              teddiesMintAccount.PublicKey().ToBase58(),
+			SupplyFromBonding: ciculatingSupply,
+			Time:              ts,
+		})
+	}()
+
 	if err1 != nil {
 		return err1
 	}
@@ -303,6 +318,9 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 	}
 	if err13 != nil {
 		return err13
+	}
+	if err14 != nil {
+		return err14
 	}
 
 	return nil

@@ -75,6 +75,11 @@ const (
 	MoonyVmAccountPublicKey = "FCZitKZWuMfrZ3Krcp67egUwPzFoWM9Xo913S17qdjWV"
 	MoonyVmOmnibusPublicKey = "FvhtPHhARVkRJKfkM96Wvo2WEwjtiweyLAdpAroqT646"
 
+	TeddiesMintPublicKey      = "55TKRUaaxXoSNFMzchMYUwC5CQmbMko5ZQECpH5Uqajm"
+	TeddiesAuthorityPublicKey = "tedA5B3L5b6tL88ZyWdpxSbJV6PMxTg6ArtaKJcQ14J"
+	TeddiesVmAccountPublicKey = "2y5sWz6GfqqnvpRLJNbchg7hLmzC8khvjw1SvUBsuYKP"
+	TeddiesVmOmnibusPublicKey = "E1R3TWPqFFWHMxMURprpAXSeVzF93tJn6Pn8x165pcVe"
+
 	TestMintPublicKey      = "2psDP3LAvbNzfvBYNMs9ieMpsD8PVzyQsKNfZrjEKoDN"
 	TestAuthorityPublicKey = "tstBCPtzNDycsM7rAd2CxzdgKh1gWrMULzrDHuGVXAW"
 	TestVmAccountPublicKey = "CYtzE732LQ7YP9sngSPUQhCCTQ8GY14dmjWX2hXP16Np"

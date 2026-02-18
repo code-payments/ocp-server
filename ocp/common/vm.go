@@ -53,6 +53,10 @@ var (
 	moonyVmAccount, _        = NewAccountFromPublicKeyString(config.MoonyVmAccountPublicKey)
 	moonyVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.MoonyVmOmnibusPublicKey)
 
+	teddiesAuthority, _        = NewAccountFromPublicKeyString(config.TeddiesAuthorityPublicKey)
+	teddiesVmAccount, _        = NewAccountFromPublicKeyString(config.TeddiesVmAccountPublicKey)
+	teddiesVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.TeddiesVmOmnibusPublicKey)
+
 	testAuthority, _        = NewAccountFromPublicKeyString(config.TestAuthorityPublicKey)
 	testVmAccount, _        = NewAccountFromPublicKeyString(config.TestVmAccountPublicKey)
 	testVmOmnibusAccount, _ = NewAccountFromPublicKeyString(config.TestVmOmnibusPublicKey)
@@ -274,6 +278,25 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 			Authority: moonyAuthority,
 			Vm:        moonyVmAccount,
 			Omnibus:   moonyVmOmnibusAccount,
+			Mint:      mintAccount,
+		}, nil
+	case teddiesMintAccount.PublicKey().ToBase58():
+		if teddiesAuthority.PrivateKey() == nil {
+			vaultRecord, err := data.GetKey(ctx, teddiesAuthority.PublicKey().ToBase58())
+			if err != nil {
+				return nil, err
+			}
+
+			teddiesAuthority, err = NewAccountFromPrivateKeyString(vaultRecord.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &VmConfig{
+			Authority: teddiesAuthority,
+			Vm:        teddiesVmAccount,
+			Omnibus:   teddiesVmOmnibusAccount,
 			Mint:      mintAccount,
 		}, nil
 	case testMintAccount.PublicKey().ToBase58():
