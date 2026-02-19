@@ -160,11 +160,13 @@ func (opts *noncePoolOpts) validate() error {
 	return nil
 }
 
-// Nonce represents a handle to a nonce that is owned by a local nonce pool.
+// Nonce represents a handle to a nonce that is owned by a local nonce pool,
+// or claimed directly from the database via GetNonce.
 type Nonce struct {
 	Account   *common.Account
 	Blockhash solana.Blockhash
 
+	data   ocp_data.Provider
 	pool   *LocalNoncePool
 	record *nonce.Record
 }
@@ -195,7 +197,7 @@ func (n *Nonce) MarkReservedWithSignature(ctx context.Context, sig string) error
 		n.record.Signature = sig
 		n.record.ClaimNodeID = nil
 		n.record.ClaimExpiresAt = nil
-		return n.pool.data.SaveNonce(ctx, n.record)
+		return n.data.SaveNonce(ctx, n.record)
 	}()
 	tracer.OnError(err)
 	return err
@@ -211,10 +213,20 @@ func (n *Nonce) ReleaseIfNotReserved(ctx context.Context) {
 	if n.record.State != nonce.StateClaimed {
 		return
 	}
-	if *n.record.ClaimNodeID != n.pool.opts.nodeID {
+	if n.record.ClaimExpiresAt.Before(time.Now()) {
 		return
 	}
-	if n.record.ClaimExpiresAt.Before(time.Now()) {
+
+	// When there's no pool, release directly back to the database.
+	if n.pool == nil {
+		n.record.State = nonce.StateAvailable
+		n.record.ClaimNodeID = nil
+		n.record.ClaimExpiresAt = nil
+		n.data.SaveNonce(ctx, n.record)
+		return
+	}
+
+	if *n.record.ClaimNodeID != n.pool.opts.nodeID {
 		return
 	}
 
@@ -454,6 +466,7 @@ func (np *LocalNoncePool) load(ctx context.Context, limit int) (int, error) {
 		newNonces = append(newNonces, &Nonce{
 			Account:   account,
 			Blockhash: bh,
+			data:      np.data,
 			pool:      np,
 			record:    record,
 		})
@@ -604,6 +617,62 @@ func (np *LocalNoncePool) getBaseMetricKvs() map[string]interface{} {
 		"nonce_env_instance": np.envInstance,
 		"nonce_pool_type":    np.poolType.String(),
 	}
+}
+
+// GetNonce claims a single nonce directly from the database. This is intended
+// for use when a LocalNoncePool doesn't exist for the desired environment and
+// purpose.
+func GetNonce(
+	ctx context.Context,
+	data ocp_data.Provider,
+	env nonce.Environment,
+	envInstance string,
+	purpose nonce.Purpose,
+	nodeID string,
+	timeout time.Duration,
+) (*Nonce, error) {
+	now := time.Now()
+	records, err := data.BatchClaimAvailableNoncesByPurpose(
+		ctx,
+		env,
+		envInstance,
+		purpose,
+		1,
+		nodeID,
+		now.Add(timeout),
+		now.Add(timeout+time.Second),
+	)
+	if err == nonce.ErrNonceNotFound {
+		return nil, ErrNoAvailableNonces
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if len(records) == 0 {
+		return nil, ErrNoAvailableNonces
+	}
+
+	record := records[0]
+
+	account, err := common.NewAccountFromPublicKeyString(record.Address)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid address")
+	}
+
+	decodedBh, err := base58.Decode(record.Blockhash)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid blockhash")
+	}
+	var bh solana.Blockhash
+	copy(bh[:], decodedBh)
+
+	return &Nonce{
+		Account:   account,
+		Blockhash: bh,
+		data:      data,
+		record:    record,
+	}, nil
 }
 
 // UpdateNonceSignature safely transitions a nonce's signature to a new value

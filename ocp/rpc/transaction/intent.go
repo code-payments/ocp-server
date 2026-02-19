@@ -431,12 +431,21 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 					nonce.PurposeClientIntent,
 					s.noncePools...,
 				)
-				if err != nil {
-					log.With(zap.Error(err)).Warn("failure selecting nonce pool")
-					return handleSubmitIntentError(ctx, streamer, intentRecord, err)
+				switch err {
+				case nil:
+					selectedNonce, err = noncePool.GetNonce(ctx)
+				case transaction.ErrNoncePoolNotFound:
+					selectedNonce, err = transaction.GetNonce(
+						ctx,
+						s.data,
+						nonce.EnvironmentVm,
+						vmAccount.PublicKey().ToBase58(),
+						nonce.PurposeClientIntent,
+						s.nodeID,
+						s.conf.submitIntentTimeout.Get(ctx)+time.Second,
+					)
+				default:
 				}
-
-				selectedNonce, err = noncePool.GetNonce(ctx)
 				if err != nil {
 					log.With(zap.Error(err)).Warn("failure selecting available nonce")
 					return handleSubmitIntentError(ctx, streamer, intentRecord, err)
