@@ -176,7 +176,7 @@ func (p *runtime) createNonceAccountTx(ctx context.Context, nonce *nonce.Record)
 	return &tx, nil
 }
 
-func (p *runtime) checkForMissingTx(ctx context.Context, nonce *nonce.Record) error {
+func (p *runtime) checkForMissingTx(nonce *nonce.Record) error {
 	sigCacheMu.Lock()
 	defer sigCacheMu.Unlock()
 
@@ -222,6 +222,10 @@ func (p *runtime) broadcastTx(ctx context.Context, tx *solana.Transaction) {
 func (p *runtime) getBlockhashFromSolanaNonce(ctx context.Context, record *nonce.Record, slot uint64) (string, error) {
 	if record.Environment != nonce.EnvironmentSolana {
 		return "", errors.Errorf("nonce environment is not %s", nonce.EnvironmentSolana.String())
+	}
+
+	if record.EnvironmentInstance != nonce.EnvironmentInstanceSolanaMainnet {
+		return "", errors.New("only support solana nonces on mainnet")
 	}
 
 	// Always get the account's state after the transaction's block to avoid

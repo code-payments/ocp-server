@@ -33,11 +33,17 @@ type Store interface {
 	// Returns ErrNotFound if no record is found.
 	Get(ctx context.Context, address string) (*Record, error)
 
-	// GetAllByState returns nonce records in the store for a given confirmation state
-	// within an environment intance.
+	// GetAllByEnvironmentInstanceAndState returns nonce records in the store for a
+	// given confirmation state within an environment instance.
 	//
 	// Returns ErrNotFound if no records are found.
-	GetAllByState(ctx context.Context, env Environment, instance string, state State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
+	GetAllByEnvironmentInstanceAndState(ctx context.Context, env Environment, instance string, state State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
+
+	// GetAllByEnvironmentAndState returns nonce records in the store for a given
+	// environment and state across all instances.
+	//
+	// Returns ErrNotFound if no records are found.
+	GetAllByEnvironmentAndState(ctx context.Context, env Environment, state State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
 
 	// BatchClaimAvailableByPurpose batch claims up to the specified limit.
 	//

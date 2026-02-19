@@ -172,7 +172,7 @@ func dbGetNonce(ctx context.Context, db *sqlx.DB, address string) (*nonceModel, 
 	return res, nil
 }
 
-func dbGetAllByState(ctx context.Context, db *sqlx.DB, env nonce.Environment, instance string, state nonce.State, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*nonceModel, error) {
+func dbGetAllByEnvironmentInstanceAndState(ctx context.Context, db *sqlx.DB, env nonce.Environment, instance string, state nonce.State, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*nonceModel, error) {
 	res := []*nonceModel{}
 
 	// Signature null check is required because some legacy records didn't have this
@@ -187,6 +187,30 @@ func dbGetAllByState(ctx context.Context, db *sqlx.DB, env nonce.Environment, in
 	`
 
 	opts := []interface{}{env, instance, state}
+	query, opts = q.PaginateQuery(query, opts, cursor, limit, direction)
+
+	err := db.SelectContext(ctx, &res, query, opts...)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, nonce.ErrNonceNotFound)
+	}
+
+	if len(res) == 0 {
+		return nil, nonce.ErrNonceNotFound
+	}
+
+	return res, nil
+}
+
+func dbGetAllByEnvironmentAndState(ctx context.Context, db *sqlx.DB, env nonce.Environment, state nonce.State, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*nonceModel, error) {
+	res := []*nonceModel{}
+
+	query := `SELECT
+		id, address, authority, blockhash, environment, environment_instance, purpose, state, signature, claim_node_id, claim_expires_at, version
+		FROM ` + nonceTableName + `
+		WHERE environment = $1 AND state = $2 AND signature IS NOT NULL
+	`
+
+	opts := []interface{}{env, state}
 	query, opts = q.PaginateQuery(query, opts, cursor, limit, direction)
 
 	err := db.SelectContext(ctx, &res, query, opts...)

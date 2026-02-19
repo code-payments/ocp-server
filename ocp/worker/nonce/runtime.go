@@ -10,8 +10,6 @@ import (
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
-	"github.com/code-payments/ocp-server/ocp/common"
-	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/worker"
@@ -57,45 +55,26 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 	} {
 		go func(state nonce.State) {
 
-			err := p.worker(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, state, interval)
+			err := p.worker(ctx, nonce.EnvironmentSolana, state, interval)
 			if err != nil && err != context.Canceled {
-				p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, state))
+				p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, state %d", nonce.EnvironmentSolana, state))
 			}
 
 		}(state)
 	}
 
 	// Setup workers to watch for nonce state changes on the VM side
-	//
-	// todo: Dynamically detect VMs
-	for _, vm := range []string{
-		common.CoreMintVmAccount.PublicKey().ToBase58(),
-		config.BadBoysVmAccountPublicKey,
-		config.BluebucksVmAccountPublicKey,
-		config.BitsVmAccountPublicKey,
-		config.BogeyVmAccountPublicKey,
-		config.FloatVmAccountPublicKey,
-		config.JeffyVmAccountPublicKey,
-		config.LightspeedVmAccountPublicKey,
-		config.LinksVmAccountPublicKey,
-		config.MarketCoinVmAccountPublicKey,
-		config.MoonyVmAccountPublicKey,
-		config.TestVmAccountPublicKey,
-		config.ToshiVmAccountPublicKey,
-		config.XpVmAccountPublicKey,
+	for _, state := range []nonce.State{
+		nonce.StateReleased,
 	} {
-		for _, state := range []nonce.State{
-			nonce.StateReleased,
-		} {
-			go func(vm string, state nonce.State) {
+		go func(state nonce.State) {
 
-				err := p.worker(ctx, nonce.EnvironmentVm, vm, state, interval)
-				if err != nil && err != context.Canceled {
-					p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, instance %s, state %d", nonce.EnvironmentVm, vm, state))
-				}
+			err := p.worker(ctx, nonce.EnvironmentVm, state, interval)
+			if err != nil && err != context.Canceled {
+				p.log.With(zap.Error(err)).Warn(fmt.Sprintf("nonce processing loop terminated unexpectedly for env %s, state %d", nonce.EnvironmentVm, state))
+			}
 
-			}(vm, state)
-		}
+		}(state)
 	}
 
 	go func() {

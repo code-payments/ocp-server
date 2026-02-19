@@ -191,7 +191,8 @@ type DatabaseData interface {
 	GetNonceCount(ctx context.Context, env nonce.Environment, instance string) (uint64, error)
 	GetNonceCountByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State) (uint64, error)
 	GetNonceCountByStateAndPurpose(ctx context.Context, env nonce.Environment, instance string, state nonce.State, purpose nonce.Purpose) (uint64, error)
-	GetAllNonceByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error)
+	GetAllNoncesByEnvironmentInstanceAndState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error)
+	GetAllNoncesByEnvironmentAndState(ctx context.Context, env nonce.Environment, state nonce.State, opts ...query.Option) ([]*nonce.Record, error)
 	BatchClaimAvailableNoncesByPurpose(ctx context.Context, env nonce.Environment, instance string, purpose nonce.Purpose, limit int, nodeID string, minExpireAt, maxExpireAt time.Time) ([]*nonce.Record, error)
 	SaveNonce(ctx context.Context, record *nonce.Record) error
 
@@ -685,13 +686,21 @@ func (dp *DatabaseProvider) GetNonceCountByState(ctx context.Context, env nonce.
 func (dp *DatabaseProvider) GetNonceCountByStateAndPurpose(ctx context.Context, env nonce.Environment, instance string, state nonce.State, purpose nonce.Purpose) (uint64, error) {
 	return dp.nonces.CountByStateAndPurpose(ctx, env, instance, state, purpose)
 }
-func (dp *DatabaseProvider) GetAllNonceByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error) {
+func (dp *DatabaseProvider) GetAllNoncesByEnvironmentInstanceAndState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error) {
 	req, err := query.DefaultPaginationHandler(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	return dp.nonces.GetAllByState(ctx, env, instance, state, req.Cursor, req.Limit, req.SortBy)
+	return dp.nonces.GetAllByEnvironmentInstanceAndState(ctx, env, instance, state, req.Cursor, req.Limit, req.SortBy)
+}
+func (dp *DatabaseProvider) GetAllNoncesByEnvironmentAndState(ctx context.Context, env nonce.Environment, state nonce.State, opts ...query.Option) ([]*nonce.Record, error) {
+	req, err := query.DefaultPaginationHandler(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return dp.nonces.GetAllByEnvironmentAndState(ctx, env, state, req.Cursor, req.Limit, req.SortBy)
 }
 func (dp *DatabaseProvider) BatchClaimAvailableNoncesByPurpose(ctx context.Context, env nonce.Environment, instance string, purpose nonce.Purpose, limit int, nodeID string, minExpireAt, maxExpireAt time.Time) ([]*nonce.Record, error) {
 	return dp.nonces.BatchClaimAvailableByPurpose(ctx, env, instance, purpose, limit, nodeID, minExpireAt, maxExpireAt)

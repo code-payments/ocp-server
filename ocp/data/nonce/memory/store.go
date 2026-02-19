@@ -85,6 +85,16 @@ func (s *store) findByStateAndPurpose(env nonce.Environment, instance string, st
 	return res
 }
 
+func (s *store) findByEnvironmentAndState(env nonce.Environment, state nonce.State) []*nonce.Record {
+	res := make([]*nonce.Record, 0)
+	for _, item := range s.records {
+		if item.Environment == env && item.State == state {
+			res = append(res, item)
+		}
+	}
+	return res
+}
+
 func (s *store) findByEnvironmentInstance(env nonce.Environment, instance string) []*nonce.Record {
 	res := make([]*nonce.Record, 0)
 	for _, item := range s.records {
@@ -215,11 +225,28 @@ func (s *store) Get(ctx context.Context, address string) (*nonce.Record, error) 
 	return nil, nonce.ErrNonceNotFound
 }
 
-func (s *store) GetAllByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*nonce.Record, error) {
+func (s *store) GetAllByEnvironmentInstanceAndState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*nonce.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if items := s.findByState(env, instance, state); len(items) > 0 {
+		res := s.filter(items, cursor, limit, direction)
+
+		if len(res) == 0 {
+			return nil, nonce.ErrNonceNotFound
+		}
+
+		return clonedRecords(res), nil
+	}
+
+	return nil, nonce.ErrNonceNotFound
+}
+
+func (s *store) GetAllByEnvironmentAndState(ctx context.Context, env nonce.Environment, state nonce.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*nonce.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if items := s.findByEnvironmentAndState(env, state); len(items) > 0 {
 		res := s.filter(items, cursor, limit, direction)
 
 		if len(res) == 0 {

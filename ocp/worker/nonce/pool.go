@@ -22,7 +22,7 @@ const (
 	nonceBatchSize = 100
 )
 
-func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, instance string, state nonce.State, interval time.Duration) error {
+func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, state nonce.State, interval time.Duration) error {
 	var cursor query.Cursor
 	delay := interval
 
@@ -35,11 +35,9 @@ func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, inst
 			defer trace.End()
 			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
-			// Get a batch of nonce records in similar state (e.g. newly created, released, reserved, etc...)
-			items, err := p.data.GetAllNonceByState(
+			items, err := p.data.GetAllNoncesByEnvironmentAndState(
 				tracedCtx,
 				env,
-				instance,
 				state,
 				query.WithLimit(nonceBatchSize),
 				query.WithCursor(cursor),
@@ -49,7 +47,6 @@ func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, inst
 				return err
 			}
 
-			// Process the batch of nonce accounts in parallel
 			var wg sync.WaitGroup
 			for _, item := range items {
 				wg.Add(1)
@@ -65,7 +62,6 @@ func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, inst
 			}
 			wg.Wait()
 
-			// Update cursor to point to the next set of nonce accounts
 			if len(items) > 0 {
 				cursor = query.ToCursor(items[len(items)-1].Id)
 			} else {
@@ -173,7 +169,7 @@ func (p *runtime) handleUnknown(ctx context.Context, record *nonce.Record) error
 		// Check the signature for a potential timeout (e.g. if the nonce account
 		// was never created because the blockchain never saw the init/create
 		// transaction)
-		err := p.checkForMissingTx(ctx, record)
+		err := p.checkForMissingTx(record)
 		if err != nil {
 			return p.markInvalid(ctx, record)
 		}

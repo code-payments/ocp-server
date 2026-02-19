@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -58,8 +58,22 @@ func (s *store) Get(ctx context.Context, address string) (*nonce.Record, error) 
 	return fromNonceModel(obj), nil
 }
 
-func (s *store) GetAllByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*nonce.Record, error) {
-	models, err := dbGetAllByState(ctx, s.db, env, instance, state, cursor, limit, direction)
+func (s *store) GetAllByEnvironmentInstanceAndState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*nonce.Record, error) {
+	models, err := dbGetAllByEnvironmentInstanceAndState(ctx, s.db, env, instance, state, cursor, limit, direction)
+	if err != nil {
+		return nil, err
+	}
+
+	nonces := make([]*nonce.Record, len(models))
+	for i, model := range models {
+		nonces[i] = fromNonceModel(model)
+	}
+
+	return nonces, nil
+}
+
+func (s *store) GetAllByEnvironmentAndState(ctx context.Context, env nonce.Environment, state nonce.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*nonce.Record, error) {
+	models, err := dbGetAllByEnvironmentAndState(ctx, s.db, env, state, cursor, limit, direction)
 	if err != nil {
 		return nil, err
 	}
