@@ -21,7 +21,10 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 )
 
-var errMintNotTracked = errors.New("mint is not being tracked")
+var (
+	errMintNotTracked   = errors.New("mint is not being tracked")
+	errMintNotSupported = errors.New("mint is not supported")
+)
 
 // liveExchangeRateData represents live exchange rate data with its pre-signed response
 type liveExchangeRateData struct {
@@ -69,6 +72,7 @@ func newLiveMintStateWorker(log *zap.Logger, data ocp_data.Provider, conf *conf)
 		log:                log,
 		conf:               conf,
 		data:               data,
+		trackedMints:       make(map[string]*common.Account),
 		launchpadReserves:  make(map[string]*liveReserveStateData),
 		streams:            make(map[string]*liveMintDataStream),
 		exchangeRatesReady: make(chan struct{}),
@@ -78,9 +82,8 @@ func newLiveMintStateWorker(log *zap.Logger, data ocp_data.Provider, conf *conf)
 	}
 }
 
-// start begins the polling goroutines for mints, exchange rates, and reserve state
+// start begins the polling goroutines for exchange rates and reserve state
 func (m *liveMintStateWorker) start(ctx context.Context) error {
-	go m.pollMints(ctx)
 	go m.pollExchangeRates(ctx)
 	go m.pollReserveState(ctx)
 	return nil
@@ -111,52 +114,42 @@ func (m *liveMintStateWorker) getTrackedMints() map[string]*common.Account {
 	return result
 }
 
-func (m *liveMintStateWorker) pollMints(ctx context.Context) {
-	log := m.log.With(zap.String("poller", "mints"))
-
-	// Initial poll immediately
-	m.fetchAndUpdateMints(ctx, log)
-
-	ticker := time.NewTicker(m.conf.mintPollInterval.Get(ctx))
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			m.fetchAndUpdateMints(ctx, log)
+// trackMints validates and adds mints to the tracked set. Only mints that
+// pass IsSupportedMint validation are added. Core mint is excluded. Returns
+// an error if any non-core mint is unsupported or cannot be validated.
+func (m *liveMintStateWorker) trackMints(ctx context.Context, mints []*common.Account) error {
+	for _, mint := range mints {
+		if common.IsCoreMint(mint) {
+			continue
 		}
-	}
-}
 
-func (m *liveMintStateWorker) fetchAndUpdateMints(ctx context.Context, log *zap.Logger) {
-	mintStrings, err := m.data.GetAllCurrencyMints(ctx)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failed to fetch all mints")
-		return
-	}
+		mintAddr := mint.PublicKey().ToBase58()
 
-	mints := make(map[string]*common.Account, len(mintStrings))
-	for _, mintStr := range mintStrings {
-		account, err := common.NewAccountFromPublicKeyString(mintStr)
+		m.mintsMu.RLock()
+		_, alreadyTracked := m.trackedMints[mintAddr]
+		m.mintsMu.RUnlock()
+
+		if alreadyTracked {
+			continue
+		}
+
+		isSupported, err := common.IsSupportedMint(ctx, m.data, mint)
 		if err != nil {
-			log.With(zap.Error(err), zap.String("mint", mintStr)).Warn("failed to parse mint public key")
-			continue
+			return errors.Wrapf(err, "failed to validate mint %s", mintAddr)
 		}
-		if common.IsCoreMint(account) {
-			continue
+		if !isSupported {
+			return errMintNotSupported
 		}
-		mints[mintStr] = account
+
+		m.mintsMu.Lock()
+		m.trackedMints[mintAddr] = mint
+		m.mintsMu.Unlock()
+
+		m.log.With(zap.String("mint", mintAddr)).Debug("tracking new mint from client request")
+
+		go m.fetchAndUpdateReserveState(ctx, mint)
 	}
-
-	m.mintsMu.Lock()
-	m.trackedMints = mints
-	m.mintsMu.Unlock()
-
-	log.With(zap.Int("count", len(mints))).Debug("updated tracked mints")
+	return nil
 }
 
 // registerStream creates and registers a new stream for the given mints
@@ -324,10 +317,8 @@ func (m *liveMintStateWorker) fetchAndUpdateExchangeRates(ctx context.Context, l
 }
 
 func (m *liveMintStateWorker) pollReserveState(ctx context.Context) {
-	log := m.log.With(zap.String("poller", "reserve_state"))
-
 	// Initial poll immediately
-	m.fetchAndUpdateReserveStates(ctx, log)
+	m.fetchAndUpdateReserveStates(ctx)
 
 	ticker := time.NewTicker(m.conf.reserveStatePollInterval.Get(ctx))
 	defer ticker.Stop()
@@ -339,12 +330,51 @@ func (m *liveMintStateWorker) pollReserveState(ctx context.Context) {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
-			m.fetchAndUpdateReserveStates(ctx, log)
+			m.fetchAndUpdateReserveStates(ctx)
 		}
 	}
 }
 
-func (m *liveMintStateWorker) fetchAndUpdateReserveStates(ctx context.Context, log *zap.Logger) {
+// fetchAndUpdateReserveState fetches and updates the reserve state for a single mint.
+// Returns the updated state data, or nil if the fetch failed.
+func (m *liveMintStateWorker) fetchAndUpdateReserveState(ctx context.Context, mint *common.Account) *liveReserveStateData {
+	mintAddr := mint.PublicKey().ToBase58()
+
+	supply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, m.data, mint)
+	if err != nil {
+		m.log.With(
+			zap.Error(err),
+			zap.String("mint", mintAddr),
+		).Warn("failed to fetch launchpad currency circulating supply")
+		return nil
+	}
+
+	signedState, err := m.signReserveState(mint, supply, ts)
+	if err != nil {
+		m.log.With(
+			zap.Error(err),
+			zap.String("mint", mintAddr),
+		).Warn("failed to sign reserve state")
+		return nil
+	}
+
+	m.markReserveStateReady(mint)
+
+	stateData := &liveReserveStateData{
+		Mint:              mint,
+		SupplyFromBonding: supply,
+		Timestamp:         ts,
+		SignedState:       signedState,
+	}
+
+	m.stateMu.Lock()
+	m.launchpadReserves[mintAddr] = stateData
+	m.stateMu.Unlock()
+
+	return stateData
+}
+
+func (m *liveMintStateWorker) fetchAndUpdateReserveStates(ctx context.Context) {
 	trackedMints := m.getTrackedMints()
 
 	var mu sync.Mutex
@@ -352,45 +382,16 @@ func (m *liveMintStateWorker) fetchAndUpdateReserveStates(ctx context.Context, l
 
 	var wg sync.WaitGroup
 	wg.Add(len(trackedMints))
-	for mintAddr, mint := range trackedMints {
-		go func(mintAddr string, mint *common.Account) {
+	for _, mint := range trackedMints {
+		go func(mint *common.Account) {
 			defer wg.Done()
 
-			supply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, m.data, mint)
-			if err != nil {
-				log.With(
-					zap.Error(err),
-					zap.String("mint", mintAddr),
-				).Warn("failed to fetch launchpad currency circulating supply")
-				return
+			if stateData := m.fetchAndUpdateReserveState(ctx, mint); stateData != nil {
+				mu.Lock()
+				updatedStates = append(updatedStates, stateData)
+				mu.Unlock()
 			}
-
-			signedState, err := m.signReserveState(mint, supply, ts)
-			if err != nil {
-				log.With(
-					zap.Error(err),
-					zap.String("mint", mintAddr),
-				).Warn("failed to sign reserve state")
-				return
-			}
-
-			m.markReserveStateReady(mint)
-
-			stateData := &liveReserveStateData{
-				Mint:              mint,
-				SupplyFromBonding: supply,
-				Timestamp:         ts,
-				SignedState:       signedState,
-			}
-
-			m.stateMu.Lock()
-			m.launchpadReserves[mintAddr] = stateData
-			m.stateMu.Unlock()
-
-			mu.Lock()
-			updatedStates = append(updatedStates, stateData)
-			mu.Unlock()
-		}(mintAddr, mint)
+		}(mint)
 	}
 	wg.Wait()
 
