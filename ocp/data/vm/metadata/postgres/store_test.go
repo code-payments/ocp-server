@@ -35,6 +35,9 @@ const (
 			omnibus_bump INTEGER NOT NULL,
 			days_locked INTEGER NOT NULL,
 
+			state INTEGER NOT NULL DEFAULT 0,
+			version INTEGER NOT NULL DEFAULT 0,
+
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 
 			CONSTRAINT ocp__core_vmmetadata__uniq__mint UNIQUE (mint)

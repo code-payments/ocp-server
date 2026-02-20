@@ -246,7 +246,7 @@ type DatabaseData interface {
 
 	// VM Metadata
 	// --------------------------------------------------------------------------------
-	PutVmMetadata(ctx context.Context, record *vm_metadata.Record) error
+	SaveVmMetadata(ctx context.Context, record *vm_metadata.Record) error
 	GetVmMetadataByMint(ctx context.Context, mint string) (*vm_metadata.Record, error)
 
 	// VM Storage
@@ -889,8 +889,8 @@ func (dp *DatabaseProvider) SaveKey(ctx context.Context, record *vault.Record) e
 
 // VM Metadata
 // --------------------------------------------------------------------------------
-func (dp *DatabaseProvider) PutVmMetadata(ctx context.Context, record *vm_metadata.Record) error {
-	return dp.vmMetadata.Put(ctx, record)
+func (dp *DatabaseProvider) SaveVmMetadata(ctx context.Context, record *vm_metadata.Record) error {
+	return dp.vmMetadata.Save(ctx, record)
 }
 func (dp *DatabaseProvider) GetVmMetadataByMint(ctx context.Context, mint string) (*vm_metadata.Record, error) {
 	return dp.vmMetadata.GetByMint(ctx, mint)
