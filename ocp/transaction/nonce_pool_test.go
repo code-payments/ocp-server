@@ -280,6 +280,139 @@ func testLocalNoncePoolUpdateSignature(nt *localNoncePoolTest) {
 	require.Equal(nt.t, "signature2", actual.Signature)
 }
 
+func TestGetNonce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tf   func(*getNonceTest)
+	}{
+		{"HappyPath", testGetNonceHappyPath},
+		{"NoAvailableNonces", testGetNonceNoAvailableNonces},
+		{"FiltersByEnvironmentAndPurpose", testGetNonceFiltersByEnvironmentAndPurpose},
+		{"ReserveWithSignature", testGetNonceReserveWithSignature},
+		{"ReleaseIfNotReserved", testGetNonceReleaseIfNotReserved},
+		{"ReleaseIfNotReserved_AlreadyReserved", testGetNonceReleaseIfNotReserved_AlreadyReserved},
+	} {
+		t.Run(
+			tc.name,
+			func(t *testing.T) {
+				tc.tf(newGetNonceTest(t))
+			},
+		)
+	}
+}
+
+func testGetNonceHappyPath(nt *getNonceTest) {
+	ctx := context.Background()
+
+	nt.initializeNonces(5, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent)
+
+	n, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent, "test-node", time.Minute)
+	require.NoError(nt.t, err)
+	require.NotNil(nt.t, n)
+
+	// Verify the returned Nonce has correct fields
+	require.NotNil(nt.t, n.Account)
+	require.Equal(nt.t, n.Account.PublicKey().ToBase58(), n.record.Address)
+	require.Equal(nt.t, base58.Encode(n.Blockhash[:]), n.record.Blockhash)
+
+	// Nonce should have no pool reference
+	require.Nil(nt.t, n.pool)
+
+	// Verify DB state
+	actual, err := nt.data.GetNonce(ctx, n.record.Address)
+	require.NoError(nt.t, err)
+	require.Equal(nt.t, nonce.StateClaimed, actual.State)
+	require.Equal(nt.t, "test-node", *actual.ClaimNodeID)
+	require.NotNil(nt.t, actual.ClaimExpiresAt)
+}
+
+func testGetNonceNoAvailableNonces(nt *getNonceTest) {
+	ctx := context.Background()
+
+	// No nonces initialized, should get ErrNoAvailableNonces
+	_, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent, "test-node", time.Minute)
+	require.ErrorIs(nt.t, err, ErrNoAvailableNonces)
+}
+
+func testGetNonceFiltersByEnvironmentAndPurpose(nt *getNonceTest) {
+	ctx := context.Background()
+
+	// Initialize nonces only for a specific env/purpose
+	nt.initializeNonces(3, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaDevnet, nonce.PurposeOnDemandTransaction)
+
+	// Requesting a different env/purpose should fail
+	_, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent, "test-node", time.Minute)
+	require.ErrorIs(nt.t, err, ErrNoAvailableNonces)
+
+	// Requesting the correct env/purpose should succeed
+	n, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaDevnet, nonce.PurposeOnDemandTransaction, "test-node", time.Minute)
+	require.NoError(nt.t, err)
+	require.NotNil(nt.t, n)
+
+	actual, err := nt.data.GetNonce(ctx, n.record.Address)
+	require.NoError(nt.t, err)
+	require.Equal(nt.t, nonce.EnvironmentSolana, actual.Environment)
+	require.Equal(nt.t, nonce.EnvironmentInstanceSolanaDevnet, actual.EnvironmentInstance)
+	require.Equal(nt.t, nonce.PurposeOnDemandTransaction, actual.Purpose)
+}
+
+func testGetNonceReserveWithSignature(nt *getNonceTest) {
+	ctx := context.Background()
+
+	nt.initializeNonces(1, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent)
+
+	n, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent, "test-node", time.Minute)
+	require.NoError(nt.t, err)
+
+	// Reserve with a signature
+	require.NoError(nt.t, n.MarkReservedWithSignature(ctx, "test-sig"))
+
+	actual, err := nt.data.GetNonce(ctx, n.record.Address)
+	require.NoError(nt.t, err)
+	require.Equal(nt.t, nonce.StateReserved, actual.State)
+	require.Equal(nt.t, "test-sig", actual.Signature)
+	require.Nil(nt.t, actual.ClaimNodeID)
+	require.Nil(nt.t, actual.ClaimExpiresAt)
+}
+
+func testGetNonceReleaseIfNotReserved(nt *getNonceTest) {
+	ctx := context.Background()
+
+	nt.initializeNonces(1, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent)
+
+	n, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent, "test-node", time.Minute)
+	require.NoError(nt.t, err)
+
+	// Release without reserving — should go back to Available in DB
+	n.ReleaseIfNotReserved(ctx)
+
+	actual, err := nt.data.GetNonce(ctx, n.record.Address)
+	require.NoError(nt.t, err)
+	require.Equal(nt.t, nonce.StateAvailable, actual.State)
+	require.Nil(nt.t, actual.ClaimNodeID)
+	require.Nil(nt.t, actual.ClaimExpiresAt)
+}
+
+func testGetNonceReleaseIfNotReserved_AlreadyReserved(nt *getNonceTest) {
+	ctx := context.Background()
+
+	nt.initializeNonces(1, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent)
+
+	n, err := GetNonce(ctx, nt.data, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeClientIntent, "test-node", time.Minute)
+	require.NoError(nt.t, err)
+
+	// Reserve with signature first
+	require.NoError(nt.t, n.MarkReservedWithSignature(ctx, "test-sig"))
+
+	// Release should be a no-op since it's already reserved
+	n.ReleaseIfNotReserved(ctx)
+
+	actual, err := nt.data.GetNonce(ctx, n.record.Address)
+	require.NoError(nt.t, err)
+	require.Equal(nt.t, nonce.StateReserved, actual.State)
+	require.Equal(nt.t, "test-sig", actual.Signature)
+}
+
 type localNoncePoolTest struct {
 	t    *testing.T
 	pool *LocalNoncePool
@@ -328,5 +461,36 @@ func (np *localNoncePoolTest) initializeNonces(amount int, env nonce.Environment
 			State:               nonce.StateAvailable,
 		})
 		require.NoError(np.t, err)
+	}
+}
+
+type getNonceTest struct {
+	t    *testing.T
+	data ocp_data.Provider
+}
+
+func newGetNonceTest(t *testing.T) *getNonceTest {
+	data := ocp_data.NewTestDataProvider()
+	testutil.SetupRandomSubsidizer(t, data)
+	return &getNonceTest{
+		t:    t,
+		data: data,
+	}
+}
+
+func (nt *getNonceTest) initializeNonces(amount int, env nonce.Environment, envInstance string, purpose nonce.Purpose) {
+	for range amount {
+		var bh solana.Blockhash
+		rand.Read(bh[:])
+		err := nt.data.SaveNonce(context.Background(), &nonce.Record{
+			Address:             testutil.NewRandomAccount(nt.t).PublicKey().ToBase58(),
+			Blockhash:           base58.Encode(bh[:]),
+			Authority:           common.GetSubsidizer().PublicKey().ToBase58(),
+			Environment:         env,
+			EnvironmentInstance: envInstance,
+			Purpose:             purpose,
+			State:               nonce.StateAvailable,
+		})
+		require.NoError(nt.t, err)
 	}
 }

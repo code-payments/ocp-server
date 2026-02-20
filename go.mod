@@ -1,6 +1,6 @@
 module github.com/code-payments/ocp-server
 
-go 1.25.0
+go 1.26.0
 
 require (
 	filippo.io/edwards25519 v1.1.0
