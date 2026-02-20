@@ -33,6 +33,7 @@ type transactionServer struct {
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
 
+	nodeID     string
 	noncePools []*transaction.LocalNoncePool
 
 	localAccountLocksMu sync.Mutex
@@ -53,6 +54,7 @@ func NewTransactionServer(
 	airdropIntegration AirdropIntegration,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
+	nodeID string,
 	noncePools []*transaction.LocalNoncePool,
 	configProvider ConfigProvider,
 ) (transactionpb.TransactionServer, error) {
@@ -99,6 +101,7 @@ func NewTransactionServer(
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
 
+		nodeID:     nodeID,
 		noncePools: noncePools,
 
 		localAccountLocks: make(map[string]*sync.Mutex),
