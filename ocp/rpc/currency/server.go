@@ -85,6 +85,23 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 	log := s.log.With(zap.String("method", "GetMints"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
+	// Track all requested mints so the worker polls their reserve state
+	var requestedMints []*common.Account
+	for _, protoMintAddress := range req.Addresses {
+		mintAccount, err := common.NewAccountFromProto(protoMintAddress)
+		if err != nil {
+			continue
+		}
+		requestedMints = append(requestedMints, mintAccount)
+	}
+	if err := s.liveMintStateWorker.trackMints(ctx, requestedMints); err != nil {
+		if err == errMintNotSupported {
+			return &currencypb.GetMintsResponse{Result: currencypb.GetMintsResponse_NOT_FOUND}, nil
+		}
+		log.With(zap.Error(err)).Warn("failed to track requested mints")
+		return nil, status.Error(codes.Internal, "")
+	}
+
 	resp := &currencypb.GetMintsResponse{
 		MetadataByAddress: make(map[string]*currencypb.Mint),
 	}
@@ -189,9 +206,9 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			err = s.liveMintStateWorker.waitForData(ctx)
+			err = s.liveMintStateWorker.waitForReserveState(ctx, mintAccount)
 			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to wait for live mint data")
+				log.With(zap.Error(err)).Warn("failed to wait for live mint reserve state")
 				return nil, status.Error(codes.Internal, "")
 			}
 
@@ -634,6 +651,12 @@ func (s *currencyServer) StreamLiveMintData(
 		requestedMints = append(requestedMints, mint)
 	}
 
+	// Track requested mints so the worker polls their reserve state
+	if err := s.liveMintStateWorker.trackMints(ctx, requestedMints); err != nil {
+		log.With(zap.Error(err)).Warn("failed to track requested mints")
+		return status.Error(codes.Internal, "")
+	}
+
 	// Generate unique stream ID
 	streamID := uuid.New().String()
 	log = log.With(zap.String("stream_id", streamID))
@@ -644,14 +667,13 @@ func (s *currencyServer) StreamLiveMintData(
 
 	log.Debug("stream registered")
 
-	// Wait for initial data to be available
-	if err := s.liveMintStateWorker.waitForData(ctx); err != nil {
-		log.With(zap.Error(err)).Debug("context cancelled while waiting for data")
-		return status.Error(codes.Canceled, "")
-	}
-
-	// Initial flush: send current exchange rates if the stream wants them
+	// Wait for and flush initial exchange rates if the stream wants them
 	if stream.wantsExchangeRates() {
+		if err := s.liveMintStateWorker.waitForExchangeRates(ctx); err != nil {
+			log.With(zap.Error(err)).Debug("context cancelled while waiting for exchange rates")
+			return status.Error(codes.Canceled, "")
+		}
+
 		exchangeRates := s.liveMintStateWorker.getExchangeRates()
 		if exchangeRates != nil && exchangeRates.SignedResponse != nil {
 			if err := streamer.Send(exchangeRates.SignedResponse); err != nil {
@@ -661,32 +683,42 @@ func (s *currencyServer) StreamLiveMintData(
 		}
 	}
 
-	// Initial flush: send current reserve states
-	reserveStates := s.liveMintStateWorker.getReserveStates()
-	if len(reserveStates) > 0 {
-		// Filter based on requested mints and build batch response
-		var filtered []*currencypb.VerifiedLaunchpadCurrencyReserveState
-		for _, state := range reserveStates {
-			if stream.wantsMint(state.Mint.PublicKey().ToBase58()) && state.SignedState != nil {
-				filtered = append(filtered, state.SignedState)
-			}
+	// Wait for and flush initial reserve states for each requested mint
+	var filtered []*currencypb.VerifiedLaunchpadCurrencyReserveState
+	for _, mint := range requestedMints {
+		if common.IsCoreMint(mint) {
+			continue
 		}
-		if len(filtered) > 0 {
-			resp := &currencypb.StreamLiveMintDataResponse{
-				Type: &currencypb.StreamLiveMintDataResponse_Data{
-					Data: &currencypb.StreamLiveMintDataResponse_LiveData{
-						Type: &currencypb.StreamLiveMintDataResponse_LiveData_LaunchpadCurrencyReserveStates{
-							LaunchpadCurrencyReserveStates: &currencypb.VerifiedLaunchapdCurrencyReserveStateBatch{
-								ReserveStates: filtered,
-							},
+
+		err := s.liveMintStateWorker.waitForReserveState(ctx, mint)
+		if err != nil {
+			log.With(zap.Error(err)).Debug("context cancelled while waiting for reserve state")
+			return status.Error(codes.Canceled, "")
+		}
+
+		state, err := s.liveMintStateWorker.getReserveState(mint)
+		if err != nil {
+			continue
+		}
+		if state.SignedState != nil {
+			filtered = append(filtered, state.SignedState)
+		}
+	}
+	if len(filtered) > 0 {
+		resp := &currencypb.StreamLiveMintDataResponse{
+			Type: &currencypb.StreamLiveMintDataResponse_Data{
+				Data: &currencypb.StreamLiveMintDataResponse_LiveData{
+					Type: &currencypb.StreamLiveMintDataResponse_LiveData_LaunchpadCurrencyReserveStates{
+						LaunchpadCurrencyReserveStates: &currencypb.VerifiedLaunchapdCurrencyReserveStateBatch{
+							ReserveStates: filtered,
 						},
 					},
 				},
-			}
-			if err := streamer.Send(resp); err != nil {
-				log.With(zap.Error(err)).Debug("failed to send initial reserve states")
-				return err
-			}
+			},
+		}
+		if err := streamer.Send(resp); err != nil {
+			log.With(zap.Error(err)).Debug("failed to send initial reserve states")
+			return err
 		}
 	}
 

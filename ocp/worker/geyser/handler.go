@@ -7,7 +7,6 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
-	"github.com/code-payments/ocp-server/ocp/config"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 
 	"github.com/code-payments/ocp-server/ocp/common"
@@ -76,57 +75,44 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		return errors.Wrap(err, "invalid owner account")
 	}
 
+	// Not an ATA, so filter it out. It cannot be a VM deposit ATA
+	if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
+		return nil
+	}
+
 	mintAccount, err := common.NewAccountFromPublicKeyBytes(unmarshalled.Mint)
 	if err != nil {
 		return errors.Wrap(err, "invalid mint account")
 	}
 
-	switch mintAccount.PublicKey().ToBase58() {
-
-	// todo: Don't hardcode Jeffy and other Flipcash currencies
-	case common.CoreMintAccount.PublicKey().ToBase58(),
-		config.BadBoysMintPublicKey,
-		config.BluebucksMintPublicKey,
-		config.BitsMintPublicKey,
-		config.BogeyMintPublicKey,
-		config.FloatMintPublicKey,
-		config.JeffyMintPublicKey,
-		config.LightspeedMintPublicKey,
-		config.LinksMintPublicKey,
-		config.MarketCoinMintPublicKey,
-		config.MoonyMintPublicKey,
-		config.TeddiesMintPublicKey,
-		config.TestMintPublicKey,
-		config.ToshiMintPublicKey,
-		config.XpMintPublicKey:
-		// Not an ATA, so filter it out. It cannot be a VM deposit ATA
-		if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
-			return nil
-		}
-
-		exists, userAuthorityAccount, err := testForKnownUserAuthorityFromDepositPda(ctx, h.data, ownerAccount)
-		if err != nil {
-			return errors.Wrap(err, "error testing for user authority from deposit pda")
-		} else if !exists {
-			return nil
-		}
-
-		err = processPotentialExternalDepositIntoVm(ctx, h.data, h.integration, signature, userAuthorityAccount, mintAccount)
-		if err != nil {
-			return errors.Wrap(err, "error processing signature for external deposit into vm")
-		}
-
-		if unmarshalled.Amount > 0 {
-			err = initiateExternalDepositIntoVm(ctx, h.data, userAuthorityAccount, mintAccount, unmarshalled.Amount)
-			if err != nil {
-				return errors.Wrap(err, "error depositing into the vm")
-			}
-		}
-
-		return nil
-	default:
+	isSupportedMint, err := common.IsSupportedMint(ctx, h.data, mintAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if mint is supported")
+	}
+	if !isSupportedMint {
 		return nil
 	}
+
+	exists, userAuthorityAccount, err := testForKnownUserAuthorityFromDepositPda(ctx, h.data, ownerAccount)
+	if err != nil {
+		return errors.Wrap(err, "error testing for user authority from deposit pda")
+	} else if !exists {
+		return nil
+	}
+
+	err = processPotentialExternalDepositIntoVm(ctx, h.data, h.integration, signature, userAuthorityAccount, mintAccount)
+	if err != nil {
+		return errors.Wrap(err, "error processing signature for external deposit into vm")
+	}
+
+	if unmarshalled.Amount > 0 {
+		err = initiateExternalDepositIntoVm(ctx, h.data, userAuthorityAccount, mintAccount, unmarshalled.Amount)
+		if err != nil {
+			return errors.Wrap(err, "error depositing into the vm")
+		}
+	}
+
+	return nil
 }
 
 func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, integration Integration) map[string]ProgramAccountUpdateHandler {

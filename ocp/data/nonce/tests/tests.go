@@ -22,7 +22,8 @@ func RunTests(t *testing.T, s nonce.Store, teardown func()) {
 		testRoundTrip,
 		testUpdateHappyPath,
 		testUpdateStaleRecord,
-		testGetAllByState,
+		testGetAllByEnvironmentInstanceAndState,
+		testGetAllByEnvironmentAndState,
 		testGetCount,
 		testBatchClaimAvailableByPurpose,
 		testBatchClaimAvailableByPurposeExpirationRandomness,
@@ -156,8 +157,8 @@ func testUpdateStaleRecord(t *testing.T, s nonce.Store) {
 	})
 }
 
-func testGetAllByState(t *testing.T, s nonce.Store) {
-	t.Run("testGetAllByState", func(t *testing.T) {
+func testGetAllByEnvironmentInstanceAndState(t *testing.T, s nonce.Store) {
+	t.Run("testGetAllByEnvironmentInstanceAndState", func(t *testing.T) {
 		ctx := context.Background()
 
 		expected := []nonce.Record{
@@ -179,33 +180,33 @@ func testGetAllByState(t *testing.T, s nonce.Store) {
 		}
 
 		// Simple get all by state
-		actual, err := s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Ascending)
+		actual, err := s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 3, len(actual))
 
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateUnknown, query.EmptyCursor, 5, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateUnknown, query.EmptyCursor, 5, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 1, len(actual))
 
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateInvalid, query.EmptyCursor, 5, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateInvalid, query.EmptyCursor, 5, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 2, len(actual))
 
 		// Simple get all by state (reverse)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 3, len(actual))
 
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateUnknown, query.EmptyCursor, 5, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateUnknown, query.EmptyCursor, 5, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 1, len(actual))
 
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateInvalid, query.EmptyCursor, 5, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateInvalid, query.EmptyCursor, 5, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 2, len(actual))
 
 		// Check items (asc)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 3, len(actual))
 		assert.Equal(t, "t3", actual[0].Address)
@@ -213,7 +214,7 @@ func testGetAllByState(t *testing.T, s nonce.Store) {
 		assert.Equal(t, "t5", actual[2].Address)
 
 		// Check items (desc)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 5, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 3, len(actual))
 		assert.Equal(t, "t5", actual[0].Address)
@@ -221,21 +222,21 @@ func testGetAllByState(t *testing.T, s nonce.Store) {
 		assert.Equal(t, "t3", actual[2].Address)
 
 		// Check items (asc + limit)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 2, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 2, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 2, len(actual))
 		assert.Equal(t, "t3", actual[0].Address)
 		assert.Equal(t, "t4", actual[1].Address)
 
 		// Check items (desc + limit)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 2, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.EmptyCursor, 2, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 2, len(actual))
 		assert.Equal(t, "t5", actual[0].Address)
 		assert.Equal(t, "t4", actual[1].Address)
 
 		// Check items (asc + cursor)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(1), 5, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(1), 5, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 3, len(actual))
 		assert.Equal(t, "t3", actual[0].Address)
@@ -243,7 +244,7 @@ func testGetAllByState(t *testing.T, s nonce.Store) {
 		assert.Equal(t, "t5", actual[2].Address)
 
 		// Check items (desc + cursor)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(6), 5, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(6), 5, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 3, len(actual))
 		assert.Equal(t, "t5", actual[0].Address)
@@ -251,23 +252,95 @@ func testGetAllByState(t *testing.T, s nonce.Store) {
 		assert.Equal(t, "t3", actual[2].Address)
 
 		// Check items (asc + cursor)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(3), 5, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(3), 5, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 2, len(actual))
 		assert.Equal(t, "t4", actual[0].Address)
 		assert.Equal(t, "t5", actual[1].Address)
 
 		// Check items (desc + cursor)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(4), 5, query.Descending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(4), 5, query.Descending)
 		require.NoError(t, err)
 		assert.Equal(t, 1, len(actual))
 		assert.Equal(t, "t3", actual[0].Address)
 
 		// Check items (asc + cursor + limit)
-		actual, err = s.GetAllByState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(3), 1, query.Ascending)
+		actual, err = s.GetAllByEnvironmentInstanceAndState(ctx, nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.StateReserved, query.ToCursor(3), 1, query.Ascending)
 		require.NoError(t, err)
 		assert.Equal(t, 1, len(actual))
 		assert.Equal(t, "t4", actual[0].Address)
+	})
+}
+
+func testGetAllByEnvironmentAndState(t *testing.T, s nonce.Store) {
+	t.Run("testGetAllByEnvironmentAndState", func(t *testing.T) {
+		ctx := context.Background()
+
+		records := []nonce.Record{
+			{Address: "vm1", Authority: "a1", Blockhash: "b1", Environment: nonce.EnvironmentVm, EnvironmentInstance: "vm_pubkey_1", Purpose: nonce.PurposeOnDemandTransaction, State: nonce.StateReleased, Signature: "s1"},
+			{Address: "vm2", Authority: "a2", Blockhash: "b2", Environment: nonce.EnvironmentVm, EnvironmentInstance: "vm_pubkey_2", Purpose: nonce.PurposeOnDemandTransaction, State: nonce.StateReleased, Signature: "s2"},
+			{Address: "vm3", Authority: "a3", Blockhash: "b3", Environment: nonce.EnvironmentVm, EnvironmentInstance: "vm_pubkey_1", Purpose: nonce.PurposeOnDemandTransaction, State: nonce.StateAvailable, Signature: "s3"},
+			{Address: "sol1", Authority: "a4", Blockhash: "b4", Environment: nonce.EnvironmentSolana, EnvironmentInstance: nonce.EnvironmentInstanceSolanaMainnet, Purpose: nonce.PurposeOnDemandTransaction, State: nonce.StateReleased, Signature: "s4"},
+		}
+
+		for _, item := range records {
+			err := s.Save(ctx, &item)
+			require.NoError(t, err)
+		}
+
+		// Should return released VM nonces across all instances (asc)
+		actual, err := s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateReleased, query.EmptyCursor, 10, query.Ascending)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(actual))
+		assert.Equal(t, "vm1", actual[0].Address)
+		assert.Equal(t, "vm2", actual[1].Address)
+
+		// Should return released VM nonces across all instances (desc)
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateReleased, query.EmptyCursor, 10, query.Descending)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(actual))
+		assert.Equal(t, "vm2", actual[0].Address)
+		assert.Equal(t, "vm1", actual[1].Address)
+
+		// Should return available VM nonces across all instances
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateAvailable, query.EmptyCursor, 10, query.Ascending)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(actual))
+		assert.Equal(t, "vm3", actual[0].Address)
+
+		// Should return released Solana nonces across all instances
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentSolana, nonce.StateReleased, query.EmptyCursor, 10, query.Ascending)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(actual))
+		assert.Equal(t, "sol1", actual[0].Address)
+
+		// Should return not found for non-existent combination
+		_, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentSolana, nonce.StateAvailable, query.EmptyCursor, 10, query.Ascending)
+		assert.Equal(t, nonce.ErrNonceNotFound, err)
+
+		// Test pagination with limit (asc)
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateReleased, query.EmptyCursor, 1, query.Ascending)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(actual))
+		assert.Equal(t, "vm1", actual[0].Address)
+
+		// Test pagination with cursor (asc)
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateReleased, query.ToCursor(actual[0].Id), 10, query.Ascending)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(actual))
+		assert.Equal(t, "vm2", actual[0].Address)
+
+		// Test pagination with limit (desc)
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateReleased, query.EmptyCursor, 1, query.Descending)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(actual))
+		assert.Equal(t, "vm2", actual[0].Address)
+
+		// Test pagination with cursor (desc)
+		actual, err = s.GetAllByEnvironmentAndState(ctx, nonce.EnvironmentVm, nonce.StateReleased, query.ToCursor(actual[0].Id), 10, query.Descending)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(actual))
+		assert.Equal(t, "vm1", actual[0].Address)
 	})
 }
 

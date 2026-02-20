@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
+	"time"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	"github.com/code-payments/ocp-server/ocp/config"
@@ -22,21 +24,15 @@ var (
 
 	ErrUnsupportedMint = errors.New("unsupported mint")
 
-	badBoysMintAccount, _    = NewAccountFromPublicKeyString(config.BadBoysMintPublicKey)
-	bluebucksMintAccount, _  = NewAccountFromPublicKeyString(config.BluebucksMintPublicKey)
-	bitsMintAccount, _       = NewAccountFromPublicKeyString(config.BitsMintPublicKey)
-	bogeyMintAccount, _      = NewAccountFromPublicKeyString(config.BogeyMintPublicKey)
-	floatMintAccount, _      = NewAccountFromPublicKeyString(config.FloatMintPublicKey)
-	jeffyMintAccount, _      = NewAccountFromPublicKeyString(config.JeffyMintPublicKey)
-	lightspeedMintAccount, _ = NewAccountFromPublicKeyString(config.LightspeedMintPublicKey)
-	linksMintAccount, _      = NewAccountFromPublicKeyString(config.LinksMintPublicKey)
-	marketCoinMintAccount, _ = NewAccountFromPublicKeyString(config.MarketCoinMintPublicKey)
-	moonyMintAccount, _      = NewAccountFromPublicKeyString(config.MoonyMintPublicKey)
-	teddiesMintAccount, _    = NewAccountFromPublicKeyString(config.TeddiesMintPublicKey)
-	testMintAccount, _       = NewAccountFromPublicKeyString(config.TestMintPublicKey)
-	toshiMintAccount, _      = NewAccountFromPublicKeyString(config.ToshiMintPublicKey)
-	xpMintAccount, _         = NewAccountFromPublicKeyString(config.XpMintPublicKey)
+	supportedMintCacheMu  sync.RWMutex
+	supportedMintCache    = make(map[string]supportedMintCacheEntry)
+	supportedMintCacheTTL = 1 * time.Minute
 )
+
+type supportedMintCacheEntry struct {
+	isSupported bool
+	cachedAt    time.Time
+}
 
 func GetBackwardsCompatMint(protoMint *commonpb.SolanaAccountId) (*Account, error) {
 	if protoMint == nil {
@@ -75,6 +71,31 @@ func GetMintQuarksPerUnit(mint *Account) uint64 {
 }
 
 func IsSupportedMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (bool, error) {
+	mintAddress := mintAccount.PublicKey().ToBase58()
+
+	supportedMintCacheMu.RLock()
+	entry, ok := supportedMintCache[mintAddress]
+	supportedMintCacheMu.RUnlock()
+	if ok && time.Since(entry.cachedAt) < supportedMintCacheTTL {
+		return entry.isSupported, nil
+	}
+
+	isSupported, err := isSupportedMint(ctx, data, mintAccount)
+	if err != nil {
+		return false, err
+	}
+
+	supportedMintCacheMu.Lock()
+	supportedMintCache[mintAddress] = supportedMintCacheEntry{
+		isSupported: isSupported,
+		cachedAt:    time.Now(),
+	}
+	supportedMintCacheMu.Unlock()
+
+	return isSupported, nil
+}
+
+func isSupportedMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (bool, error) {
 	if !IsCoreMint(mintAccount) && !IsCoreMintUsdStableCoin() {
 		return false, nil
 	}

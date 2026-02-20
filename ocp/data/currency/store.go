@@ -49,6 +49,11 @@ type Store interface {
 	// GetMetadata gets currency creator mint metadata by the mint address
 	GetMetadata(ctx context.Context, mint string) (*MetadataRecord, error)
 
+	// GetAllMints returns the public keys of all currency creator mints
+	//
+	// ErrNotFound is returned if no mints exist
+	GetAllMints(ctx context.Context) ([]string, error)
+
 	// PutReserveRecord puts a currency creator mint reserve records into the store.
 	PutReserveRecord(ctx context.Context, record *ReserveRecord) error
 

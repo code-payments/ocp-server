@@ -137,6 +137,7 @@ type DatabaseData interface {
 	ImportExchangeRates(ctx context.Context, record *currency.MultiRateRecord) error
 	PutCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error
 	GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error)
+	GetAllCurrencyMints(ctx context.Context) ([]string, error)
 	PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
 	GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
 	GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error)
@@ -190,7 +191,8 @@ type DatabaseData interface {
 	GetNonceCount(ctx context.Context, env nonce.Environment, instance string) (uint64, error)
 	GetNonceCountByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State) (uint64, error)
 	GetNonceCountByStateAndPurpose(ctx context.Context, env nonce.Environment, instance string, state nonce.State, purpose nonce.Purpose) (uint64, error)
-	GetAllNonceByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error)
+	GetAllNoncesByEnvironmentInstanceAndState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error)
+	GetAllNoncesByEnvironmentAndState(ctx context.Context, env nonce.Environment, state nonce.State, opts ...query.Option) ([]*nonce.Record, error)
 	BatchClaimAvailableNoncesByPurpose(ctx context.Context, env nonce.Environment, instance string, purpose nonce.Purpose, limit int, nodeID string, minExpireAt, maxExpireAt time.Time) ([]*nonce.Record, error)
 	SaveNonce(ctx context.Context, record *nonce.Record) error
 
@@ -522,6 +524,9 @@ func (dp *DatabaseProvider) PutCurrencyMetadata(ctx context.Context, record *cur
 func (dp *DatabaseProvider) GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error) {
 	return dp.currencies.GetMetadata(ctx, mint)
 }
+func (dp *DatabaseProvider) GetAllCurrencyMints(ctx context.Context) ([]string, error) {
+	return dp.currencies.GetAllMints(ctx)
+}
 func (dp *DatabaseProvider) PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
 	return dp.currencies.PutReserveRecord(ctx, record)
 }
@@ -681,13 +686,21 @@ func (dp *DatabaseProvider) GetNonceCountByState(ctx context.Context, env nonce.
 func (dp *DatabaseProvider) GetNonceCountByStateAndPurpose(ctx context.Context, env nonce.Environment, instance string, state nonce.State, purpose nonce.Purpose) (uint64, error) {
 	return dp.nonces.CountByStateAndPurpose(ctx, env, instance, state, purpose)
 }
-func (dp *DatabaseProvider) GetAllNonceByState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error) {
+func (dp *DatabaseProvider) GetAllNoncesByEnvironmentInstanceAndState(ctx context.Context, env nonce.Environment, instance string, state nonce.State, opts ...query.Option) ([]*nonce.Record, error) {
 	req, err := query.DefaultPaginationHandler(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	return dp.nonces.GetAllByState(ctx, env, instance, state, req.Cursor, req.Limit, req.SortBy)
+	return dp.nonces.GetAllByEnvironmentInstanceAndState(ctx, env, instance, state, req.Cursor, req.Limit, req.SortBy)
+}
+func (dp *DatabaseProvider) GetAllNoncesByEnvironmentAndState(ctx context.Context, env nonce.Environment, state nonce.State, opts ...query.Option) ([]*nonce.Record, error) {
+	req, err := query.DefaultPaginationHandler(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return dp.nonces.GetAllByEnvironmentAndState(ctx, env, state, req.Cursor, req.Limit, req.SortBy)
 }
 func (dp *DatabaseProvider) BatchClaimAvailableNoncesByPurpose(ctx context.Context, env nonce.Environment, instance string, purpose nonce.Purpose, limit int, nodeID string, minExpireAt, maxExpireAt time.Time) ([]*nonce.Record, error) {
 	return dp.nonces.BatchClaimAvailableByPurpose(ctx, env, instance, purpose, limit, nodeID, minExpireAt, maxExpireAt)

@@ -124,6 +124,10 @@ func (s *store) GetMetadata(ctx context.Context, mint string) (*currency.Metadat
 	return fromMetadataModel(model), nil
 }
 
+func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
+	return dbGetAllMints(ctx, s.db)
+}
+
 func (s *store) PutReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {
 	model, err := toReserveModel(record)
 	if err != nil {
