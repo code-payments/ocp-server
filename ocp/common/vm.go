@@ -6,6 +6,7 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 )
 
@@ -43,14 +44,27 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 		return cached, nil
 	}
 
-	record, err := data.GetVmMetadataByMint(ctx, mintAddress)
+	currencyMetadataRecord, err := data.GetCurrencyMetadata(ctx, mintAddress)
+	if err == currency.ErrNotFound {
+		return nil, ErrUnsupportedMint
+	} else if err != nil {
+		return nil, err
+	}
+	if currencyMetadataRecord.State != currency.MetadataStateAvailable {
+		return nil, ErrUnsupportedMint
+	}
+
+	vmMetadataRecord, err := data.GetVmMetadataByMint(ctx, mintAddress)
 	if err == vm_metadata.ErrNotFound {
 		return nil, ErrUnsupportedMint
 	} else if err != nil {
 		return nil, err
 	}
+	if vmMetadataRecord.State != vm_metadata.StateAvailable {
+		return nil, ErrUnsupportedMint
+	}
 
-	vaultRecord, err := data.GetKey(ctx, record.Authority)
+	vaultRecord, err := data.GetKey(ctx, vmMetadataRecord.Authority)
 	if err != nil {
 		return nil, err
 	}
@@ -60,12 +74,12 @@ func GetVmConfigForMint(ctx context.Context, data ocp_data.Provider, mintAccount
 		return nil, err
 	}
 
-	vmAccount, err := NewAccountFromPublicKeyString(record.Vm)
+	vmAccount, err := NewAccountFromPublicKeyString(vmMetadataRecord.Vm)
 	if err != nil {
 		return nil, err
 	}
 
-	omnibusAccount, err := NewAccountFromPublicKeyString(record.Omnibus)
+	omnibusAccount, err := NewAccountFromPublicKeyString(vmMetadataRecord.Omnibus)
 	if err != nil {
 		return nil, err
 	}
