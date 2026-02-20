@@ -168,6 +168,9 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				log.With(zap.Error(err)).Warn("failed to load currency metadata record")
 				return nil, status.Error(codes.Internal, "")
 			}
+			if metadataRecord.State != currency.MetadataStateAvailable {
+				return &currencypb.GetMintsResponse{Result: currencypb.GetMintsResponse_NOT_FOUND}, nil
+			}
 
 			vmConfig, err := common.GetVmConfigForMint(ctx, s.data, mintAccount)
 			if err != nil {
@@ -345,6 +348,11 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load currency metadata")
 		return nil, status.Error(codes.Internal, "")
+	}
+	if metadataRecord.State != currency.MetadataStateAvailable {
+		return &currencypb.GetHistoricalMintDataResponse{
+			Result: currencypb.GetHistoricalMintDataResponse_NOT_FOUND,
+		}, nil
 	}
 
 	// Determine the time range and interval based on the predefined range.
