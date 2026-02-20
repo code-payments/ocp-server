@@ -7,6 +7,14 @@ import (
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
+type MetadataState uint8
+
+const (
+	MetadataStateUnknown MetadataState = iota
+	MetadataStateAvailable
+	// todo: define more states
+)
+
 type SocialLinkType uint8
 
 const (
@@ -65,6 +73,9 @@ type MetadataRecord struct {
 	SellFeeBps uint16
 
 	Alt string
+
+	State   MetadataState
+	Version uint64
 
 	CreatedBy string
 	CreatedAt time.Time
@@ -197,6 +208,9 @@ func (m *MetadataRecord) Clone() *MetadataRecord {
 
 		Alt: m.Alt,
 
+		State:   m.State,
+		Version: m.Version,
+
 		CreatedBy: m.CreatedBy,
 		CreatedAt: m.CreatedAt,
 	}
@@ -235,6 +249,9 @@ func (m *MetadataRecord) CopyTo(dst *MetadataRecord) {
 	dst.SellFeeBps = m.SellFeeBps
 
 	dst.Alt = m.Alt
+
+	dst.State = m.State
+	dst.Version = m.Version
 
 	dst.CreatedBy = m.CreatedBy
 	dst.CreatedAt = m.CreatedAt

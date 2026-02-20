@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 )
 
 const (
@@ -158,7 +158,7 @@ func (s *store) GetExchangeRatesInRange(ctx context.Context, symbol string, inte
 	return all, nil
 }
 
-func (s *store) PutMetadata(ctx context.Context, data *currency.MetadataRecord) error {
+func (s *store) SaveMetadata(ctx context.Context, data *currency.MetadataRecord) error {
 	if err := data.Validate(); err != nil {
 		return err
 	}
@@ -166,13 +166,20 @@ func (s *store) PutMetadata(ctx context.Context, data *currency.MetadataRecord) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Not ideal but fine for testing the currency store
-	for _, item := range s.metadataRecords {
+	for i, item := range s.metadataRecords {
 		if item.Mint == data.Mint {
-			return currency.ErrExists
+			if item.Version != data.Version {
+				return currency.ErrStaleMetadataVersion
+			}
+
+			data.Version = item.Version + 1
+			data.Id = item.Id
+			s.metadataRecords[i] = data.Clone()
+			return nil
 		}
 	}
 
+	data.Version = 1
 	data.Id = s.lastMetadataIndex
 	s.metadataRecords = append(s.metadataRecords, data.Clone())
 	s.lastMetadataIndex = s.lastMetadataIndex + 1

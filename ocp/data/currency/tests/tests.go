@@ -18,6 +18,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testExchangeRateRoundTrip,
 		testGetExchangeRatesInRange,
 		testMetadataRoundTrip,
+		testMetadataSaveWithVersioning,
 		testGetAllMints,
 		testReserveRoundTrip,
 		testGetReservesInRange,
@@ -181,12 +182,15 @@ func testMetadataRoundTrip(t *testing.T, s currency.Store) {
 	assert.Equal(t, currency.ErrNotFound, err)
 
 	cloned := expected.Clone()
-	require.NoError(t, s.PutMetadata(context.Background(), expected))
+	require.NoError(t, s.SaveMetadata(context.Background(), expected))
 	assert.EqualValues(t, 1, expected.Id)
+	assert.EqualValues(t, 1, expected.Version)
 
 	actual, err := s.GetMetadata(context.Background(), expected.Mint)
 	require.NoError(t, err)
 	assertEquivalentMetadataRecords(t, cloned, actual)
+	assert.EqualValues(t, currency.MetadataStateUnknown, actual.State)
+	assert.EqualValues(t, 1, actual.Version)
 }
 
 func testGetAllMints(t *testing.T, s currency.Store) {
@@ -243,8 +247,8 @@ func testGetAllMints(t *testing.T, s currency.Store) {
 	record2.VaultCore = "vcore22222222222222222222222222222222222222222"
 	record2.Alt = "alt222222222222222222222222222222222222222222222"
 
-	require.NoError(t, s.PutMetadata(context.Background(), record1))
-	require.NoError(t, s.PutMetadata(context.Background(), record2))
+	require.NoError(t, s.SaveMetadata(context.Background(), record1))
+	require.NoError(t, s.SaveMetadata(context.Background(), record2))
 
 	mints, err = s.GetAllMints(context.Background())
 	require.NoError(t, err)
@@ -347,6 +351,71 @@ func testGetReservesInRange(t *testing.T, s currency.Store) {
 	require.NoError(t, err)
 }
 
+func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
+	record := &currency.MetadataRecord{
+		Name:        "Versioned",
+		Symbol:      "VER",
+		Description: "A versioned test currency",
+		ImageUrl:    "https://example.com/ver.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "verseed1",
+		Authority: "verauth1",
+
+		Mint:     "vermint1111111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "verconfig111111111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "verpool1111111111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "vervmint111111111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "vervcore111111111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "veralt11111111111111111111111111111111111111111",
+
+		CreatedBy: "vercreator1",
+		CreatedAt: time.Now(),
+	}
+
+	// First save — insert
+	require.NoError(t, s.SaveMetadata(context.Background(), record))
+	assert.EqualValues(t, 1, record.Version)
+	assert.EqualValues(t, currency.MetadataStateUnknown, record.State)
+
+	// Update state and save again with correct version
+	record.State = currency.MetadataStateAvailable
+	require.NoError(t, s.SaveMetadata(context.Background(), record))
+	assert.EqualValues(t, 2, record.Version)
+	assert.EqualValues(t, currency.MetadataStateAvailable, record.State)
+
+	// Verify via get
+	actual, err := s.GetMetadata(context.Background(), record.Mint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, actual.Version)
+	assert.EqualValues(t, currency.MetadataStateAvailable, actual.State)
+
+	// Attempt save with stale version
+	record.State = currency.MetadataStateUnknown
+	record.Version = 1
+	assert.Equal(t, currency.ErrStaleMetadataVersion, s.SaveMetadata(context.Background(), record))
+
+	// Verify via get
+	actual, err = s.GetMetadata(context.Background(), record.Mint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, actual.Version)
+	assert.EqualValues(t, currency.MetadataStateAvailable, actual.State)
+}
+
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {
 	assert.Equal(t, obj1.Name, obj2.Name)
 	assert.Equal(t, obj1.Symbol, obj2.Symbol)
@@ -369,6 +438,7 @@ func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.Metadata
 	assert.Equal(t, obj1.VaultCoreBump, obj2.VaultCoreBump)
 	assert.Equal(t, obj1.SellFeeBps, obj2.SellFeeBps)
 	assert.Equal(t, obj1.Alt, obj2.Alt)
+	assert.Equal(t, obj1.State, obj2.State)
 	assert.Equal(t, obj1.CreatedBy, obj2.CreatedBy)
 	assert.Equal(t, obj1.CreatedAt.Unix(), obj2.CreatedAt.Unix())
 }

@@ -135,7 +135,7 @@ type DatabaseData interface {
 	GetAllExchangeRates(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error)
 	GetExchangeRateHistory(ctx context.Context, code currency_lib.Code, opts ...query.Option) ([]*currency.ExchangeRateRecord, error)
 	ImportExchangeRates(ctx context.Context, record *currency.MultiRateRecord) error
-	PutCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error
+	SaveCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error
 	GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error)
 	GetAllCurrencyMints(ctx context.Context) ([]string, error)
 	PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
@@ -518,8 +518,8 @@ func (dp *DatabaseProvider) GetExchangeRateHistory(ctx context.Context, code cur
 func (dp *DatabaseProvider) ImportExchangeRates(ctx context.Context, data *currency.MultiRateRecord) error {
 	return dp.currencies.PutExchangeRates(ctx, data)
 }
-func (dp *DatabaseProvider) PutCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error {
-	return dp.currencies.PutMetadata(ctx, record)
+func (dp *DatabaseProvider) SaveCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error {
+	return dp.currencies.SaveMetadata(ctx, record)
 }
 func (dp *DatabaseProvider) GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error) {
 	return dp.currencies.GetMetadata(ctx, mint)

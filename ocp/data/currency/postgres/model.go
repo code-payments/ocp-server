@@ -84,6 +84,9 @@ type metadataModel struct {
 
 	Alt string `db:"alt"`
 
+	State   uint8  `db:"state"`
+	Version uint64 `db:"version"`
+
 	CreatedBy string    `db:"created_by"`
 	CreatedAt time.Time `db:"created_at"`
 }
@@ -126,6 +129,9 @@ func toMetadataModel(obj *currency.MetadataRecord) (*metadataModel, error) {
 		SellFeeBps: obj.SellFeeBps,
 
 		Alt: obj.Alt,
+
+		State:   uint8(obj.State),
+		Version: obj.Version,
 
 		CreatedBy: obj.CreatedBy,
 		CreatedAt: obj.CreatedAt,
@@ -171,6 +177,9 @@ func fromMetadataModel(obj *metadataModel) *currency.MetadataRecord {
 		SellFeeBps: obj.SellFeeBps,
 
 		Alt: obj.Alt,
+
+		State:   currency.MetadataState(obj.State),
+		Version: obj.Version,
 
 		CreatedBy: obj.CreatedBy,
 		CreatedAt: obj.CreatedAt,
@@ -273,9 +282,15 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+metadataTableName+`
-			(name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at`,
+			(name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23 + 1, $24, $25)
+
+			ON CONFLICT (mint)
+			DO UPDATE
+				SET state = $22, version = `+metadataTableName+`.version + 1
+				WHERE `+metadataTableName+`.mint = $9 AND `+metadataTableName+`.version = $23
+
+			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at`,
 			m.Name,
 			m.Symbol,
 			m.Description,
@@ -297,11 +312,13 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.VaultCoreBump,
 			m.SellFeeBps,
 			m.Alt,
+			m.State,
+			m.Version,
 			m.CreatedBy,
 			m.CreatedAt,
 		).StructScan(m)
 
-		return pgutil.CheckUniqueViolation(err, currency.ErrExists)
+		return pgutil.CheckNoRows(err, currency.ErrStaleMetadataVersion)
 	})
 }
 
@@ -375,7 +392,7 @@ func dbGetAllExchangeRatesForRange(ctx context.Context, db *sqlx.DB, symbol stri
 func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*metadataModel, error) {
 	res := &metadataModel{}
 	err := db.GetContext(ctx, res,
-		`SELECT id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, created_by, created_at
+		`SELECT id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at
 		FROM `+metadataTableName+`
 		WHERE mint = $1`,
 		mint,
