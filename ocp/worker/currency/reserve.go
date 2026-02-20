@@ -124,8 +124,12 @@ func (p *reserveRuntime) getMints() []*common.Account {
 func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) error {
 	mints := p.getMints()
 
+	var wg sync.WaitGroup
+	wg.Add(len(mints))
 	for _, mint := range mints {
 		go func(mint *common.Account) {
+			defer wg.Done()
+
 			log := p.log.With(zap.String("mint", mint.PublicKey().ToBase58()))
 
 			circulatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, mint)
@@ -145,6 +149,7 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 			}
 		}(mint)
 	}
+	wg.Wait()
 
 	return nil
 }
