@@ -19,8 +19,8 @@ func New() metadata.Store {
 	return &store{}
 }
 
-// Put implements vm.metadata.Store.Put
-func (s *store) Put(_ context.Context, record *metadata.Record) error {
+// Save implements vm.metadata.Store.Save
+func (s *store) Save(_ context.Context, record *metadata.Record) error {
 	if err := record.Validate(); err != nil {
 		return err
 	}
@@ -28,12 +28,23 @@ func (s *store) Put(_ context.Context, record *metadata.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if item := s.find(record); item != nil {
-		return metadata.ErrAlreadyExists
+	for i, item := range s.records {
+		if item.Mint == record.Mint {
+			if item.Version != record.Version {
+				return metadata.ErrStaleVersion
+			}
+
+			record.Version = item.Version + 1
+			record.Id = item.Id
+			cloned := record.Clone()
+			s.records[i] = &cloned
+			return nil
+		}
 	}
 
 	s.last++
 	record.Id = s.last
+	record.Version = 1
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now()
 	}

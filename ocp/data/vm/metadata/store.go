@@ -6,9 +6,17 @@ import (
 	"time"
 )
 
+type State uint8
+
+const (
+	StateUnknown State = iota
+	StateAvailable
+	// todo: define more states
+)
+
 var (
-	ErrAlreadyExists = errors.New("vm metadata already exists")
-	ErrNotFound      = errors.New("vm metadata not found")
+	ErrNotFound     = errors.New("vm metadata not found")
+	ErrStaleVersion = errors.New("vm metadata version is stale")
 )
 
 type Record struct {
@@ -22,12 +30,17 @@ type Record struct {
 	OmnibusBump uint8
 	DaysLocked  uint8
 
+	State   State
+	Version uint64
+
 	CreatedAt time.Time
 }
 
 type Store interface {
-	// Put inserts or updates a VM metadata record
-	Put(ctx context.Context, record *Record) error
+	// Save creates or updates a VM metadata record in the store.
+	// On insert, Version is set to 1. On update, Version is incremented.
+	// ErrStaleVersion is returned when the provided version doesn't match.
+	Save(ctx context.Context, record *Record) error
 
 	// GetByMint returns the VM metadata record for the given mint
 	GetByMint(ctx context.Context, mint string) (*Record, error)
@@ -63,6 +76,8 @@ func (r *Record) Clone() Record {
 		Omnibus:     r.Omnibus,
 		OmnibusBump: r.OmnibusBump,
 		DaysLocked:  r.DaysLocked,
+		State:       r.State,
+		Version:     r.Version,
 		CreatedAt:   r.CreatedAt,
 	}
 }
@@ -76,5 +91,7 @@ func (r *Record) CopyTo(dst *Record) {
 	dst.Omnibus = r.Omnibus
 	dst.OmnibusBump = r.OmnibusBump
 	dst.DaysLocked = r.DaysLocked
+	dst.State = r.State
+	dst.Version = r.Version
 	dst.CreatedAt = r.CreatedAt
 }

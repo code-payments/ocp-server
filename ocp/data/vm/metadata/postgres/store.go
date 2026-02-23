@@ -20,14 +20,14 @@ func New(db *sql.DB) metadata.Store {
 	}
 }
 
-// Put implements vm.metadata.Store.Put
-func (s *store) Put(ctx context.Context, record *metadata.Record) error {
+// Save implements vm.metadata.Store.Save
+func (s *store) Save(ctx context.Context, record *metadata.Record) error {
 	obj, err := toModel(record)
 	if err != nil {
 		return err
 	}
 
-	err = obj.dbPut(ctx, s.db)
+	err = obj.dbSave(ctx, s.db)
 	if err != nil {
 		return err
 	}

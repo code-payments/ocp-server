@@ -64,6 +64,9 @@ const (
 
 		alt TEXT NOT NULL,
 
+		state INTEGER NOT NULL,
+		version BIGINT NOT NULL,
+
 		created_by TEXT NOT NULL,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL
 	);

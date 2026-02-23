@@ -100,7 +100,7 @@ func (s *store) GetExchangeRatesInRange(ctx context.Context, symbol string, inte
 	return res, nil
 }
 
-func (s *store) PutMetadata(ctx context.Context, record *currency.MetadataRecord) error {
+func (s *store) SaveMetadata(ctx context.Context, record *currency.MetadataRecord) error {
 	model, err := toMetadataModel(record)
 	if err != nil {
 		return err

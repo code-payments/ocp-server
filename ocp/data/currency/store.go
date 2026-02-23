@@ -9,10 +9,11 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("record not found")
-	ErrInvalidRange    = errors.New("the provided range is not valid")
-	ErrInvalidInterval = errors.New("the provided interval is not valid")
-	ErrExists          = errors.New("record exists")
+	ErrNotFound             = errors.New("record not found")
+	ErrInvalidRange         = errors.New("the provided range is not valid")
+	ErrInvalidInterval      = errors.New("the provided interval is not valid")
+	ErrExists               = errors.New("record exists")
+	ErrStaleMetadataVersion = errors.New("metadata version is stale")
 )
 
 type Store interface {
@@ -43,8 +44,10 @@ type Store interface {
 	// ErrInvalidInterval is returned if the interval is not valid
 	GetExchangeRatesInRange(ctx context.Context, symbol string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*ExchangeRateRecord, error)
 
-	// PutMetadata puts currency creator metadata into the store
-	PutMetadata(ctx context.Context, record *MetadataRecord) error
+	// SaveMetadata creates or updates currency creator metadata in the store.
+	// On insert, Version is set to 1. On update, Version is incremented.
+	// ErrStaleMetadataVersion is returned when the provided version doesn't match.
+	SaveMetadata(ctx context.Context, record *MetadataRecord) error
 
 	// GetMetadata gets currency creator mint metadata by the mint address
 	GetMetadata(ctx context.Context, mint string) (*MetadataRecord, error)
