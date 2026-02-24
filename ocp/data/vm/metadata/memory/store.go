@@ -55,6 +55,25 @@ func (s *store) Save(_ context.Context, record *metadata.Record) error {
 	return nil
 }
 
+// GetAllVms implements vm.metadata.Store.GetAllVms
+func (s *store) GetAllVms(_ context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	seen := make(map[string]struct{})
+	var vms []string
+	for _, item := range s.records {
+		if _, ok := seen[item.Vm]; !ok {
+			seen[item.Vm] = struct{}{}
+			vms = append(vms, item.Vm)
+		}
+	}
+	if len(vms) == 0 {
+		return nil, metadata.ErrNotFound
+	}
+	return vms, nil
+}
+
 // GetByMint implements vm.metadata.Store.GetByMint
 func (s *store) GetByMint(_ context.Context, mint string) (*metadata.Record, error) {
 	s.mu.Lock()

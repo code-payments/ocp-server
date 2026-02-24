@@ -105,6 +105,20 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 	})
 }
 
+func dbGetAllVms(ctx context.Context, db *sqlx.DB) ([]string, error) {
+	var res []string
+	query := `SELECT DISTINCT vm FROM ` + tableName
+
+	err := db.SelectContext(ctx, &res, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, metadata.ErrNotFound
+	}
+	return res, nil
+}
+
 func dbGetByMint(ctx context.Context, db *sqlx.DB, mint string) (*model, error) {
 	var res model
 	query := `SELECT id, mint, authority, vm, vm_bump, omnibus, omnibus_bump, days_locked, state, version, created_at FROM ` + tableName + `
