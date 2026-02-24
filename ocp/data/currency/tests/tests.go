@@ -392,28 +392,60 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 	assert.EqualValues(t, 1, record.Version)
 	assert.EqualValues(t, currency.MetadataStateUnknown, record.State)
 
-	// Update state and save again with correct version
+	// Update mutable fields and save again with correct version
 	record.State = currency.MetadataStateAvailable
+	record.Description = "Updated description"
+	record.ImageUrl = "https://example.com/updated.png"
+	record.BillColors = []string{"#FF0000", "#00FF00", "#0000FF"}
+	record.SocialLinks = []currency.SocialLink{
+		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
+		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
+	}
 	require.NoError(t, s.SaveMetadata(context.Background(), record))
 	assert.EqualValues(t, 2, record.Version)
 	assert.EqualValues(t, currency.MetadataStateAvailable, record.State)
 
-	// Verify via get
+	// Verify mutable fields were updated
 	actual, err := s.GetMetadata(context.Background(), record.Mint)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, actual.Version)
 	assert.EqualValues(t, currency.MetadataStateAvailable, actual.State)
+	assert.Equal(t, "Updated description", actual.Description)
+	assert.Equal(t, "https://example.com/updated.png", actual.ImageUrl)
+	assert.Equal(t, []string{"#FF0000", "#00FF00", "#0000FF"}, actual.BillColors)
+	assert.Equal(t, []currency.SocialLink{
+		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
+		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
+	}, actual.SocialLinks)
+
+	// Verify immutable fields were preserved
+	assert.Equal(t, "Versioned", actual.Name)
+	assert.Equal(t, "VER", actual.Symbol)
 
 	// Attempt save with stale version
+	record.Description = "Updated description 2"
+	record.ImageUrl = "https://example.com/updated2.png"
+	record.BillColors = []string{"#FFFFFF", "#FFFFFF", "#FFFFFF"}
+	record.SocialLinks = []currency.SocialLink{
+		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated2.example.com"},
+		{Type: currency.SocialLinkTypeX, Value: "updatedhandle2"},
+	}
 	record.State = currency.MetadataStateUnknown
 	record.Version = 1
 	assert.Equal(t, currency.ErrStaleMetadataVersion, s.SaveMetadata(context.Background(), record))
 
-	// Verify via get
+	// Verify via get that nothing changed
 	actual, err = s.GetMetadata(context.Background(), record.Mint)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, actual.Version)
 	assert.EqualValues(t, currency.MetadataStateAvailable, actual.State)
+	assert.Equal(t, "Updated description", actual.Description)
+	assert.Equal(t, "https://example.com/updated.png", actual.ImageUrl)
+	assert.Equal(t, []string{"#FF0000", "#00FF00", "#0000FF"}, actual.BillColors)
+	assert.Equal(t, []currency.SocialLink{
+		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
+		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
+	}, actual.SocialLinks)
 }
 
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {
