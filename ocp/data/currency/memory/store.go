@@ -172,9 +172,16 @@ func (s *store) SaveMetadata(ctx context.Context, data *currency.MetadataRecord)
 				return currency.ErrStaleMetadataVersion
 			}
 
-			data.Version = item.Version + 1
-			data.Id = item.Id
-			s.metadataRecords[i] = data.Clone()
+			cloned := item.Clone()
+			cloned.Description = data.Description
+			cloned.ImageUrl = data.ImageUrl
+			cloned.BillColors = append([]string(nil), data.BillColors...)
+			cloned.SocialLinks = append([]currency.SocialLink(nil), data.SocialLinks...)
+			cloned.State = data.State
+			cloned.Version = item.Version + 1
+
+			s.metadataRecords[i] = cloned
+			cloned.CopyTo(data)
 			return nil
 		}
 	}

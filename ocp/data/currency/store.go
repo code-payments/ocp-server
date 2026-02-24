@@ -45,7 +45,8 @@ type Store interface {
 	GetExchangeRatesInRange(ctx context.Context, symbol string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*ExchangeRateRecord, error)
 
 	// SaveMetadata creates or updates currency creator metadata in the store.
-	// On insert, Version is set to 1. On update, Version is incremented.
+	// On insert, Version is set to 1. On update, only mutable fields (Description,
+	// ImageUrl, BillColors, SocialLinks, State) are updated and Version is incremented.
 	// ErrStaleMetadataVersion is returned when the provided version doesn't match.
 	SaveMetadata(ctx context.Context, record *MetadataRecord) error
 
