@@ -44,6 +44,9 @@ type Store interface {
 
 	// GetByMint returns the VM metadata record for the given mint
 	GetByMint(ctx context.Context, mint string) (*Record, error)
+
+	// GetAllVms returns all VM public keys
+	GetAllVms(ctx context.Context) ([]string, error)
 }
 
 func (r *Record) Validate() error {

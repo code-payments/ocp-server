@@ -14,6 +14,7 @@ import (
 func RunTests(t *testing.T, s metadata.Store, teardown func()) {
 	for _, tf := range []func(t *testing.T, s metadata.Store){
 		testHappyPath,
+		testGetAllVms,
 	} {
 		tf(t, s)
 		teardown()
@@ -81,6 +82,57 @@ func testHappyPath(t *testing.T, s metadata.Store) {
 		// Get on non-existent mint still returns ErrNotFound
 		_, err = s.GetByMint(ctx, "mint2")
 		assert.Equal(t, metadata.ErrNotFound, err)
+	})
+}
+
+func testGetAllVms(t *testing.T, s metadata.Store) {
+	t.Run("testGetAllVms", func(t *testing.T) {
+		ctx := context.Background()
+
+		// No records returns ErrNotFound
+		_, err := s.GetAllVms(ctx)
+		assert.Equal(t, metadata.ErrNotFound, err)
+
+		// Save a record and verify GetAllVms returns its VM
+		require.NoError(t, s.Save(ctx, &metadata.Record{
+			Mint:      "mint1",
+			Authority: "authority1",
+			Vm:        "vm1",
+			Omnibus:   "omnibus1",
+		}))
+
+		vms, err := s.GetAllVms(ctx)
+		require.NoError(t, err)
+		assert.Len(t, vms, 1)
+		assert.Contains(t, vms, "vm1")
+
+		// Save another record with a different VM
+		require.NoError(t, s.Save(ctx, &metadata.Record{
+			Mint:      "mint2",
+			Authority: "authority2",
+			Vm:        "vm2",
+			Omnibus:   "omnibus2",
+		}))
+
+		vms, err = s.GetAllVms(ctx)
+		require.NoError(t, err)
+		assert.Len(t, vms, 2)
+		assert.Contains(t, vms, "vm1")
+		assert.Contains(t, vms, "vm2")
+
+		// Save another record with the same VM, should not duplicate
+		require.NoError(t, s.Save(ctx, &metadata.Record{
+			Mint:      "mint3",
+			Authority: "authority3",
+			Vm:        "vm1",
+			Omnibus:   "omnibus3",
+		}))
+
+		vms, err = s.GetAllVms(ctx)
+		require.NoError(t, err)
+		assert.Len(t, vms, 2)
+		assert.Contains(t, vms, "vm1")
+		assert.Contains(t, vms, "vm2")
 	})
 }
 

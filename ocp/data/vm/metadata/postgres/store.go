@@ -37,6 +37,11 @@ func (s *store) Save(ctx context.Context, record *metadata.Record) error {
 	return nil
 }
 
+// GetAllVms implements vm.metadata.Store.GetAllVms
+func (s *store) GetAllVms(ctx context.Context) ([]string, error) {
+	return dbGetAllVms(ctx, s.db)
+}
+
 // GetByMint implements vm.metadata.Store.GetByMint
 func (s *store) GetByMint(ctx context.Context, mint string) (*metadata.Record, error) {
 	obj, err := dbGetByMint(ctx, s.db, mint)

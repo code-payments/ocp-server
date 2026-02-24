@@ -248,6 +248,7 @@ type DatabaseData interface {
 	// --------------------------------------------------------------------------------
 	SaveVmMetadata(ctx context.Context, record *vm_metadata.Record) error
 	GetVmMetadataByMint(ctx context.Context, mint string) (*vm_metadata.Record, error)
+	GetAllVms(ctx context.Context) ([]string, error)
 
 	// VM Storage
 	// --------------------------------------------------------------------------------
@@ -894,6 +895,9 @@ func (dp *DatabaseProvider) SaveVmMetadata(ctx context.Context, record *vm_metad
 }
 func (dp *DatabaseProvider) GetVmMetadataByMint(ctx context.Context, mint string) (*vm_metadata.Record, error) {
 	return dp.vmMetadata.GetByMint(ctx, mint)
+}
+func (dp *DatabaseProvider) GetAllVms(ctx context.Context) ([]string, error) {
+	return dp.vmMetadata.GetAllVms(ctx)
 }
 
 // VM RAM
