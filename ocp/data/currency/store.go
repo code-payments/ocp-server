@@ -54,6 +54,11 @@ type Store interface {
 	// GetMetadata gets currency creator mint metadata by the mint address
 	GetMetadata(ctx context.Context, mint string) (*MetadataRecord, error)
 
+	// GetAllMetadataByState returns all currency metadata records in a given state
+	//
+	// ErrNotFound is returned if no metadata records exist for the given state
+	GetAllMetadataByState(ctx context.Context, state MetadataState, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*MetadataRecord, error)
+
 	// GetAllMints returns the public keys of all currency creator mints
 	//
 	// ErrNotFound is returned if no mints exist

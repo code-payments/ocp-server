@@ -215,6 +215,61 @@ func (s *store) GetMetadata(ctx context.Context, mint string) (*currency.Metadat
 	return nil, currency.ErrNotFound
 }
 
+type metadataById []*currency.MetadataRecord
+
+func (a metadataById) Len() int           { return len(a) }
+func (a metadataById) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a metadataById) Less(i, j int) bool { return a[i].Id < a[j].Id }
+
+func (s *store) GetAllMetadataByState(_ context.Context, state currency.MetadataState, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*currency.MetadataRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var items []*currency.MetadataRecord
+	for _, item := range s.metadataRecords {
+		if item.State == state {
+			items = append(items, item)
+		}
+	}
+
+	if len(items) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	var start uint64
+	start = 0
+	if direction == query.Descending {
+		start = s.lastMetadataIndex + 1
+	}
+	if len(cursor) > 0 {
+		start = cursor.ToUint64()
+	}
+
+	var res []*currency.MetadataRecord
+	for _, item := range items {
+		if item.Id > start && direction == query.Ascending {
+			res = append(res, item.Clone())
+		}
+		if item.Id < start && direction == query.Descending {
+			res = append(res, item.Clone())
+		}
+	}
+
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	if direction == query.Descending {
+		sort.Sort(sort.Reverse(metadataById(res)))
+	}
+
+	if uint64(len(res)) > limit {
+		res = res[:limit]
+	}
+
+	return res, nil
+}
+
 func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

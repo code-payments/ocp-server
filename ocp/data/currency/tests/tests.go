@@ -20,6 +20,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testMetadataRoundTrip,
 		testMetadataSaveWithVersioning,
 		testMetadataUniqueNameConstraint,
+		testGetAllMetadataByState,
 		testGetAllMints,
 		testCountMints,
 		testReserveRoundTrip,
@@ -270,6 +271,118 @@ func testMetadataUniqueNameConstraint(t *testing.T, s currency.Store) {
 	}
 
 	assert.Equal(t, currency.ErrDuplicateCurrency, s.SaveMetadata(context.Background(), record2))
+}
+
+func testGetAllMetadataByState(t *testing.T, s currency.Store) {
+	t.Run("testGetAllMetadataByState", func(t *testing.T) {
+		ctx := context.Background()
+
+		// No records should exist initially
+		_, err := s.GetAllMetadataByState(ctx, currency.MetadataStateUnknown, query.EmptyCursor, 100, query.Ascending)
+		assert.Equal(t, currency.ErrNotFound, err)
+
+		// Create records
+		record1 := &currency.MetadataRecord{
+			Name:        "Currency1",
+			Symbol:      "C1",
+			Description: "First test currency",
+			ImageUrl:    "https://example.com/c1.png",
+			BillColors:  []string{"#000000"},
+			SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+			Seed:      "seed1",
+			Authority: "auth1",
+
+			Mint:     "mint1111111111111111111111111111111111111111111",
+			MintBump: 255,
+			Decimals: currencycreator.DefaultMintDecimals,
+
+			CurrencyConfig:     "config1111111111111111111111111111111111111111",
+			CurrencyConfigBump: 255,
+
+			LiquidityPool:     "pool111111111111111111111111111111111111111111",
+			LiquidityPoolBump: 255,
+
+			VaultMint:     "vmint11111111111111111111111111111111111111111",
+			VaultMintBump: 255,
+
+			VaultCore:     "vcore11111111111111111111111111111111111111111",
+			VaultCoreBump: 255,
+
+			SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+			Alt: "alt111111111111111111111111111111111111111111111",
+
+			CreatedBy: "creator1",
+			CreatedAt: time.Now(),
+		}
+
+		record2 := record1.Clone()
+		record2.Name = "Currency2"
+		record2.Symbol = "C2"
+		record2.Seed = "seed2"
+		record2.Mint = "mint2222222222222222222222222222222222222222222"
+		record2.CurrencyConfig = "config2222222222222222222222222222222222222222"
+		record2.LiquidityPool = "pool222222222222222222222222222222222222222222"
+		record2.VaultMint = "vmint22222222222222222222222222222222222222222"
+		record2.VaultCore = "vcore22222222222222222222222222222222222222222"
+		record2.Alt = "alt222222222222222222222222222222222222222222222"
+
+		require.NoError(t, s.SaveMetadata(ctx, record1))
+		require.NoError(t, s.SaveMetadata(ctx, record2))
+
+		// Both should be in unknown state
+		items, err := s.GetAllMetadataByState(ctx, currency.MetadataStateUnknown, query.EmptyCursor, 100, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+
+		// No records in available state
+		_, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 100, query.Ascending)
+		assert.Equal(t, currency.ErrNotFound, err)
+
+		// Move record1 to available
+		record1.State = currency.MetadataStateAvailable
+		require.NoError(t, s.SaveMetadata(ctx, record1))
+
+		// Now only record2 should be unknown
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateUnknown, query.EmptyCursor, 100, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record2.Mint, items[0].Mint)
+
+		// Record1 should be available
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 100, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record1.Mint, items[0].Mint)
+
+		// Test limit
+		record2.State = currency.MetadataStateAvailable
+		require.NoError(t, s.SaveMetadata(ctx, record2))
+
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 1, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+
+		// Test cursor pagination ascending
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.ToCursor(items[0].Id), 10, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record2.Mint, items[0].Mint)
+
+		// Test descending order returns highest ID first
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 10, query.Descending)
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+		assert.Equal(t, record2.Mint, items[0].Mint)
+		assert.Equal(t, record1.Mint, items[1].Mint)
+
+		// Test cursor pagination descending
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.ToCursor(items[0].Id), 10, query.Descending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record1.Mint, items[0].Mint)
+	})
 }
 
 func testGetAllMints(t *testing.T, s currency.Store) {

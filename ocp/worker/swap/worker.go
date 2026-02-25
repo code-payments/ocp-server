@@ -35,7 +35,10 @@ func (p *runtime) worker(runtimeCtx context.Context, state swap.State, interval 
 				query.WithLimit(p.conf.batchSize.Get(runtimeCtx)),
 				query.WithCursor(cursor),
 			)
-			if err != nil {
+			if err == swap.ErrNotFound {
+				cursor = query.EmptyCursor
+				return nil
+			} else if err != nil {
 				cursor = query.EmptyCursor
 				return err
 			}
