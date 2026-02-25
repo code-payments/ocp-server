@@ -58,6 +58,9 @@ type Store interface {
 	// ErrNotFound is returned if no mints exist
 	GetAllMints(ctx context.Context) ([]string, error)
 
+	// CountMints returns the total number of currency creator mints
+	CountMints(ctx context.Context) (uint64, error)
+
 	// PutReserveRecord puts a currency creator mint reserve records into the store.
 	PutReserveRecord(ctx context.Context, record *ReserveRecord) error
 

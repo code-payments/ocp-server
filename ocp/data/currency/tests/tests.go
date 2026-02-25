@@ -20,6 +20,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testMetadataRoundTrip,
 		testMetadataSaveWithVersioning,
 		testGetAllMints,
+		testCountMints,
 		testReserveRoundTrip,
 		testGetReservesInRange,
 	} {
@@ -255,6 +256,73 @@ func testGetAllMints(t *testing.T, s currency.Store) {
 	assert.Len(t, mints, 2)
 	assert.Contains(t, mints, record1.Mint)
 	assert.Contains(t, mints, record2.Mint)
+}
+
+func testCountMints(t *testing.T, s currency.Store) {
+	// No mints should exist initially
+	count, err := s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	// Insert two metadata records with different mints
+	record1 := &currency.MetadataRecord{
+		Name:        "Currency1",
+		Symbol:      "C1",
+		Description: "First test currency",
+		ImageUrl:    "https://example.com/c1.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "seed1",
+		Authority: "auth1",
+
+		Mint:     "mint1111111111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "config1111111111111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "pool111111111111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "vmint11111111111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "vcore11111111111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "alt111111111111111111111111111111111111111111111",
+
+		CreatedBy: "creator1",
+		CreatedAt: time.Now(),
+	}
+
+	record2 := record1.Clone()
+	record2.Name = "Currency2"
+	record2.Symbol = "C2"
+	record2.Description = "Second test currency"
+	record2.Seed = "seed2"
+	record2.Mint = "mint2222222222222222222222222222222222222222222"
+	record2.CurrencyConfig = "config2222222222222222222222222222222222222222"
+	record2.LiquidityPool = "pool222222222222222222222222222222222222222222"
+	record2.VaultMint = "vmint22222222222222222222222222222222222222222"
+	record2.VaultCore = "vcore22222222222222222222222222222222222222222"
+	record2.Alt = "alt222222222222222222222222222222222222222222222"
+
+	require.NoError(t, s.SaveMetadata(context.Background(), record1))
+
+	count, err = s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	require.NoError(t, s.SaveMetadata(context.Background(), record2))
+
+	count, err = s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, count)
 }
 
 func testReserveRoundTrip(t *testing.T, s currency.Store) {

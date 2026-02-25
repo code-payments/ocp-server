@@ -128,6 +128,15 @@ func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
 	return dbGetAllMints(ctx, s.db)
 }
 
+func (s *store) CountMints(ctx context.Context) (uint64, error) {
+	var count uint64
+	err := s.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM `+metadataTableName)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *store) PutReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {
 	model, err := toReserveModel(record)
 	if err != nil {

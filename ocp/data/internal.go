@@ -138,6 +138,7 @@ type DatabaseData interface {
 	SaveCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error
 	GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error)
 	GetAllCurrencyMints(ctx context.Context) ([]string, error)
+	CountCurrencyMints(ctx context.Context) (uint64, error)
 	PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
 	GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
 	GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error)
@@ -527,6 +528,9 @@ func (dp *DatabaseProvider) GetCurrencyMetadata(ctx context.Context, mint string
 }
 func (dp *DatabaseProvider) GetAllCurrencyMints(ctx context.Context) ([]string, error) {
 	return dp.currencies.GetAllMints(ctx)
+}
+func (dp *DatabaseProvider) CountCurrencyMints(ctx context.Context) (uint64, error) {
+	return dp.currencies.CountMints(ctx)
 }
 func (dp *DatabaseProvider) PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
 	return dp.currencies.PutReserveRecord(ctx, record)

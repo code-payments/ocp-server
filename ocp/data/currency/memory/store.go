@@ -223,6 +223,13 @@ func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
 	return mints, nil
 }
 
+func (s *store) CountMints(ctx context.Context) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return uint64(len(s.metadataRecords)), nil
+}
+
 func (s *store) PutReserveRecord(ctx context.Context, data *currency.ReserveRecord) error {
 	if err := data.Validate(); err != nil {
 		return err

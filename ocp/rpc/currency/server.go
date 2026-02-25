@@ -820,7 +820,18 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		return nil, err
 	}
 
+	// Restrict currency launch internally for now
 	if ownerAccount.PublicKey().ToBase58() != s.conf.adminPublicKey.Get(ctx) {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
+	count, err := s.data.CountCurrencyMints(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to count currency mints")
+		return nil, status.Error(codes.Internal, "")
+	}
+	if count > s.conf.maxCurrencyCount.Get(ctx) {
+		log.Info("exceeded max currencies")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
@@ -958,7 +969,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 		State: currency.MetadataStateUnknown,
 
-		CreatedBy: base58.Encode(system.ProgramKey[:]),
+		CreatedBy: ownerAccount.PublicKey().ToBase58(),
 		CreatedAt: creationTs,
 	}
 
