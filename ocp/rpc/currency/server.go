@@ -837,6 +837,11 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 	name := strings.TrimSpace(req.Name)
 
+	switch name {
+	case common.CoreMintName:
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
 	symbol := req.Symbol
 	if len(symbol) == 0 {
 		symbol = strings.ToUpper(name)
