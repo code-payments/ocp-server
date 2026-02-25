@@ -1,4 +1,4 @@
-package currency
+package exchange_rate
 
 import (
 	"context"
