@@ -469,6 +469,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
 	}
+	record.Alt = "updatedalt1111111111111111111111111111111111111"
 	require.NoError(t, s.SaveMetadata(context.Background(), record))
 	assert.EqualValues(t, 2, record.Version)
 	assert.EqualValues(t, currency.MetadataStateAvailable, record.State)
@@ -485,6 +486,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
 	}, actual.SocialLinks)
+	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 
 	// Verify immutable fields were preserved
 	assert.Equal(t, "Versioned", actual.Name)
@@ -498,6 +500,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated2.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle2"},
 	}
+	record.Alt = "stalealt1111111111111111111111111111111111111111"
 	record.State = currency.MetadataStateUnknown
 	record.Version = 1
 	assert.Equal(t, currency.ErrStaleMetadataVersion, s.SaveMetadata(context.Background(), record))
@@ -514,6 +517,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
 	}, actual.SocialLinks)
+	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 }
 
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {

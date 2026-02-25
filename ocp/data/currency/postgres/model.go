@@ -287,7 +287,7 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 
 			ON CONFLICT (mint)
 			DO UPDATE
-				SET description = $3, image_url = $4, bill_colors = $5, social_links = $6, state = $22, version = `+metadataTableName+`.version + 1
+				SET description = $3, image_url = $4, bill_colors = $5, social_links = $6, alt = $21, state = $22, version = `+metadataTableName+`.version + 1
 				WHERE `+metadataTableName+`.mint = $9 AND `+metadataTableName+`.version = $23
 
 			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at`,

@@ -177,6 +177,7 @@ func (s *store) SaveMetadata(ctx context.Context, data *currency.MetadataRecord)
 			cloned.ImageUrl = data.ImageUrl
 			cloned.BillColors = append([]string(nil), data.BillColors...)
 			cloned.SocialLinks = append([]currency.SocialLink(nil), data.SocialLinks...)
+			cloned.Alt = data.Alt
 			cloned.State = data.State
 			cloned.Version = item.Version + 1
 
