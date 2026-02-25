@@ -18,6 +18,8 @@ const (
 
 	actionSwap = "Swap"
 
+	actionLaunchCurrency = "LaunchCurrency"
+
 	actionWelcomeBonus = "WelcomeBonus"
 )
 

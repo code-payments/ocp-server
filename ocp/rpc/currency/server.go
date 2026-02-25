@@ -24,6 +24,7 @@ import (
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/grpc/client"
+	"github.com/code-payments/ocp-server/ocp/antispam"
 	auth_util "github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
@@ -61,6 +62,8 @@ type currencyServer struct {
 
 	auth *auth_util.RPCSignatureVerifier
 
+	antispamGuard *antispam.Guard
+
 	exchangeRateHistoryCache cache.Cache
 	reserveHistoryCache      cache.Cache
 
@@ -75,6 +78,7 @@ type currencyServer struct {
 func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	antispamGuard *antispam.Guard,
 	configProvider ConfigProvider,
 ) currencypb.CurrencyServer {
 	conf := configProvider()
@@ -90,6 +94,8 @@ func NewCurrencyServer(
 		data: data,
 
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
+
+		antispamGuard: antispamGuard,
 
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
@@ -857,6 +863,14 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	))
 	if len(symbol) > currencycreator.MaxCurrencyConfigAccountSymbolLength {
 		symbol = symbol[0:currencycreator.MaxCurrencyConfigAccountSymbolLength]
+	}
+
+	allow, err := s.antispamGuard.AllowCurrencyLaunch(ctx, ownerAccount, name, symbol)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to perform antispam checks")
+		return nil, status.Error(codes.Internal, "")
+	} else if !allow {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
 	authority, err := common.NewRandomAccount()
