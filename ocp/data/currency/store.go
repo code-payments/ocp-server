@@ -14,6 +14,7 @@ var (
 	ErrInvalidInterval      = errors.New("the provided interval is not valid")
 	ErrExists               = errors.New("record exists")
 	ErrStaleMetadataVersion = errors.New("metadata version is stale")
+	ErrDuplicateCurrency    = errors.New("duplicate currency detected")
 )
 
 type Store interface {

@@ -70,6 +70,7 @@ const (
 		created_by TEXT NOT NULL,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL
 	);
+	CREATE UNIQUE INDEX ocp__core_currencymetadata__name__idx ON ocp__core_currencymetadata (LOWER(name));
 	CREATE TABLE ocp__core_currencyreserve (
 		id serial NOT NULL PRIMARY KEY,
 

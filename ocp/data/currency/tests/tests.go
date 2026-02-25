@@ -19,6 +19,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testGetExchangeRatesInRange,
 		testMetadataRoundTrip,
 		testMetadataSaveWithVersioning,
+		testMetadataUniqueNameConstraint,
 		testGetAllMints,
 		testReserveRoundTrip,
 		testGetReservesInRange,
@@ -191,6 +192,83 @@ func testMetadataRoundTrip(t *testing.T, s currency.Store) {
 	assertEquivalentMetadataRecords(t, cloned, actual)
 	assert.EqualValues(t, currency.MetadataStateUnknown, actual.State)
 	assert.EqualValues(t, 1, actual.Version)
+}
+
+func testMetadataUniqueNameConstraint(t *testing.T, s currency.Store) {
+	record1 := &currency.MetadataRecord{
+		Name:        "UniqueName",
+		Symbol:      "UN1",
+		Description: "First currency",
+		ImageUrl:    "https://example.com/un1.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "uniqueseed1",
+		Authority: "uniqueauth1",
+
+		Mint:     "uniquemint1111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "uniqueconfig11111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "uniquepool1111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "uniquevmint111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "uniquevcore111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "uniquealt11111111111111111111111111111111111111",
+
+		CreatedBy: "uniquecreator1",
+		CreatedAt: time.Now(),
+	}
+
+	require.NoError(t, s.SaveMetadata(context.Background(), record1))
+
+	// Second record with the same name (different case) but different everything else
+	record2 := &currency.MetadataRecord{
+		Name:        "uniquename",
+		Symbol:      "UN2",
+		Description: "Second currency",
+		ImageUrl:    "https://example.com/un2.png",
+		BillColors:  []string{"#FFFFFF"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example2.com"}},
+
+		Seed:      "uniqueseed2",
+		Authority: "uniqueauth2",
+
+		Mint:     "uniquemint2222222222222222222222222222222222222",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "uniqueconfig22222222222222222222222222222222",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "uniquepool2222222222222222222222222222222222",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "uniquevmint222222222222222222222222222222222",
+		VaultMintBump: 255,
+
+		VaultCore:     "uniquevcore222222222222222222222222222222222",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "uniquealt22222222222222222222222222222222222222",
+
+		CreatedBy: "uniquecreator2",
+		CreatedAt: time.Now(),
+	}
+
+	assert.Equal(t, currency.ErrDuplicateCurrency, s.SaveMetadata(context.Background(), record2))
 }
 
 func testGetAllMints(t *testing.T, s currency.Store) {

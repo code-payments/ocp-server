@@ -318,6 +318,11 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.CreatedAt,
 		).StructScan(m)
 
+		err = pgutil.CheckUniqueViolation(err, currency.ErrDuplicateCurrency)
+		if err == currency.ErrDuplicateCurrency {
+			return err
+		}
+
 		return pgutil.CheckNoRows(err, currency.ErrStaleMetadataVersion)
 	})
 }
