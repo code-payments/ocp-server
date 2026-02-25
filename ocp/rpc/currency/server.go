@@ -998,7 +998,9 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 		return s.data.SaveVmMetadata(ctx, vmMetadataRecord)
 	})
-	if err != nil {
+	if err == currency.ErrDuplicateCurrency {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_EXISTS}, nil
+	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failed to save currency and vm metadata")
 		return nil, status.Error(codes.Internal, "")
 	}
