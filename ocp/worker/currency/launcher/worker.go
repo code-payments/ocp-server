@@ -14,6 +14,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/retry"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
@@ -170,11 +171,109 @@ func (p *runtime) handleStateInitializing(ctx context.Context, record *currency.
 	return nil
 }
 
-func (p *runtime) handleStateFinalValidation(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateFinalValidation)
+func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateFinalValidation)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	vmMetadataRecord, err := p.data.GetVmMetadataByMint(ctx, currencyMetadataRecord.Mint)
+	if err != nil {
+		return errors.Wrap(err, "error getting vm metadata record")
+	}
+
+	currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(currencyMetadataRecord)
+	if err != nil {
+		return errors.Wrap(err, "error getting launchpad currency accounts")
+	}
+	vmAccount, err := common.NewAccountFromPublicKeyString(vmMetadataRecord.Vm)
+	if err != nil {
+		return errors.Wrap(err, "invalid vm")
+	}
+	timelockMemoryAddress, _, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
+		Name: initialTimelockMemoryAccountName,
+		Vm:   vmAccount.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "error deriving timelock memory account address")
+	}
+	timelockMemoryAccount, err := common.NewAccountFromPublicKeyBytes(timelockMemoryAddress)
+	if err != nil {
+		return errors.Wrap(err, "invalid timelock memory account")
+	}
+	nonceMemoryAddress, _, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
+		Name: initialNonceMemoryAccountName,
+		Vm:   vmAccount.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "error deriving nonce memory account address")
+	}
+	nonceMemoryAccount, err := common.NewAccountFromPublicKeyBytes(nonceMemoryAddress)
+	if err != nil {
+		return errors.Wrap(err, "invalid timelock memory account")
+	}
+
+	ok, err := validateMintExists(ctx, p.data, currencyAccounts.Mint)
+	if err != nil {
+		return errors.Wrap(err, "error validating mint exists")
+	} else if !ok {
+		return errors.New("mint doesn't exist")
+	}
+
+	ok, err = validateCurrencyConfigExists(ctx, p.data, currencyAccounts.CurrencyConfig)
+	if err != nil {
+		return errors.Wrap(err, "error validating currency config exists")
+	} else if !ok {
+		return errors.New("currency config doesn't exist")
+	}
+
+	ok, err = validateLiquidityPoolExists(ctx, p.data, currencyAccounts.LiquidityPool)
+	if err != nil {
+		return errors.Wrap(err, "error validating liquidity pool exists")
+	} else if !ok {
+		return errors.New("")
+	}
+
+	ok, err = validateVmExists(ctx, p.data, vmAccount)
+	if err != nil {
+		return errors.Wrap(err, "error validating vm exists")
+	} else if !ok {
+		return errors.New("vm doesn't exist")
+	}
+
+	ok, err = validateAltIsExtended(ctx, p.data, currencyAccounts.Alt)
+	if err != nil {
+		return errors.Wrap(err, "error validating alt exists and is extended")
+	} else if !ok {
+		return errors.New("alt failed validation")
+	}
+
+	ok, err = validateMemoryAccountIsResized(ctx, p.data, timelockMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error validating timelock memory account exists and is resized")
+	} else if !ok {
+		return errors.New("timelock memory account failed validation")
+	}
+
+	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, nonceMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error validating nonce memory account exists and is populated")
+	} else if !ok {
+		return errors.New("nonce memory account failed validation")
+	}
+
+	ok, err = validateNoncePoolInitialized(ctx, p.data, nonceMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error validating nonce pool is initialized")
+	} else if !ok {
+		return errors.New("nonce pool is not fully initialized")
+	}
+
+	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		err := p.markVmMetadataAvailable(ctx, vmMetadataRecord)
+		if err != nil {
+			return err
+		}
+		return p.markCurrencyMetadataAvailable(ctx, currencyMetadataRecord)
+	})
 }
