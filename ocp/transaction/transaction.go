@@ -349,7 +349,7 @@ func MakeSolanaTransferTransaction(
 	txn := solana.NewLegacyTransaction(
 		common.GetSubsidizer().PublicKey().ToBytes(),
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(25_000), // todo: optimize this
+		compute_budget.SetComputeUnitLimit(1_000),
 		system.Transfer(
 			source.PublicKey().ToBytes(),
 			destination.PublicKey().ToBytes(),
