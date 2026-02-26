@@ -67,6 +67,56 @@ func TestDecompileNonCreate(t *testing.T) {
 	assert.True(t, strings.HasPrefix(err.Error(), "instruction doesn't exist"))
 }
 
+func TestTransfer(t *testing.T) {
+	keys := generateKeys(t, 2)
+
+	instruction := Transfer(keys[0], keys[1], 99999)
+
+	command := make([]byte, 4)
+	binary.LittleEndian.PutUint32(command, commandTransfer)
+	lamports := make([]byte, 8)
+	binary.LittleEndian.PutUint64(lamports, 99999)
+
+	assert.Equal(t, command, instruction.Data[0:4])
+	assert.Equal(t, lamports, instruction.Data[4:12])
+
+	var tx solana.Transaction
+	require.NoError(t, tx.Unmarshal(solana.NewLegacyTransaction(keys[0], instruction).Marshal()))
+
+	decompiled, err := DecompileTransfer(tx.Message, 0)
+	require.NoError(t, err)
+	assert.Equal(t, decompiled.Sender, keys[0])
+	assert.Equal(t, decompiled.Recipient, keys[1])
+	assert.EqualValues(t, decompiled.Lamports, 99999)
+}
+
+func TestDecompileNonTransfer(t *testing.T) {
+	keys := generateKeys(t, 3)
+
+	instruction := Transfer(keys[0], keys[1], 99999)
+
+	instruction.Accounts = instruction.Accounts[:1]
+	_, err := DecompileTransfer(solana.NewLegacyTransaction(keys[0], instruction).Message, 0)
+	assert.NotNil(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "invalid number of accounts"), err)
+
+	binary.BigEndian.PutUint32(instruction.Data, commandAllocate)
+	_, err = DecompileTransfer(solana.NewLegacyTransaction(keys[0], instruction).Message, 0)
+	assert.Equal(t, solana.ErrIncorrectInstruction, err)
+
+	instruction.Data = make([]byte, 3)
+	_, err = DecompileTransfer(solana.NewLegacyTransaction(keys[0], instruction).Message, 0)
+	assert.Equal(t, solana.ErrIncorrectInstruction, err)
+
+	instruction.Program = keys[2]
+	_, err = DecompileTransfer(solana.NewLegacyTransaction(keys[0], instruction).Message, 0)
+	assert.Equal(t, solana.ErrIncorrectProgram, err)
+
+	_, err = DecompileTransfer(solana.NewLegacyTransaction(keys[0], instruction).Message, 1)
+	assert.NotNil(t, err)
+	assert.True(t, strings.HasPrefix(err.Error(), "instruction doesn't exist"))
+}
+
 func TestAdvanceNonceAccount(t *testing.T) {
 	keys := generateKeys(t, 3)
 
