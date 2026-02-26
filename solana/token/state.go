@@ -14,6 +14,9 @@ const (
 	AccountStateFrozen
 )
 
+// Reference: https://github.com/solana-labs/solana-program-library/blob/11b1e3eefdd4e523768d63f7c70a7aa391ea0d02/token/program/src/state.rs#L18
+const MintSize = 82
+
 // Reference: https://github.com/solana-labs/solana-program-library/blob/11b1e3eefdd4e523768d63f7c70a7aa391ea0d02/token/program/src/state.rs#L125
 const AccountSize = 165
 
@@ -21,6 +24,54 @@ const AccountSize = 165
 const MultisigAccountSize = 355
 
 const optionSize = 4
+
+// Reference: https://github.com/solana-labs/solana-program-library/blob/11b1e3eefdd4e523768d63f7c70a7aa391ea0d02/token/program/src/state.rs#L18
+type Mint struct {
+	// Optional authority used to mint new tokens. The mint authority may only
+	// be provided during mint creation. If no mint authority is present then
+	// the mint has a fixed supply and no further tokens may be minted.
+	MintAuthority ed25519.PublicKey
+	// Total supply of tokens.
+	Supply uint64
+	// Number of base 10 digits to the right of the decimal place.
+	Decimals uint8
+	// Is true if this structure has been initialized.
+	IsInitialized bool
+	// Optional authority to freeze token accounts.
+	FreezeAuthority ed25519.PublicKey
+}
+
+func (m *Mint) Marshal() []byte {
+	b := make([]byte, MintSize)
+
+	var offset int
+	binary.PutOptionalKey32(b, m.MintAuthority, &offset, optionSize)
+	binary.PutUint64(b[offset:], m.Supply, &offset)
+	binary.PutUint8(b[offset:], m.Decimals, &offset)
+	if m.IsInitialized {
+		b[offset] = 1
+	}
+	offset++
+	binary.PutOptionalKey32(b[offset:], m.FreezeAuthority, &offset, optionSize)
+
+	return b
+}
+
+func (m *Mint) Unmarshal(b []byte) bool {
+	if len(b) != MintSize {
+		return false
+	}
+
+	var offset int
+	binary.GetOptionalKey32(b, &m.MintAuthority, &offset, optionSize)
+	binary.GetUint64(b[offset:], &m.Supply, &offset)
+	binary.GetUint8(b[offset:], &m.Decimals, &offset)
+	m.IsInitialized = b[offset] == 1
+	offset++
+	binary.GetOptionalKey32(b[offset:], &m.FreezeAuthority, &offset, optionSize)
+
+	return true
+}
 
 type Account struct {
 	// The mint associated with this account
