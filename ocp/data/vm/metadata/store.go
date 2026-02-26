@@ -11,7 +11,7 @@ type State uint8
 const (
 	StateUnknown State = iota
 	StateAvailable
-	// todo: define more states
+	StateInitializing
 )
 
 var (
