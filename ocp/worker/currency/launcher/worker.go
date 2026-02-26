@@ -2,15 +2,28 @@ package launcher
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
+	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/retry"
+)
+
+const (
+	initialAuthorityFundingLamports = 2_000_000_000 // 2 SOL
+
+	initialNoncePoolSize          = 1_000
+	initialNonceMemoryAccountName = "nonce-0"
+
+	initialTimelockAccounts          = 1_000
+	initialTimelockMemoryAccountName = "timelock-0"
 )
 
 func (p *runtime) worker(runtimeCtx context.Context, state currency.MetadataState, interval time.Duration) error {
@@ -95,21 +108,73 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 }
 
 func (p *runtime) handleStateUnknown(ctx context.Context, record *currency.MetadataRecord) error {
-	// todo: Implement unknown state handling logic
-	return nil
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateUnknown)
+	if err != nil {
+		return err
+	}
+
+	// Nothing to do here currently
+
+	return p.markCurrencyMetadataFundingAuthority(ctx, record)
 }
 
-func (p *runtime) handleStateFundingAuthority(ctx context.Context, record *currency.MetadataRecord) error {
-	// todo: Implement funding authority state handling logic
-	return nil
+// Note: Assumes unique authority per currency
+func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateFundingAuthority)
+	if err != nil {
+		return err
+	}
+
+	authorityAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Authority)
+	if err != nil {
+		return errors.Wrap(err, "invalid authority")
+	}
+
+	privateKeyExists, err := validateAuthorityPrivateKeyExists(ctx, p.data, authorityAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking authority private key")
+	} else if !privateKeyExists {
+		return errors.New("authority private key doesn't exist")
+	}
+
+	isAuthorityFunded, remainingLamports, err := validateMinimumAuthorityFunding(ctx, p.data, authorityAccount, initialAuthorityFundingLamports)
+	if err != nil {
+		return errors.Wrap(err, "error validating minimum authority funding")
+	} else if !isAuthorityFunded {
+		err = fundAuthority(ctx, p.data, authorityAccount, remainingLamports)
+		if err != nil {
+			return errors.Wrap(err, "error funding authority")
+		}
+	}
+
+	vmMetadataRecord, err := p.data.GetVmMetadataByMint(ctx, currencyMetadataRecord.Mint)
+	if err != nil {
+		return errors.Wrap(err, "error getting vm metadata record")
+	}
+
+	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		err := p.markVmMetadataInitializing(ctx, vmMetadataRecord)
+		if err != nil {
+			return err
+		}
+		return p.markCurrencyMetadataInitializing(ctx, currencyMetadataRecord)
+	})
 }
 
 func (p *runtime) handleStateInitializing(ctx context.Context, record *currency.MetadataRecord) error {
-	// todo: Implement initializing state handling logic
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateInitializing)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (p *runtime) handleStateFinalValidation(ctx context.Context, record *currency.MetadataRecord) error {
-	// todo: Implement final validation state handling logic
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateFinalValidation)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
