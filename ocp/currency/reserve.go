@@ -25,7 +25,7 @@ func GetLaunchpadCurrencyCirculatingSupply(ctx context.Context, data ocp_data.Pr
 		return 0, time.Time{}, err
 	}
 
-	ai, err := data.GetBlockchainAccountInfo(ctx, accounts.VaultMint.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, accounts.VaultMint.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return 0, time.Time{}, err
 	}

@@ -61,11 +61,11 @@ func getTimelockUnlockState(ctx context.Context, data ocp_data.Provider, timeloc
 		return nil, 0, err
 	}
 
-	marshalled, slot, err := data.GetBlockchainAccountDataAfterBlock(ctx, timelockAccounts.Unlock.PublicKey().ToBase58(), timelockRecord.Block)
+	ai, slot, err := data.GetBlockchainAccountInfo(ctx, timelockAccounts.Unlock.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	switch err {
 	case nil:
 		var unlockState vm.UnlockStateAccount
-		if err = unlockState.Unmarshal(marshalled); err != nil {
+		if err = unlockState.Unmarshal(ai.Data); err != nil {
 			return nil, 0, err
 		}
 		return &unlockState, slot, nil
