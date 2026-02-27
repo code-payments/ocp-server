@@ -59,6 +59,9 @@ type Store interface {
 	// ErrNotFound is returned if no metadata records exist for the given state
 	GetAllMetadataByState(ctx context.Context, state MetadataState, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*MetadataRecord, error)
 
+	// CountMetadataByState returns the count of currency metadata records in the requested state
+	CountMetadataByState(ctx context.Context, state MetadataState) (uint64, error)
+
 	// GetAllMints returns the public keys of all currency creator mints
 	//
 	// ErrNotFound is returned if no mints exist

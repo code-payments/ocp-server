@@ -7,8 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 
 	pg "github.com/code-payments/ocp-server/database/postgres"
 )
@@ -142,12 +142,11 @@ func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
 }
 
 func (s *store) CountMints(ctx context.Context) (uint64, error) {
-	var count uint64
-	err := s.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM `+metadataTableName)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
+	return dbCountMints(ctx, s.db)
+}
+
+func (s *store) CountMetadataByState(ctx context.Context, state currency.MetadataState) (uint64, error) {
+	return dbCountMetadataByState(ctx, s.db, state)
 }
 
 func (s *store) PutReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {

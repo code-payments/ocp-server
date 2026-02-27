@@ -41,6 +41,13 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		}(state)
 	}
 
+	go func() {
+		err := p.metricsGaugeWorker(ctx)
+		if err != nil && err != context.Canceled {
+			p.log.With(zap.Error(err)).Warn("currency launcher metrics gauge loop terminated unexpectedly")
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

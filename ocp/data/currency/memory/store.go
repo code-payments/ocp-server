@@ -286,6 +286,19 @@ func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
 	return mints, nil
 }
 
+func (s *store) CountMetadataByState(_ context.Context, state currency.MetadataState) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var count uint64
+	for _, item := range s.metadataRecords {
+		if item.State == state {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (s *store) CountMints(ctx context.Context) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

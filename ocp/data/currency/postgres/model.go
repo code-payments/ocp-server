@@ -443,6 +443,25 @@ func dbGetAllMints(ctx context.Context, db *sqlx.DB) ([]string, error) {
 	return res, nil
 }
 
+func dbCountMints(ctx context.Context, db *sqlx.DB) (uint64, error) {
+	var count uint64
+	err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM `+metadataTableName)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func dbCountMetadataByState(ctx context.Context, db *sqlx.DB, state currency.MetadataState) (uint64, error) {
+	var res uint64
+	query := `SELECT COUNT(*) FROM ` + metadataTableName + ` WHERE state = $1`
+	err := db.GetContext(ctx, &res, query, state)
+	if err != nil {
+		return 0, err
+	}
+	return res, nil
+}
+
 func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t time.Time, ordering q.Ordering) (*reserveModel, error) {
 	res := &reserveModel{}
 	err := db.GetContext(ctx, res,

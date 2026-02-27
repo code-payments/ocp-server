@@ -23,6 +23,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testGetAllMetadataByState,
 		testGetAllMints,
 		testCountMints,
+		testCountMetadataByState,
 		testReserveRoundTrip,
 		testGetReservesInRange,
 	} {
@@ -514,6 +515,111 @@ func testCountMints(t *testing.T, s currency.Store) {
 	count, err = s.CountMints(context.Background())
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, count)
+}
+
+func testCountMetadataByState(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+
+	// No records should exist initially
+	for _, state := range []currency.MetadataState{
+		currency.MetadataStateUnknown,
+		currency.MetadataStateAvailable,
+		currency.MetadataStateWaitingForInitialPurchase,
+		currency.MetadataStateFundingAuthority,
+		currency.MetadataStateInitializing,
+		currency.MetadataStateFinalValidation,
+	} {
+		count, err := s.CountMetadataByState(ctx, state)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, count)
+	}
+
+	// Insert two metadata records (both default to Unknown state)
+	record1 := &currency.MetadataRecord{
+		Name:        "Currency1",
+		Symbol:      "C1",
+		Description: "First test currency",
+		ImageUrl:    "https://example.com/c1.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "seed1",
+		Authority: "auth1",
+
+		Mint:     "mint1111111111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "config1111111111111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "pool111111111111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "vmint11111111111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "vcore11111111111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "alt111111111111111111111111111111111111111111111",
+
+		CreatedBy: "creator1",
+		CreatedAt: time.Now(),
+	}
+
+	record2 := record1.Clone()
+	record2.Name = "Currency2"
+	record2.Symbol = "C2"
+	record2.Seed = "seed2"
+	record2.Mint = "mint2222222222222222222222222222222222222222222"
+	record2.CurrencyConfig = "config2222222222222222222222222222222222222222"
+	record2.LiquidityPool = "pool222222222222222222222222222222222222222222"
+	record2.VaultMint = "vmint22222222222222222222222222222222222222222"
+	record2.VaultCore = "vcore22222222222222222222222222222222222222222"
+	record2.Alt = "alt222222222222222222222222222222222222222222222"
+
+	require.NoError(t, s.SaveMetadata(ctx, record1))
+	require.NoError(t, s.SaveMetadata(ctx, record2))
+
+	// Both should be in unknown state
+	count, err := s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateAvailable)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	// Move record1 to available
+	record1.State = currency.MetadataStateAvailable
+	require.NoError(t, s.SaveMetadata(ctx, record1))
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateAvailable)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	// Move record2 to initializing
+	record2.State = currency.MetadataStateInitializing
+	require.NoError(t, s.SaveMetadata(ctx, record2))
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateAvailable)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateInitializing)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
 }
 
 func testReserveRoundTrip(t *testing.T, s currency.Store) {
