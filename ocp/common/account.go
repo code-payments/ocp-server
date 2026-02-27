@@ -534,7 +534,9 @@ func ValidateExternalTokenAccount(ctx context.Context, data ocp_data.Provider, t
 }
 
 type LaunchpadCurrencyAccounts struct {
+	Authority          *Account
 	Mint               *Account
+	MintBump           uint8
 	CurrencyConfig     *Account
 	CurrencyConfigBump uint8
 	LiquidityPool      *Account
@@ -547,6 +549,10 @@ type LaunchpadCurrencyAccounts struct {
 }
 
 func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*LaunchpadCurrencyAccounts, error) {
+	authority, err := NewAccountFromPublicKeyString(metadataRecord.Authority)
+	if err != nil {
+		return nil, err
+	}
 	mint, err := NewAccountFromPublicKeyString(metadataRecord.Mint)
 	if err != nil {
 		return nil, err
@@ -572,7 +578,9 @@ func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*Lau
 		return nil, err
 	}
 	return &LaunchpadCurrencyAccounts{
+		Authority:          authority,
 		Mint:               mint,
+		MintBump:           metadataRecord.MintBump,
 		CurrencyConfig:     currencyConfig,
 		CurrencyConfigBump: metadataRecord.CurrencyConfigBump,
 		LiquidityPool:      liquidityPool,

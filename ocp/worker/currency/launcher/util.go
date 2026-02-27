@@ -2,7 +2,10 @@ package launcher
 
 import (
 	"context"
+	"database/sql"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
@@ -12,15 +15,51 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
+	"github.com/code-payments/ocp-server/ocp/data/vm/ram"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/solana"
 	address_lookup_table "github.com/code-payments/ocp-server/solana/addresslookuptable"
+	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/system"
+	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 // todo: some of these utilities can be promoted into a common package
+
+type newCurrencyAccounts struct {
+	Authority *common.Account
+
+	Mint                 *common.Account
+	MintBump             uint8
+	CurrencyConfig       *common.Account
+	CurrencyConfigBump   uint8
+	LiquidityPool        *common.Account
+	LiquidityPoolBump    uint8
+	MetaplexMetadata     *common.Account
+	MetaplexMetadataBump uint8
+	VaultBase            *common.Account
+	VaultBaseBump        uint8
+	VaultMint            *common.Account
+	VaultMintBump        uint8
+
+	Vm                    *common.Account
+	VmBump                uint8
+	Omnibus               *common.Account
+	OmnibusBump           uint8
+	NonceMemoryAccount    *common.Account
+	NonceMemoryBump       uint8
+	TimelockMemoryAccount *common.Account
+	TimelockMemoryBump    uint8
+
+	Alt           *common.Account
+	AltBump       uint8
+	AltRecentSlot uint64
+
+	Fees *common.Account
+}
 
 func (p *runtime) validateCurrencyMetadataState(record *currency.MetadataRecord, states ...currency.MetadataState) error {
 	if slices.Contains(states, record.State) {
@@ -237,6 +276,21 @@ func validateAltIsExtended(ctx context.Context, data ocp_data.Provider, account 
 	return len(state.Addresses) > 0, nil
 }
 
+func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
+	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err != nil {
+		return false, err
+	}
+
+	var state token.Account
+	ok := state.Unmarshal(ai.Data)
+	if !ok {
+		return false, errors.New("invalid token account state")
+	}
+
+	return true, nil
+}
+
 func validateMemoryAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
@@ -301,8 +355,8 @@ func validateNonceMemoryAccountPopulated(ctx context.Context, data ocp_data.Prov
 	return true, nil
 }
 
-func validateNoncePoolInitialized(ctx context.Context, data ocp_data.Provider, memoryAccount *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, memoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+func validateNoncePoolInitialized(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
+	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -318,4 +372,579 @@ func validateNoncePoolInitialized(ctx context.Context, data ocp_data.Provider, m
 		return false, err
 	}
 	return count == uint64(state.NumAccounts), nil
+}
+
+func (p *runtime) deriveNewAlt(ctx context.Context, accounts *newCurrencyAccounts) error {
+	recentSlot, err := p.data.GetBlockchainSlot(ctx, solana.CommitmentFinalized)
+	if err != nil {
+		return err
+	}
+
+	address, bump, err := address_lookup_table.GetAddress(accounts.Authority.PublicKey().ToBytes(), recentSlot)
+	if err != nil {
+		return err
+	}
+
+	account, err := common.NewAccountFromPublicKeyBytes(address)
+	if err != nil {
+		return err
+	}
+
+	accounts.Alt = account
+	accounts.AltBump = bump
+	accounts.AltRecentSlot = recentSlot
+
+	return nil
+}
+
+func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
+	seed, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Seed)
+	if err != nil {
+		return errors.Wrap(err, "invalid seed")
+	}
+
+	initCurrencyIxn := currencycreator.NewInitializeCurrencyInstruction(
+		&currencycreator.InitializeCurrencyInstructionAccounts{
+			Authority: accounts.Authority.PublicKey().ToBytes(),
+			Mint:      accounts.Mint.PublicKey().ToBytes(),
+			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializeCurrencyInstructionArgs{
+			Name:     currencyMetadataRecord.Name,
+			Symbol:   currencyMetadataRecord.Symbol,
+			Seed:     seed.PublicKey().ToBytes(),
+			Bump:     accounts.CurrencyConfigBump,
+			MintBump: accounts.MintBump,
+		},
+	)
+
+	initPoolIxn := currencycreator.NewInitializePoolInstruction(
+		&currencycreator.InitializePoolInstructionAccounts{
+			Authority:   accounts.Authority.PublicKey().ToBytes(),
+			Currency:    accounts.CurrencyConfig.PublicKey().ToBytes(),
+			TargetMint:  accounts.Mint.PublicKey().ToBytes(),
+			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
+			Pool:        accounts.LiquidityPool.PublicKey().ToBytes(),
+			VaultTarget: accounts.VaultMint.PublicKey().ToBytes(),
+			VaultBase:   accounts.VaultBase.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializePoolInstructionArgs{
+			SellFee:         currencycreator.DefaultSellFeeBps,
+			Bump:            accounts.LiquidityPoolBump,
+			VaultTargetBump: accounts.VaultMintBump,
+			VaultBaseBump:   accounts.VaultBaseBump,
+		},
+	)
+
+	initMetadataIxn := currencycreator.NewInitializeMetadataInstruction(
+		&currencycreator.InitializeMetadataInstructionAccounts{
+			Authority: accounts.Authority.PublicKey().ToBytes(),
+			Mint:      accounts.Mint.PublicKey().ToBytes(),
+			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
+			Metadata:  accounts.MetaplexMetadata.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializeMetadataInstructionArgs{},
+	)
+
+	initVmIxn := vm.NewInitVmInstruction(
+		&vm.InitVmInstructionAccounts{
+			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
+			Vm:          accounts.Vm.PublicKey().ToBytes(),
+			VmOmnibus:   accounts.Omnibus.PublicKey().ToBytes(),
+			Mint:        accounts.Mint.PublicKey().ToBytes(),
+		},
+		&vm.InitVmInstructionArgs{
+			LockDuration:  timelock_token.DefaultNumDaysLocked,
+			VmBump:        accounts.VmBump,
+			VmOmnibusBump: accounts.OmnibusBump,
+		},
+	)
+
+	initNonceMemoryIxn := vm.NewInitMemoryInstruction(
+		&vm.InitMemoryInstructionAccounts{
+			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
+			Vm:          accounts.Vm.PublicKey().ToBytes(),
+			VmMemory:    accounts.NonceMemoryAccount.PublicKey().ToBytes(),
+		},
+		&vm.InitMemoryInstructionArgs{
+			Name:         initialNonceMemoryAccountName,
+			NumAccounts:  uint32(initialNoncePoolSize),
+			AccountSize:  uint16(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce)),
+			VmMemoryBump: accounts.NonceMemoryBump,
+		},
+	)
+
+	initTimelockMemoryIxn := vm.NewInitMemoryInstruction(
+		&vm.InitMemoryInstructionAccounts{
+			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
+			Vm:          accounts.Vm.PublicKey().ToBytes(),
+			VmMemory:    accounts.TimelockMemoryAccount.PublicKey().ToBytes(),
+		},
+		&vm.InitMemoryInstructionArgs{
+			Name:         initialTimelockMemoryAccountName,
+			NumAccounts:  uint32(initialTimelockAccounts),
+			AccountSize:  uint16(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock)),
+			VmMemoryBump: accounts.TimelockMemoryBump,
+		},
+	)
+
+	initFeeAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(
+		accounts.Authority.PublicKey().ToBytes(),
+		common.GetSubsidizer().PublicKey().ToBytes(),
+		accounts.Mint.PublicKey().ToBytes(),
+	)
+
+	initAltIxn := address_lookup_table.Create(
+		accounts.Alt.PublicKey().ToBytes(),
+		accounts.Authority.PublicKey().ToBytes(),
+		accounts.Authority.PublicKey().ToBytes(),
+		accounts.AltRecentSlot,
+		accounts.AltBump,
+	)
+
+	txn := solana.NewLegacyTransaction(
+		accounts.Authority.PublicKey().ToBytes(),
+		compute_budget.SetComputeUnitLimit(300_000),
+		compute_budget.SetComputeUnitPrice(10_000),
+		initCurrencyIxn,
+		initPoolIxn,
+		initMetadataIxn,
+		initVmIxn,
+		initNonceMemoryIxn,
+		initTimelockMemoryIxn,
+		initFeeAtaIxn,
+		initAltIxn,
+	)
+
+	bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
+	if err != nil {
+		return errors.Wrap(err, "error getting latest blockhash")
+	}
+	txn.SetBlockhash(bh)
+
+	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+	if err != nil {
+		return errors.Wrap(err, "error signing transaction")
+	}
+
+	return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
+}
+
+func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, accounts *newCurrencyAccounts) error {
+	ixns := []solana.Instruction{
+		compute_budget.SetComputeUnitLimit(250_000),
+		compute_budget.SetComputeUnitPrice(10_000),
+	}
+
+	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err != nil {
+		return errors.Wrap(err, "error getting nonce memory account info")
+	}
+	var nonceMemoryAccountState vm.MemoryAccount
+	err = nonceMemoryAccountState.Unmarshal(ai.Data)
+	if err != nil {
+		return errors.Wrap(err, "error unmarshalling nonce memory account")
+	}
+
+	ai, err = p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err != nil {
+		return errors.Wrap(err, "error getting timelock memory account info")
+	}
+	var timelockMemoryAccountState vm.MemoryAccount
+	err = timelockMemoryAccountState.Unmarshal(ai.Data)
+	if err != nil {
+		return errors.Wrap(err, "error unmarshalling timelock memory account")
+	}
+
+	memoryResizeChunkSize := 10 * 1024
+
+	desiredNonceMemoryCapacity := vm.MemoryAccountSize + vm.GetSliceAllocatorSize(
+		int(nonceMemoryAccountState.NumAccounts),
+		int(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce)),
+	)
+	for i := 1; i <= desiredNonceMemoryCapacity/memoryResizeChunkSize+1; i++ {
+		nextSize := min(i*memoryResizeChunkSize, desiredNonceMemoryCapacity)
+		ixns = append(ixns, vm.NewResizeMemoryInstruction(
+			&vm.ResizeMemoryInstructionAccounts{
+				VmAuthority: accounts.Authority.PublicKey().ToBytes(),
+				Vm:          accounts.Vm.PublicKey().ToBytes(),
+				VmMemory:    accounts.NonceMemoryAccount.PublicKey().ToBytes(),
+			},
+			&vm.ResizeMemoryInstructionArgs{
+				AccountSize: uint32(nextSize),
+			},
+		))
+	}
+
+	desiredTimelockMemoryCapacity := vm.MemoryAccountSize + vm.GetSliceAllocatorSize(
+		int(timelockMemoryAccountState.NumAccounts),
+		int(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock)),
+	)
+	for i := 1; i <= desiredTimelockMemoryCapacity/memoryResizeChunkSize+1; i++ {
+		nextSize := min(i*memoryResizeChunkSize, desiredTimelockMemoryCapacity)
+		ixns = append(ixns, vm.NewResizeMemoryInstruction(
+			&vm.ResizeMemoryInstructionAccounts{
+				VmAuthority: accounts.Authority.PublicKey().ToBytes(),
+				Vm:          accounts.Vm.PublicKey().ToBytes(),
+				VmMemory:    accounts.TimelockMemoryAccount.PublicKey().ToBytes(),
+			},
+			&vm.ResizeMemoryInstructionArgs{
+				AccountSize: uint32(nextSize),
+			},
+		))
+	}
+
+	ixns = append(ixns, address_lookup_table.Extend(
+		accounts.Alt.PublicKey().ToBytes(),
+		accounts.Authority.PublicKey().ToBytes(),
+		accounts.Authority.PublicKey().ToBytes(),
+
+		// Address ordering matters
+		accounts.Vm.PublicKey().ToBytes(),
+		accounts.Omnibus.PublicKey().ToBytes(),
+		accounts.Mint.PublicKey().ToBytes(),
+		accounts.LiquidityPool.PublicKey().ToBytes(),
+		accounts.VaultBase.PublicKey().ToBytes(),
+		accounts.VaultMint.PublicKey().ToBytes(),
+		common.CoreMintAccount.PublicKey().ToBytes(),
+		system.RentSysVar,
+		system.RecentBlockhashesSysVar,
+	))
+
+	txn := solana.NewLegacyTransaction(
+		accounts.Authority.PublicKey().ToBytes(),
+		ixns...,
+	)
+
+	if len(txn.Marshal()) > solana.MaxTransactionSize {
+		return errors.New("transaction exceeds maximum size")
+	}
+
+	bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
+	if err != nil {
+		return errors.Wrap(err, "error getting latest blockhash")
+	}
+	txn.SetBlockhash(bh)
+
+	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+	if err != nil {
+		return errors.Wrap(err, "error signing transaction")
+	}
+
+	return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
+}
+
+func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrencyAccounts) error {
+	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err != nil {
+		return err
+	}
+
+	var state vm.MemoryAccountWithData
+	err = state.Unmarshal(ai.Data)
+	if err != nil {
+		return err
+	}
+
+	initVdnIxnsPerTxn := 22
+	initVdnBatchTxns := int(state.NumAccounts) / initVdnIxnsPerTxn
+	if int(state.NumAccounts)%initVdnIxnsPerTxn != 0 {
+		initVdnBatchTxns += 1
+	}
+
+	var mu sync.Mutex
+	var anyError error
+	var wg sync.WaitGroup
+	wg.Add(initVdnBatchTxns)
+	for batch := range initVdnBatchTxns {
+		go func(batch int) {
+			defer wg.Done()
+
+			func() error {
+				ixns := []solana.Instruction{
+					compute_budget.SetComputeUnitLimit(400_000),
+					compute_budget.SetComputeUnitPrice(10_000),
+				}
+				for i := range initVdnIxnsPerTxn {
+					randomOwner, err := common.NewRandomAccount()
+					if err != nil {
+						return errors.Wrap(err, "error generating random nonce owner")
+					}
+
+					memoryIndex := batch*initVdnIxnsPerTxn + i
+
+					if state.Data.IsAllocated(memoryIndex) {
+						continue
+					}
+					if memoryIndex >= int(state.NumAccounts) {
+						break
+					}
+
+					ixns = append(ixns, vm.NewInitNonceInstruction(
+						&vm.InitNonceInstructionAccounts{
+							VmAuthority:         accounts.Authority.PublicKey().ToBytes(),
+							Vm:                  accounts.Vm.PublicKey().ToBytes(),
+							VmMemory:            accounts.NonceMemoryAccount.PublicKey().ToBytes(),
+							VirtualAccountOwner: randomOwner.PublicKey().ToBytes(),
+						},
+						&vm.InitNonceInstructionArgs{
+							AccountIndex: uint16(memoryIndex),
+						},
+					))
+				}
+
+				txn := solana.NewLegacyTransaction(
+					accounts.Authority.PublicKey().ToBytes(),
+					ixns...,
+				)
+
+				bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
+				if err != nil {
+					return errors.Wrap(err, "error getting latest blockhash")
+				}
+				txn.SetBlockhash(bh)
+
+				err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+				if err != nil {
+					return errors.Wrap(err, "error signing transaction")
+				}
+
+				return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
+			}()
+
+			if err != nil {
+				mu.Lock()
+				anyError = err
+				mu.Unlock()
+			}
+		}(batch)
+	}
+	wg.Wait()
+
+	return anyError
+}
+
+func (p *runtime) initializeNoncePool(ctx context.Context, accounts *newCurrencyAccounts) error {
+	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err != nil {
+		return errors.Wrap(err, "error getting nonce memory account info")
+	}
+
+	var state vm.MemoryAccountWithData
+	err = state.Unmarshal(ai.Data)
+	if err != nil {
+		return errors.Wrap(err, "error unmarshalling nonce memory account")
+	}
+
+	vdns := make([]vm.VirtualDurableNonce, state.NumAccounts)
+	for i := range int(state.NumAccounts) {
+		if !state.Data.IsAllocated(i) {
+			return errors.Errorf("memory account state has uninitialized data at index %d", i)
+		}
+
+		rawVdn, ok := state.Data.Read(i)
+		if !ok {
+			return errors.Errorf("unable to read from allocated memory at index %d", i)
+		}
+
+		var vdn vm.VirtualDurableNonce
+		err = vdn.UnmarshalFromMemory(rawVdn)
+		if err != nil {
+			return err
+		}
+
+		vdns[i] = vdn
+	}
+
+	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		for _, vdn := range vdns {
+			record := nonce.Record{
+				Address:   base58.Encode(vdn.Address),
+				Authority: accounts.Authority.PublicKey().ToBase58(),
+				Blockhash: base58.Encode(vdn.Value[:]),
+
+				Environment:         nonce.EnvironmentVm,
+				EnvironmentInstance: accounts.Vm.PublicKey().ToBase58(),
+
+				Purpose: nonce.PurposeClientIntent,
+				State:   nonce.StateAvailable,
+
+				Signature: "",
+			}
+			err = p.data.SaveNonce(ctx, &record)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+func (p *runtime) addTimelockMemoryAccountToDb(ctx context.Context, accounts *newCurrencyAccounts) error {
+	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err != nil {
+		return errors.Wrap(err, "error getting timelock memory account info")
+	}
+
+	var state vm.MemoryAccountWithData
+	err = state.Unmarshal(ai.Data)
+	if err != nil {
+		return errors.Wrap(err, "error unmarshalling timelock memory account")
+	}
+
+	record := &ram.Record{
+		Vm: accounts.Vm.PublicKey().ToBase58(),
+
+		Address: accounts.TimelockMemoryAccount.PublicKey().ToBase58(),
+
+		Capacity:   uint16(state.NumAccounts),
+		NumSectors: 1,
+		NumPages:   uint16(state.NumAccounts),
+		PageSize:   uint8(state.AccountSize),
+
+		StoredAccountType: vm.VirtualAccountTypeTimelock,
+
+		CreatedAt: time.Now(),
+	}
+	err = p.data.InitializeVmMemory(ctx, record)
+	if err == ram.ErrAlreadyInitialized {
+		return nil
+	}
+	return err
+}
+
+func (p *runtime) getNewCurrencyAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, vmMetadataRecord *vm_metadata.Record) (*newCurrencyAccounts, error) {
+	authorityVaultRecord, err := p.data.GetKey(ctx, currencyMetadataRecord.Authority)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting authority vault record")
+	}
+
+	authority, err := common.NewAccountFromPrivateKeyString(authorityVaultRecord.PrivateKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid authority")
+	}
+
+	// Accounts directly from the currency metadata record
+	mint, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Mint)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid mint")
+	}
+	currencyConfig, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.CurrencyConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid currency config")
+	}
+	liquidityPool, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.LiquidityPool)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid liquidity pool")
+	}
+	vaultBase, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.VaultCore)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid vault base")
+	}
+	vaultMint, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.VaultMint)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid vault mint")
+	}
+	alt, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Alt)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid alt")
+	}
+
+	// Accounts directly from the VM metadata record
+	vmAccount, err := common.NewAccountFromPublicKeyString(vmMetadataRecord.Vm)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid vm")
+	}
+	omnibus, err := common.NewAccountFromPublicKeyString(vmMetadataRecord.Omnibus)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid omnibus")
+	}
+
+	// Derived metaplex metadata address
+	metaplexMetadataAddress, metaplexMetadataBump, err := currencycreator.GetMetadataAddress(&currencycreator.GetMetadataAddressArgs{
+		Mint: mint.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "error deriving metaplex metadata address")
+	}
+	metaplexMetadata, err := common.NewAccountFromPublicKeyBytes(metaplexMetadataAddress)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid metaplex metadata account")
+	}
+
+	// Derived memory account addresses
+	nonceMemoryAddress, nonceMemoryBump, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
+		Name: initialNonceMemoryAccountName,
+		Vm:   vmAccount.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "error deriving nonce memory account address")
+	}
+	nonceMemoryAccount, err := common.NewAccountFromPublicKeyBytes(nonceMemoryAddress)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid nonce memory account")
+	}
+
+	timelockMemoryAddress, timelockMemoryBump, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
+		Name: initialTimelockMemoryAccountName,
+		Vm:   vmAccount.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "error deriving timelock memory account address")
+	}
+	timelockMemoryAccount, err := common.NewAccountFromPublicKeyBytes(timelockMemoryAddress)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid timelock memory account")
+	}
+
+	// Derived fee account address
+	feeAtaAddress, err := token.GetAssociatedAccount(common.GetSubsidizer().PublicKey().ToBytes(), mint.PublicKey().ToBytes())
+	if err != nil {
+		return nil, errors.Wrap(err, "error deriving fee ata address")
+	}
+	fees, err := common.NewAccountFromPublicKeyBytes(feeAtaAddress)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid fee ata address")
+	}
+
+	return &newCurrencyAccounts{
+		Authority: authority,
+
+		Mint:     mint,
+		MintBump: currencyMetadataRecord.MintBump,
+
+		CurrencyConfig:     currencyConfig,
+		CurrencyConfigBump: currencyMetadataRecord.CurrencyConfigBump,
+
+		LiquidityPool:     liquidityPool,
+		LiquidityPoolBump: currencyMetadataRecord.LiquidityPoolBump,
+
+		MetaplexMetadata:     metaplexMetadata,
+		MetaplexMetadataBump: metaplexMetadataBump,
+
+		VaultBase:     vaultBase,
+		VaultBaseBump: currencyMetadataRecord.VaultCoreBump,
+
+		VaultMint:     vaultMint,
+		VaultMintBump: currencyMetadataRecord.VaultMintBump,
+
+		Vm:     vmAccount,
+		VmBump: vmMetadataRecord.VmBump,
+
+		Omnibus:     omnibus,
+		OmnibusBump: vmMetadataRecord.OmnibusBump,
+
+		NonceMemoryAccount: nonceMemoryAccount,
+		NonceMemoryBump:    nonceMemoryBump,
+
+		TimelockMemoryAccount: timelockMemoryAccount,
+		TimelockMemoryBump:    timelockMemoryBump,
+
+		Alt:           alt,
+		AltBump:       0, // Not tracked
+		AltRecentSlot: 0, // Not tracked
+
+		Fees: fees,
+	}, nil
 }

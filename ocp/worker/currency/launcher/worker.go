@@ -14,7 +14,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/retry"
-	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
@@ -27,6 +26,7 @@ const (
 	initialTimelockMemoryAccountName = "timelock-0"
 )
 
+// todo: Improve paralellization, given blocking initialization takes a long time
 func (p *runtime) worker(runtimeCtx context.Context, state currency.MetadataState, interval time.Duration) error {
 	var cursor query.Cursor
 	delay := interval
@@ -88,6 +88,7 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 		zap.String("method", "handle"),
 		zap.String("state", record.State.String()),
 		zap.String("mint", record.Mint),
+		zap.String("name", record.Name),
 	)
 
 	var err error
@@ -102,7 +103,7 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 		err = p.handleStateFinalValidation(ctx, record)
 	}
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure processing currency for launch")
+		log.With(zap.Error(err)).Warn("failure processing currency to launch")
 		return err
 	}
 	return nil
@@ -131,17 +132,17 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 		return errors.Wrap(err, "invalid authority")
 	}
 
-	privateKeyExists, err := validateAuthorityPrivateKeyExists(ctx, p.data, authorityAccount)
+	ok, err := validateAuthorityPrivateKeyExists(ctx, p.data, authorityAccount)
 	if err != nil {
 		return errors.Wrap(err, "error checking authority private key")
-	} else if !privateKeyExists {
+	} else if !ok {
 		return errors.New("authority private key doesn't exist")
 	}
 
-	isAuthorityFunded, remainingLamports, err := validateMinimumAuthorityFunding(ctx, p.data, authorityAccount, initialAuthorityFundingLamports)
+	ok, remainingLamports, err := validateMinimumAuthorityFunding(ctx, p.data, authorityAccount, initialAuthorityFundingLamports)
 	if err != nil {
 		return errors.Wrap(err, "error validating minimum authority funding")
-	} else if !isAuthorityFunded {
+	} else if !ok {
 		err = fundAuthority(ctx, p.data, authorityAccount, remainingLamports)
 		if err != nil {
 			return errors.Wrap(err, "error funding authority")
@@ -162,13 +163,102 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 	})
 }
 
-func (p *runtime) handleStateInitializing(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateInitializing)
+func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateInitializing)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	vmMetadataRecord, err := p.data.GetVmMetadataByMint(ctx, currencyMetadataRecord.Mint)
+	if err != nil {
+		return errors.Wrap(err, "error getting vm metadata record")
+	}
+
+	accounts, err := p.getNewCurrencyAccounts(ctx, currencyMetadataRecord, vmMetadataRecord)
+	if err != nil {
+		return errors.Wrap(err, "error getting currency accounts")
+	}
+
+	//
+	// Initialization phase 1 (init blockchain accounts)
+	//
+
+	ok, err := validateMintExists(ctx, p.data, accounts.Mint)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 1 is complete")
+	} else if !ok {
+		// Must derive ALT near time of creation due to recent slot requirement
+		err := p.deriveNewAlt(ctx, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error deriving new alt")
+		}
+
+		currencyMetadataRecord.Alt = accounts.Alt.PublicKey().ToBase58()
+		err = p.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
+		if err != nil {
+			return errors.Wrap(err, "error saving new alt")
+		}
+
+		err = p.initBlockchainAccounts(ctx, currencyMetadataRecord, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error initializing blockchain accounts")
+		}
+	}
+
+	//
+	// Initialization phase 2 (resize and extend blockchain accounts)
+	//
+
+	ok, err = validateAltIsExtended(ctx, p.data, accounts.Alt)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 2 is complete")
+	} else if !ok {
+		err = p.resizeAndExtendBlockchainAccounts(ctx, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error resizing and extending blockchain accounts")
+		}
+	}
+
+	// todo: Need mechanism for nonce memory accounts, which are pre-populated with random accounts
+	//       not known until after finalization. No direct impact here, given that we don't need to
+	//       reserve state later.
+
+	err = p.addTimelockMemoryAccountToDb(ctx, accounts)
+	if err != nil {
+		return errors.Wrap(err, "error adding timelock memory account to db")
+	}
+
+	// todo: add timelock memory account to reservation system
+
+	//
+	// Initialization phase 3 (nonce pool)
+	//
+
+	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, accounts.NonceMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
+	} else if !ok {
+		err := p.populateNonceMemory(ctx, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error populating nonce memory")
+		}
+	}
+
+	ok, err = validateNoncePoolInitialized(ctx, p.data, accounts.NonceMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
+	} else if !ok {
+		err := p.initializeNoncePool(ctx, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error initializing nonce pool")
+		}
+	}
+
+	//
+	// Initialization complete
+	//
+
+	return p.markCurrencyMetadataFinalValidation(ctx, currencyMetadataRecord)
 }
 
 func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
@@ -182,87 +272,68 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 		return errors.Wrap(err, "error getting vm metadata record")
 	}
 
-	currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(currencyMetadataRecord)
+	accounts, err := p.getNewCurrencyAccounts(ctx, currencyMetadataRecord, vmMetadataRecord)
 	if err != nil {
-		return errors.Wrap(err, "error getting launchpad currency accounts")
-	}
-	vmAccount, err := common.NewAccountFromPublicKeyString(vmMetadataRecord.Vm)
-	if err != nil {
-		return errors.Wrap(err, "invalid vm")
-	}
-	timelockMemoryAddress, _, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
-		Name: initialTimelockMemoryAccountName,
-		Vm:   vmAccount.PublicKey().ToBytes(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "error deriving timelock memory account address")
-	}
-	timelockMemoryAccount, err := common.NewAccountFromPublicKeyBytes(timelockMemoryAddress)
-	if err != nil {
-		return errors.Wrap(err, "invalid timelock memory account")
-	}
-	nonceMemoryAddress, _, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
-		Name: initialNonceMemoryAccountName,
-		Vm:   vmAccount.PublicKey().ToBytes(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "error deriving nonce memory account address")
-	}
-	nonceMemoryAccount, err := common.NewAccountFromPublicKeyBytes(nonceMemoryAddress)
-	if err != nil {
-		return errors.Wrap(err, "invalid timelock memory account")
+		return errors.Wrap(err, "error getting currency accounts")
 	}
 
-	ok, err := validateMintExists(ctx, p.data, currencyAccounts.Mint)
+	ok, err := validateMintExists(ctx, p.data, accounts.Mint)
 	if err != nil {
 		return errors.Wrap(err, "error validating mint exists")
 	} else if !ok {
 		return errors.New("mint doesn't exist")
 	}
 
-	ok, err = validateCurrencyConfigExists(ctx, p.data, currencyAccounts.CurrencyConfig)
+	ok, err = validateCurrencyConfigExists(ctx, p.data, accounts.CurrencyConfig)
 	if err != nil {
 		return errors.Wrap(err, "error validating currency config exists")
 	} else if !ok {
 		return errors.New("currency config doesn't exist")
 	}
 
-	ok, err = validateLiquidityPoolExists(ctx, p.data, currencyAccounts.LiquidityPool)
+	ok, err = validateLiquidityPoolExists(ctx, p.data, accounts.LiquidityPool)
 	if err != nil {
 		return errors.Wrap(err, "error validating liquidity pool exists")
 	} else if !ok {
 		return errors.New("")
 	}
 
-	ok, err = validateVmExists(ctx, p.data, vmAccount)
+	ok, err = validateVmExists(ctx, p.data, accounts.Vm)
 	if err != nil {
 		return errors.Wrap(err, "error validating vm exists")
 	} else if !ok {
 		return errors.New("vm doesn't exist")
 	}
 
-	ok, err = validateAltIsExtended(ctx, p.data, currencyAccounts.Alt)
+	ok, err = validateAltIsExtended(ctx, p.data, accounts.Alt)
 	if err != nil {
 		return errors.Wrap(err, "error validating alt exists and is extended")
 	} else if !ok {
 		return errors.New("alt failed validation")
 	}
 
-	ok, err = validateMemoryAccountIsResized(ctx, p.data, timelockMemoryAccount)
+	ok, err = validateFeeAccountExists(ctx, p.data, accounts.Fees)
+	if err != nil {
+		return errors.Wrap(err, "error validating fee acount exists")
+	} else if !ok {
+		return errors.New("fee account doesn't exist")
+	}
+
+	ok, err = validateMemoryAccountIsResized(ctx, p.data, accounts.TimelockMemoryAccount)
 	if err != nil {
 		return errors.Wrap(err, "error validating timelock memory account exists and is resized")
 	} else if !ok {
 		return errors.New("timelock memory account failed validation")
 	}
 
-	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, nonceMemoryAccount)
+	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, accounts.NonceMemoryAccount)
 	if err != nil {
 		return errors.Wrap(err, "error validating nonce memory account exists and is populated")
 	} else if !ok {
 		return errors.New("nonce memory account failed validation")
 	}
 
-	ok, err = validateNoncePoolInitialized(ctx, p.data, nonceMemoryAccount)
+	ok, err = validateNoncePoolInitialized(ctx, p.data, accounts.NonceMemoryAccount)
 	if err != nil {
 		return errors.Wrap(err, "error validating nonce pool is initialized")
 	} else if !ok {
