@@ -153,7 +153,7 @@ func validateAuthorityPrivateKeyExists(ctx context.Context, data ocp_data.Provid
 }
 
 func validateMinimumAuthorityFunding(ctx context.Context, data ocp_data.Provider, account *common.Account, amount uint64) (bool, uint64, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	switch err {
 	case nil:
 		if ai.Lamports >= initialAuthorityFundingLamports {
@@ -186,7 +186,7 @@ func fundAuthority(ctx context.Context, data ocp_data.Provider, account *common.
 }
 
 func validateMintExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -201,7 +201,7 @@ func validateMintExists(ctx context.Context, data ocp_data.Provider, account *co
 }
 
 func validateCurrencyConfigExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -216,7 +216,7 @@ func validateCurrencyConfigExists(ctx context.Context, data ocp_data.Provider, a
 }
 
 func validateLiquidityPoolExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -231,7 +231,7 @@ func validateLiquidityPoolExists(ctx context.Context, data ocp_data.Provider, ac
 }
 
 func validateVmExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -246,7 +246,7 @@ func validateVmExists(ctx context.Context, data ocp_data.Provider, account *comm
 }
 
 func validateAltExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -261,7 +261,7 @@ func validateAltExists(ctx context.Context, data ocp_data.Provider, account *com
 }
 
 func validateAltIsExtended(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -277,7 +277,7 @@ func validateAltIsExtended(ctx context.Context, data ocp_data.Provider, account 
 }
 
 func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -292,7 +292,7 @@ func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, accou
 }
 
 func validateMemoryAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -307,7 +307,7 @@ func validateMemoryAccountExists(ctx context.Context, data ocp_data.Provider, ac
 }
 
 func validateMemoryAccountIsResized(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -324,7 +324,7 @@ func validateMemoryAccountIsResized(ctx context.Context, data ocp_data.Provider,
 }
 
 func validateNonceMemoryAccountPopulated(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -356,7 +356,7 @@ func validateNonceMemoryAccountPopulated(ctx context.Context, data ocp_data.Prov
 }
 
 func validateNoncePoolInitialized(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return false, err
 	}
@@ -536,7 +536,7 @@ func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, account
 		compute_budget.SetComputeUnitPrice(10_000),
 	}
 
-	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return errors.Wrap(err, "error getting nonce memory account info")
 	}
@@ -546,7 +546,7 @@ func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, account
 		return errors.Wrap(err, "error unmarshalling nonce memory account")
 	}
 
-	ai, err = p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err = p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return errors.Wrap(err, "error getting timelock memory account info")
 	}
@@ -635,7 +635,7 @@ func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, account
 }
 
 func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrencyAccounts) error {
-	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return err
 	}
@@ -725,7 +725,7 @@ func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrency
 }
 
 func (p *runtime) initializeNoncePool(ctx context.Context, accounts *newCurrencyAccounts) error {
-	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return errors.Wrap(err, "error getting nonce memory account info")
 	}
@@ -782,7 +782,7 @@ func (p *runtime) initializeNoncePool(ctx context.Context, accounts *newCurrency
 }
 
 func (p *runtime) addTimelockMemoryAccountToDb(ctx context.Context, accounts *newCurrencyAccounts) error {
-	ai, err := p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err != nil {
 		return errors.Wrap(err, "error getting timelock memory account info")
 	}
