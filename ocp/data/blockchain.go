@@ -6,9 +6,9 @@ import (
 
 	"github.com/mr-tron/base58"
 
-	"github.com/code-payments/ocp-server/ocp/config"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
+	"github.com/code-payments/ocp-server/ocp/config"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/token"
 )
@@ -20,7 +20,7 @@ const (
 type BlockchainData interface {
 	SubmitBlockchainTransaction(ctx context.Context, tx *solana.Transaction) (solana.Signature, error)
 
-	GetBlockchainAccountInfo(ctx context.Context, account string, commitment solana.Commitment) (*solana.AccountInfo, error)
+	GetBlockchainAccountInfo(ctx context.Context, account string, commitment solana.Commitment) (*solana.AccountInfo, uint64, error)
 	GetBlockchainAccountDataAfterBlock(ctx context.Context, account string, slot uint64) ([]byte, uint64, error)
 	GetBlockchainBalance(ctx context.Context, account string) (uint64, uint64, error)
 	GetBlockchainBlock(ctx context.Context, slot uint64) (*solana.Block, error)
@@ -69,20 +69,20 @@ func (dp *BlockchainProvider) SubmitBlockchainTransaction(ctx context.Context, t
 	return res, err
 }
 
-func (dp *BlockchainProvider) GetBlockchainAccountInfo(ctx context.Context, account string, commitment solana.Commitment) (*solana.AccountInfo, error) {
+func (dp *BlockchainProvider) GetBlockchainAccountInfo(ctx context.Context, account string, commitment solana.Commitment) (*solana.AccountInfo, uint64, error) {
 	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainAccountInfo")
 	defer tracer.End()
 
 	accountId, err := base58.Decode(account)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	accountInfo, err := dp.sc.GetAccountInfo(accountId, commitment)
+	accountInfo, slot, err := dp.sc.GetAccountInfo(accountId, commitment)
 	if err != nil {
 		tracer.OnError(err)
 	}
 
-	return &accountInfo, err
+	return &accountInfo, slot, err
 }
 func (dp *BlockchainProvider) GetBlockchainAccountDataAfterBlock(ctx context.Context, account string, slot uint64) ([]byte, uint64, error) {
 	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainAccountDataAfterBlock")

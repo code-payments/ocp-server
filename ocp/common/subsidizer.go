@@ -112,7 +112,7 @@ func InjectTestSubsidizer(ctx context.Context, data ocp_data.Provider, testAccou
 
 // GetCurrentSubsidizerBalance returns the subsidizer's current balance in lamports.
 func GetCurrentSubsidizerBalance(ctx context.Context, data ocp_data.Provider) (uint64, error) {
-	accountInfo, err := data.GetBlockchainAccountInfo(ctx, GetSubsidizer().PublicKey().ToBase58(), solana.CommitmentProcessed)
+	accountInfo, _, err := data.GetBlockchainAccountInfo(ctx, GetSubsidizer().PublicKey().ToBase58(), solana.CommitmentProcessed)
 	if err != nil {
 		return 0, err
 	}

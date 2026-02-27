@@ -168,7 +168,7 @@ type TransactionSignature struct {
 //
 // Reference: https://docs.solana.com/apps/jsonrpc-api
 type Client interface {
-	GetAccountInfo(ed25519.PublicKey, Commitment) (AccountInfo, error)
+	GetAccountInfo(ed25519.PublicKey, Commitment) (AccountInfo, uint64, error)
 	GetAccountDataAfterBlock(ed25519.PublicKey, uint64) ([]byte, uint64, error)
 	GetBalance(ed25519.PublicKey) (uint64, error)
 	GetBlock(slot uint64) (*Block, error)
@@ -723,8 +723,11 @@ func (c *client) SubmitTransaction(txn Transaction, commitment Commitment) (Sign
 	return sig, err
 }
 
-func (c *client) GetAccountInfo(account ed25519.PublicKey, commitment Commitment) (accountInfo AccountInfo, err error) {
+func (c *client) GetAccountInfo(account ed25519.PublicKey, commitment Commitment) (accountInfo AccountInfo, slot uint64, err error) {
 	type rpcResponse struct {
+		Context struct {
+			Slot uint64 `json:"slot"`
+		} `json:"context"`
 		Value *struct {
 			Lamports   uint64   `json:"lamports"`
 			Owner      string   `json:"owner"`
@@ -743,27 +746,29 @@ func (c *client) GetAccountInfo(account ed25519.PublicKey, commitment Commitment
 
 	var resp rpcResponse
 	if err := c.call(&resp, "getAccountInfo", base58.Encode(account[:]), rpcConfig); err != nil {
-		return accountInfo, errors.Wrap(err, "getAccountInfo() failed to send request")
+		return accountInfo, 0, errors.Wrap(err, "getAccountInfo() failed to send request")
 	}
 
+	slot = resp.Context.Slot
+
 	if resp.Value == nil {
-		return accountInfo, ErrNoAccountInfo
+		return accountInfo, slot, ErrNoAccountInfo
 	}
 
 	accountInfo.Owner, err = base58.Decode(resp.Value.Owner)
 	if err != nil {
-		return accountInfo, errors.Wrap(err, "invalid base58 encoded owner")
+		return accountInfo, slot, errors.Wrap(err, "invalid base58 encoded owner")
 	}
 
 	accountInfo.Data, err = base64.StdEncoding.DecodeString(resp.Value.Data[0])
 	if err != nil {
-		return accountInfo, errors.Wrap(err, "invalid base58 encoded data")
+		return accountInfo, slot, errors.Wrap(err, "invalid base58 encoded data")
 	}
 
 	accountInfo.Lamports = resp.Value.Lamports
 	accountInfo.Executable = resp.Value.Executable
 
-	return accountInfo, nil
+	return accountInfo, slot, nil
 }
 
 func (c *client) GetAccountDataAfterBlock(account ed25519.PublicKey, slot uint64) ([]byte, uint64, error) {

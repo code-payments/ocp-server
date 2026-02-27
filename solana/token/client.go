@@ -33,7 +33,7 @@ func NewClient(sc solana.Client) *Client {
 // If the account is not initialized, or belongs to a different
 // mint, then ErrInvalidTokenAccount is returned.
 func (c *Client) GetAccount(accountID, mintID ed25519.PublicKey, commitment solana.Commitment) (*Account, error) {
-	accountInfo, err := c.sc.GetAccountInfo(accountID, commitment)
+	accountInfo, _, err := c.sc.GetAccountInfo(accountID, commitment)
 	if err == solana.ErrNoAccountInfo {
 		return nil, ErrAccountNotFound
 	} else if err != nil {

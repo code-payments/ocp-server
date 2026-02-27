@@ -2162,7 +2162,7 @@ func validateTimelockUnlockStateDoesntExist(ctx context.Context, data ocp_data.P
 		return err
 	}
 
-	_, err = data.GetBlockchainAccountInfo(ctx, timelockAccounts.Unlock.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	_, _, err = data.GetBlockchainAccountInfo(ctx, timelockAccounts.Unlock.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	switch err {
 	case nil:
 		return NewIntentDeniedError("an account being opened has already initiated an unlock")
