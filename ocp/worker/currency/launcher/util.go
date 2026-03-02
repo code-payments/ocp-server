@@ -187,7 +187,9 @@ func fundAuthority(ctx context.Context, data ocp_data.Provider, account *common.
 
 func validateMintExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -202,7 +204,9 @@ func validateMintExists(ctx context.Context, data ocp_data.Provider, account *co
 
 func validateCurrencyConfigExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -217,7 +221,9 @@ func validateCurrencyConfigExists(ctx context.Context, data ocp_data.Provider, a
 
 func validateLiquidityPoolExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -232,7 +238,9 @@ func validateLiquidityPoolExists(ctx context.Context, data ocp_data.Provider, ac
 
 func validateVmExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -247,7 +255,9 @@ func validateVmExists(ctx context.Context, data ocp_data.Provider, account *comm
 
 func validateAltExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -262,7 +272,9 @@ func validateAltExists(ctx context.Context, data ocp_data.Provider, account *com
 
 func validateAltIsExtended(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -278,7 +290,9 @@ func validateAltIsExtended(ctx context.Context, data ocp_data.Provider, account 
 
 func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -293,7 +307,9 @@ func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, accou
 
 func validateMemoryAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -308,7 +324,9 @@ func validateMemoryAccountExists(ctx context.Context, data ocp_data.Provider, ac
 
 func validateMemoryAccountIsResized(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -325,7 +343,9 @@ func validateMemoryAccountIsResized(ctx context.Context, data ocp_data.Provider,
 
 func validateNonceMemoryAccountPopulated(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
@@ -357,7 +377,9 @@ func validateNonceMemoryAccountPopulated(ctx context.Context, data ocp_data.Prov
 
 func validateNoncePoolInitialized(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
-	if err != nil {
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 
