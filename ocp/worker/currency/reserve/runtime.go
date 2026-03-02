@@ -147,6 +147,8 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 				log.With(zap.Error(err)).Warn("failed to put currency reserve")
 				return
 			}
+
+			recordReserveStateEvent(ctx, mint, circulatingSupply)
 		}(mint)
 	}
 	wg.Wait()
