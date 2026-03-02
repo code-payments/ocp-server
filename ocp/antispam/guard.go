@@ -32,20 +32,6 @@ func (g *Guard) AllowOpenAccounts(ctx context.Context, owner *common.Account, ac
 	return allow, nil
 }
 
-func (g *Guard) AllowWelcomeBonus(ctx context.Context, owner *common.Account) (bool, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "AllowWelcomeBonus")
-	defer tracer.End()
-
-	allow, reason, err := g.integration.AllowWelcomeBonus(ctx, owner)
-	if err != nil {
-		return false, err
-	}
-	if !allow {
-		recordDenialEvent(ctx, actionWelcomeBonus, reason)
-	}
-	return allow, nil
-}
-
 func (g *Guard) AllowSendPayment(ctx context.Context, owner, destination *common.Account, isPublic bool) (bool, error) {
 	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "AllowSendPayment")
 	defer tracer.End()

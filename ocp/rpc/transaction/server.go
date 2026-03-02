@@ -28,7 +28,6 @@ type transactionServer struct {
 	auth *auth_util.RPCSignatureVerifier
 
 	submitIntentIntegration SubmitIntentIntegration
-	airdropIntegration      AirdropIntegration
 
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -39,9 +38,6 @@ type transactionServer struct {
 	localAccountLocksMu sync.Mutex
 	localAccountLocks   map[string]*sync.Mutex
 
-	airdropperLock sync.Mutex
-	airdropper     *common.TimelockAccounts
-
 	feeCollector *common.Account
 
 	transactionpb.UnimplementedTransactionServer
@@ -51,7 +47,6 @@ func NewTransactionServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
 	submitIntentIntegration SubmitIntentIntegration,
-	airdropIntegration AirdropIntegration,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 	nodeID string,
@@ -96,7 +91,6 @@ func NewTransactionServer(
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
 		submitIntentIntegration: submitIntentIntegration,
-		airdropIntegration:      airdropIntegration,
 
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
@@ -111,14 +105,6 @@ func NewTransactionServer(
 	s.feeCollector, err = common.NewAccountFromPublicKeyString(s.conf.feeCollectorOwnerPublicKey.Get(ctx))
 	if err != nil {
 		return nil, err
-	}
-
-	airdropper := s.conf.airdropperOwnerPublicKey.Get(ctx)
-	if len(airdropper) > 0 && airdropper != defaultAirdropperOwnerPublicKey {
-		err := s.loadAirdropper(ctx)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return s, nil

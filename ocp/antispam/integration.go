@@ -14,8 +14,6 @@ import (
 type Integration interface {
 	AllowOpenAccounts(ctx context.Context, owner *common.Account, accountSet transactionpb.OpenAccountsMetadata_AccountSet) (bool, string, error)
 
-	AllowWelcomeBonus(ctx context.Context, owner *common.Account) (bool, string, error)
-
 	AllowSendPayment(ctx context.Context, owner, destination *common.Account, isPublic bool) (bool, string, error)
 
 	AllowReceivePayments(ctx context.Context, owner *common.Account, isPublic bool) (bool, string, error)
@@ -36,10 +34,6 @@ func NewAllowEverything() Integration {
 }
 
 func (i *allowEverythingIntegration) AllowOpenAccounts(ctx context.Context, owner *common.Account, accountSet transactionpb.OpenAccountsMetadata_AccountSet) (bool, string, error) {
-	return true, "", nil
-}
-
-func (i *allowEverythingIntegration) AllowWelcomeBonus(ctx context.Context, owner *common.Account) (bool, string, error) {
 	return true, "", nil
 }
 

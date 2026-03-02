@@ -4,18 +4,15 @@ import (
 	"context"
 	"time"
 
-	"github.com/code-payments/ocp-server/ocp/common"
-	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/metrics"
+	"github.com/code-payments/ocp-server/ocp/data/intent"
 )
 
 const (
 	userIntentCreatedEventName            = "UserIntentCreated"
 	submitIntentLatencyBreakdownEventName = "SubmitIntentLatencyBreakdown"
 	criticalSubmitIntentFailure           = "CriticalSubmitIntentFailure"
-
-	airdropEventName = "Airdrop"
 )
 
 func recordUserIntentCreatedEvent(ctx context.Context, intentRecord *intent.Record) {
@@ -56,11 +53,4 @@ func recordCriticalSubmitIntentFailure(ctx context.Context, intentRecord *intent
 	}
 
 	metrics.RecordEvent(ctx, criticalSubmitIntentFailure, kvs)
-}
-
-func recordAirdropEvent(ctx context.Context, owner *common.Account, airdropType AirdropType) {
-	metrics.RecordEvent(ctx, airdropEventName, map[string]interface{}{
-		"owner":        owner.PublicKey().ToBase58(),
-		"airdrop_type": airdropType.String(),
-	})
 }
