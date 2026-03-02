@@ -10,6 +10,7 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/usdc"
 	"github.com/code-payments/ocp-server/usdf"
@@ -80,31 +81,45 @@ func IsSupportedMint(ctx context.Context, data ocp_data.Provider, mintAccount *A
 		return entry.isSupported, nil
 	}
 
-	isSupported, err := isSupportedMint(ctx, data, mintAccount)
+	isSupported, canCache, err := isSupportedMint(ctx, data, mintAccount)
 	if err != nil {
 		return false, err
 	}
 
-	supportedMintCacheMu.Lock()
-	supportedMintCache[mintAddress] = supportedMintCacheEntry{
-		isSupported: isSupported,
-		cachedAt:    time.Now(),
+	if canCache {
+		supportedMintCacheMu.Lock()
+		supportedMintCache[mintAddress] = supportedMintCacheEntry{
+			isSupported: isSupported,
+			cachedAt:    time.Now(),
+		}
+		supportedMintCacheMu.Unlock()
 	}
-	supportedMintCacheMu.Unlock()
 
 	return isSupported, nil
 }
 
-func isSupportedMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (bool, error) {
+func isSupportedMint(ctx context.Context, data ocp_data.Provider, mintAccount *Account) (isSupported bool, canCache bool, err error) {
 	if !IsCoreMint(mintAccount) && !IsCoreMintUsdStableCoin() {
-		return false, nil
+		return false, true, nil
 	}
 
-	_, err := GetVmConfigForMint(ctx, data, mintAccount)
+	_, err = GetVmConfigForMint(ctx, data, mintAccount)
 	if err == ErrUnsupportedMint {
-		return false, nil
+		// Don't cache supported=false for launchpad currencies that exist
+		// but aren't in the available state yet, since they may become
+		// available at any time.
+		canCache = true
+		if !IsCoreMint(mintAccount) {
+			_, err := data.GetCurrencyMetadata(ctx, mintAccount.PublicKey().ToBase58())
+			if err == nil {
+				canCache = false
+			} else if err != currency.ErrNotFound {
+				return false, false, err
+			}
+		}
+		return false, canCache, nil
 	} else if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return true, nil
+	return true, true, nil
 }
