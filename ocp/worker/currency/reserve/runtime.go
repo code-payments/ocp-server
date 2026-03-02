@@ -1,4 +1,4 @@
-package currency
+package reserve
 
 import (
 	"context"
@@ -25,7 +25,7 @@ type reserveRuntime struct {
 	mints   []*common.Account
 }
 
-func NewReserveRuntime(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
 	return &reserveRuntime{
 		log:  log,
 		data: data,
