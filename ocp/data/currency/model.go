@@ -12,7 +12,10 @@ type MetadataState uint8
 const (
 	MetadataStateUnknown MetadataState = iota
 	MetadataStateAvailable
-	// todo: define more states
+	MetadataStateWaitingForInitialPurchase
+	MetadataStateFundingAuthority
+	MetadataStateInitializing
+	MetadataStateFinalValidation
 )
 
 type SocialLinkType uint8
@@ -290,4 +293,20 @@ func (m *ReserveRecord) CopyTo(dst *ReserveRecord) {
 	dst.Mint = m.Mint
 	dst.SupplyFromBonding = m.SupplyFromBonding
 	dst.Time = m.Time
+}
+
+func (s MetadataState) String() string {
+	switch s {
+	case MetadataStateAvailable:
+		return "available"
+	case MetadataStateWaitingForInitialPurchase:
+		return "waiting_for_initial_purchase"
+	case MetadataStateFundingAuthority:
+		return "funding_authority"
+	case MetadataStateInitializing:
+		return "initializing"
+	case MetadataStateFinalValidation:
+		return "final_validation"
+	}
+	return "unknown"
 }

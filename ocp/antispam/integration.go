@@ -21,6 +21,8 @@ type Integration interface {
 	AllowDistribution(ctx context.Context, owner *common.Account, isPublic bool) (bool, string, error)
 
 	AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account) (bool, string, error)
+
+	AllowCurrencyLaunch(ctx context.Context, owner *common.Account, name, symbol string) (bool, string, error)
 }
 
 type allowEverythingIntegration struct {
@@ -48,5 +50,9 @@ func (i *allowEverythingIntegration) AllowDistribution(ctx context.Context, owne
 }
 
 func (i *allowEverythingIntegration) AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account) (bool, string, error) {
+	return true, "", nil
+}
+
+func (i *allowEverythingIntegration) AllowCurrencyLaunch(ctx context.Context, owner *common.Account, name, symbol string) (bool, string, error) {
 	return true, "", nil
 }

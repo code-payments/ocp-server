@@ -17,6 +17,8 @@ const (
 	actionDistribution    = "Distribution"
 
 	actionSwap = "Swap"
+
+	actionLaunchCurrency = "LaunchCurrency"
 )
 
 func recordDenialEvent(ctx context.Context, action, reason string) {

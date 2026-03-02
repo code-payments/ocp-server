@@ -287,7 +287,7 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 
 			ON CONFLICT (mint)
 			DO UPDATE
-				SET description = $3, image_url = $4, bill_colors = $5, social_links = $6, state = $22, version = `+metadataTableName+`.version + 1
+				SET description = $3, image_url = $4, bill_colors = $5, social_links = $6, alt = $21, state = $22, version = `+metadataTableName+`.version + 1
 				WHERE `+metadataTableName+`.mint = $9 AND `+metadataTableName+`.version = $23
 
 			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at`,
@@ -394,6 +394,28 @@ func dbGetAllExchangeRatesForRange(ctx context.Context, db *sqlx.DB, symbol stri
 	return res, nil
 }
 
+func dbGetAllMetadataByState(ctx context.Context, db *sqlx.DB, state currency.MetadataState, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*metadataModel, error) {
+	res := []*metadataModel{}
+
+	query := `SELECT
+		id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at
+		FROM ` + metadataTableName + `
+		WHERE state = $1`
+
+	opts := []interface{}{state}
+	query, opts = q.PaginateQuery(query, opts, cursor, limit, direction)
+
+	err := db.SelectContext(ctx, &res, query, opts...)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)
+	}
+
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
+	return res, nil
+}
+
 func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*metadataModel, error) {
 	res := &metadataModel{}
 	err := db.GetContext(ctx, res,
@@ -418,6 +440,25 @@ func dbGetAllMints(ctx context.Context, db *sqlx.DB) ([]string, error) {
 		return nil, currency.ErrNotFound
 	}
 
+	return res, nil
+}
+
+func dbCountMints(ctx context.Context, db *sqlx.DB) (uint64, error) {
+	var count uint64
+	err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM `+metadataTableName)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func dbCountMetadataByState(ctx context.Context, db *sqlx.DB, state currency.MetadataState) (uint64, error) {
+	var res uint64
+	query := `SELECT COUNT(*) FROM ` + metadataTableName + ` WHERE state = $1`
+	err := db.GetContext(ctx, &res, query, state)
+	if err != nil {
+		return 0, err
+	}
 	return res, nil
 }
 

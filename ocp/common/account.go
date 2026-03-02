@@ -534,7 +534,9 @@ func ValidateExternalTokenAccount(ctx context.Context, data ocp_data.Provider, t
 }
 
 type LaunchpadCurrencyAccounts struct {
+	Authority          *Account
 	Mint               *Account
+	MintBump           uint8
 	CurrencyConfig     *Account
 	CurrencyConfigBump uint8
 	LiquidityPool      *Account
@@ -543,9 +545,14 @@ type LaunchpadCurrencyAccounts struct {
 	VaultBaseBump      uint8
 	VaultMint          *Account
 	VaultMintBump      uint8
+	Alt                *Account
 }
 
 func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*LaunchpadCurrencyAccounts, error) {
+	authority, err := NewAccountFromPublicKeyString(metadataRecord.Authority)
+	if err != nil {
+		return nil, err
+	}
 	mint, err := NewAccountFromPublicKeyString(metadataRecord.Mint)
 	if err != nil {
 		return nil, err
@@ -566,8 +573,14 @@ func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*Lau
 	if err != nil {
 		return nil, err
 	}
+	alt, err := NewAccountFromPublicKeyString(metadataRecord.Alt)
+	if err != nil {
+		return nil, err
+	}
 	return &LaunchpadCurrencyAccounts{
+		Authority:          authority,
 		Mint:               mint,
+		MintBump:           metadataRecord.MintBump,
 		CurrencyConfig:     currencyConfig,
 		CurrencyConfigBump: metadataRecord.CurrencyConfigBump,
 		LiquidityPool:      liquidityPool,
@@ -576,6 +589,7 @@ func GetLaunchpadCurrencyAccounts(metadataRecord *currency.MetadataRecord) (*Lau
 		VaultBaseBump:      metadataRecord.VaultCoreBump,
 		VaultMint:          vaultMint,
 		VaultMintBump:      metadataRecord.VaultMintBump,
+		Alt:                alt,
 	}, nil
 }
 

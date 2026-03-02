@@ -87,3 +87,17 @@ func (g *Guard) AllowSwap(ctx context.Context, fundingSource swap.FundingSource,
 	}
 	return allow, nil
 }
+
+func (g *Guard) AllowCurrencyLaunch(ctx context.Context, owner *common.Account, name, symbol string) (bool, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "AllowCurrencyLaunch")
+	defer tracer.End()
+
+	allow, reason, err := g.integration.AllowCurrencyLaunch(ctx, owner, name, symbol)
+	if err != nil {
+		return false, err
+	}
+	if !allow {
+		recordDenialEvent(ctx, actionLaunchCurrency, reason)
+	}
+	return allow, nil
+}

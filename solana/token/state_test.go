@@ -10,6 +10,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMintRoundTrip(t *testing.T) {
+	mintAuthority := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for i := range mintAuthority {
+		mintAuthority[i] = 1
+	}
+	freezeAuthority := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for i := range freezeAuthority {
+		freezeAuthority[i] = 2
+	}
+
+	expected := Mint{
+		MintAuthority:   mintAuthority,
+		Supply:          1000000,
+		Decimals:        9,
+		IsInitialized:   true,
+		FreezeAuthority: freezeAuthority,
+	}
+
+	var actual Mint
+	require.True(t, actual.Unmarshal(expected.Marshal()))
+	assert.Equal(t, expected, actual)
+}
+
+func TestMintUnmarshalInvalidSize(t *testing.T) {
+	var m Mint
+	assert.False(t, m.Unmarshal([]byte{0x00}))
+	assert.False(t, m.Unmarshal(make([]byte, MintSize+1)))
+}
+
+func TestMintNoAuthorities(t *testing.T) {
+	expected := Mint{
+		Supply:        500,
+		Decimals:      6,
+		IsInitialized: true,
+	}
+
+	var actual Mint
+	require.True(t, actual.Unmarshal(expected.Marshal()))
+	assert.Equal(t, expected, actual)
+	assert.Empty(t, actual.MintAuthority)
+	assert.Empty(t, actual.FreezeAuthority)
+}
+
 func TestUnmarshal(t *testing.T) {
 	data, err := hex.DecodeString("118a08c9d4cc46c576282e0daf050bbdb04f03313e35e5db3f3def69fa1eeec42b15a9cd4bef2cd809e464570d2a6cbd9bcc64e32ea4ebbcf748757bbb3dd5bd000084e2506ce67c000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
 	require.NoError(t, err)

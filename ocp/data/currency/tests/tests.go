@@ -20,7 +20,10 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testMetadataRoundTrip,
 		testMetadataSaveWithVersioning,
 		testMetadataUniqueNameConstraint,
+		testGetAllMetadataByState,
 		testGetAllMints,
+		testCountMints,
+		testCountMetadataByState,
 		testReserveRoundTrip,
 		testGetReservesInRange,
 	} {
@@ -271,6 +274,118 @@ func testMetadataUniqueNameConstraint(t *testing.T, s currency.Store) {
 	assert.Equal(t, currency.ErrDuplicateCurrency, s.SaveMetadata(context.Background(), record2))
 }
 
+func testGetAllMetadataByState(t *testing.T, s currency.Store) {
+	t.Run("testGetAllMetadataByState", func(t *testing.T) {
+		ctx := context.Background()
+
+		// No records should exist initially
+		_, err := s.GetAllMetadataByState(ctx, currency.MetadataStateUnknown, query.EmptyCursor, 100, query.Ascending)
+		assert.Equal(t, currency.ErrNotFound, err)
+
+		// Create records
+		record1 := &currency.MetadataRecord{
+			Name:        "Currency1",
+			Symbol:      "C1",
+			Description: "First test currency",
+			ImageUrl:    "https://example.com/c1.png",
+			BillColors:  []string{"#000000"},
+			SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+			Seed:      "seed1",
+			Authority: "auth1",
+
+			Mint:     "mint1111111111111111111111111111111111111111111",
+			MintBump: 255,
+			Decimals: currencycreator.DefaultMintDecimals,
+
+			CurrencyConfig:     "config1111111111111111111111111111111111111111",
+			CurrencyConfigBump: 255,
+
+			LiquidityPool:     "pool111111111111111111111111111111111111111111",
+			LiquidityPoolBump: 255,
+
+			VaultMint:     "vmint11111111111111111111111111111111111111111",
+			VaultMintBump: 255,
+
+			VaultCore:     "vcore11111111111111111111111111111111111111111",
+			VaultCoreBump: 255,
+
+			SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+			Alt: "alt111111111111111111111111111111111111111111111",
+
+			CreatedBy: "creator1",
+			CreatedAt: time.Now(),
+		}
+
+		record2 := record1.Clone()
+		record2.Name = "Currency2"
+		record2.Symbol = "C2"
+		record2.Seed = "seed2"
+		record2.Mint = "mint2222222222222222222222222222222222222222222"
+		record2.CurrencyConfig = "config2222222222222222222222222222222222222222"
+		record2.LiquidityPool = "pool222222222222222222222222222222222222222222"
+		record2.VaultMint = "vmint22222222222222222222222222222222222222222"
+		record2.VaultCore = "vcore22222222222222222222222222222222222222222"
+		record2.Alt = "alt222222222222222222222222222222222222222222222"
+
+		require.NoError(t, s.SaveMetadata(ctx, record1))
+		require.NoError(t, s.SaveMetadata(ctx, record2))
+
+		// Both should be in unknown state
+		items, err := s.GetAllMetadataByState(ctx, currency.MetadataStateUnknown, query.EmptyCursor, 100, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+
+		// No records in available state
+		_, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 100, query.Ascending)
+		assert.Equal(t, currency.ErrNotFound, err)
+
+		// Move record1 to available
+		record1.State = currency.MetadataStateAvailable
+		require.NoError(t, s.SaveMetadata(ctx, record1))
+
+		// Now only record2 should be unknown
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateUnknown, query.EmptyCursor, 100, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record2.Mint, items[0].Mint)
+
+		// Record1 should be available
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 100, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record1.Mint, items[0].Mint)
+
+		// Test limit
+		record2.State = currency.MetadataStateAvailable
+		require.NoError(t, s.SaveMetadata(ctx, record2))
+
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 1, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+
+		// Test cursor pagination ascending
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.ToCursor(items[0].Id), 10, query.Ascending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record2.Mint, items[0].Mint)
+
+		// Test descending order returns highest ID first
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.EmptyCursor, 10, query.Descending)
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+		assert.Equal(t, record2.Mint, items[0].Mint)
+		assert.Equal(t, record1.Mint, items[1].Mint)
+
+		// Test cursor pagination descending
+		items, err = s.GetAllMetadataByState(ctx, currency.MetadataStateAvailable, query.ToCursor(items[0].Id), 10, query.Descending)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+		assert.Equal(t, record1.Mint, items[0].Mint)
+	})
+}
+
 func testGetAllMints(t *testing.T, s currency.Store) {
 	// No mints should exist initially
 	mints, err := s.GetAllMints(context.Background())
@@ -333,6 +448,178 @@ func testGetAllMints(t *testing.T, s currency.Store) {
 	assert.Len(t, mints, 2)
 	assert.Contains(t, mints, record1.Mint)
 	assert.Contains(t, mints, record2.Mint)
+}
+
+func testCountMints(t *testing.T, s currency.Store) {
+	// No mints should exist initially
+	count, err := s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	// Insert two metadata records with different mints
+	record1 := &currency.MetadataRecord{
+		Name:        "Currency1",
+		Symbol:      "C1",
+		Description: "First test currency",
+		ImageUrl:    "https://example.com/c1.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "seed1",
+		Authority: "auth1",
+
+		Mint:     "mint1111111111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "config1111111111111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "pool111111111111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "vmint11111111111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "vcore11111111111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "alt111111111111111111111111111111111111111111111",
+
+		CreatedBy: "creator1",
+		CreatedAt: time.Now(),
+	}
+
+	record2 := record1.Clone()
+	record2.Name = "Currency2"
+	record2.Symbol = "C2"
+	record2.Description = "Second test currency"
+	record2.Seed = "seed2"
+	record2.Mint = "mint2222222222222222222222222222222222222222222"
+	record2.CurrencyConfig = "config2222222222222222222222222222222222222222"
+	record2.LiquidityPool = "pool222222222222222222222222222222222222222222"
+	record2.VaultMint = "vmint22222222222222222222222222222222222222222"
+	record2.VaultCore = "vcore22222222222222222222222222222222222222222"
+	record2.Alt = "alt222222222222222222222222222222222222222222222"
+
+	require.NoError(t, s.SaveMetadata(context.Background(), record1))
+
+	count, err = s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	require.NoError(t, s.SaveMetadata(context.Background(), record2))
+
+	count, err = s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, count)
+}
+
+func testCountMetadataByState(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+
+	// No records should exist initially
+	for _, state := range []currency.MetadataState{
+		currency.MetadataStateUnknown,
+		currency.MetadataStateAvailable,
+		currency.MetadataStateWaitingForInitialPurchase,
+		currency.MetadataStateFundingAuthority,
+		currency.MetadataStateInitializing,
+		currency.MetadataStateFinalValidation,
+	} {
+		count, err := s.CountMetadataByState(ctx, state)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, count)
+	}
+
+	// Insert two metadata records (both default to Unknown state)
+	record1 := &currency.MetadataRecord{
+		Name:        "Currency1",
+		Symbol:      "C1",
+		Description: "First test currency",
+		ImageUrl:    "https://example.com/c1.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "seed1",
+		Authority: "auth1",
+
+		Mint:     "mint1111111111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "config1111111111111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "pool111111111111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "vmint11111111111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "vcore11111111111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "alt111111111111111111111111111111111111111111111",
+
+		CreatedBy: "creator1",
+		CreatedAt: time.Now(),
+	}
+
+	record2 := record1.Clone()
+	record2.Name = "Currency2"
+	record2.Symbol = "C2"
+	record2.Seed = "seed2"
+	record2.Mint = "mint2222222222222222222222222222222222222222222"
+	record2.CurrencyConfig = "config2222222222222222222222222222222222222222"
+	record2.LiquidityPool = "pool222222222222222222222222222222222222222222"
+	record2.VaultMint = "vmint22222222222222222222222222222222222222222"
+	record2.VaultCore = "vcore22222222222222222222222222222222222222222"
+	record2.Alt = "alt222222222222222222222222222222222222222222222"
+
+	require.NoError(t, s.SaveMetadata(ctx, record1))
+	require.NoError(t, s.SaveMetadata(ctx, record2))
+
+	// Both should be in unknown state
+	count, err := s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateAvailable)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	// Move record1 to available
+	record1.State = currency.MetadataStateAvailable
+	require.NoError(t, s.SaveMetadata(ctx, record1))
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateAvailable)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	// Move record2 to initializing
+	record2.State = currency.MetadataStateInitializing
+	require.NoError(t, s.SaveMetadata(ctx, record2))
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateAvailable)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
+
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateInitializing)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
 }
 
 func testReserveRoundTrip(t *testing.T, s currency.Store) {
@@ -479,6 +766,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
 	}
+	record.Alt = "updatedalt1111111111111111111111111111111111111"
 	require.NoError(t, s.SaveMetadata(context.Background(), record))
 	assert.EqualValues(t, 2, record.Version)
 	assert.EqualValues(t, currency.MetadataStateAvailable, record.State)
@@ -495,6 +783,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
 	}, actual.SocialLinks)
+	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 
 	// Verify immutable fields were preserved
 	assert.Equal(t, "Versioned", actual.Name)
@@ -508,6 +797,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated2.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle2"},
 	}
+	record.Alt = "stalealt1111111111111111111111111111111111111111"
 	record.State = currency.MetadataStateUnknown
 	record.Version = 1
 	assert.Equal(t, currency.ErrStaleMetadataVersion, s.SaveMetadata(context.Background(), record))
@@ -524,6 +814,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
 	}, actual.SocialLinks)
+	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 }
 
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {

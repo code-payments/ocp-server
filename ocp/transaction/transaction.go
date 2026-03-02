@@ -9,6 +9,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
+	"github.com/code-payments/ocp-server/solana/system"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
@@ -338,6 +339,25 @@ func MakeExternalTransferWithAuthorityTransaction(
 	}
 	instructions = append(instructions, execInstruction)
 	return MakeNoncedTransaction(nonce, instructions...)
+}
+
+func MakeSolanaTransferTransaction(
+	source, destination *common.Account,
+	lamports uint64,
+	bh solana.Blockhash,
+) (solana.Transaction, error) {
+	txn := solana.NewLegacyTransaction(
+		common.GetSubsidizer().PublicKey().ToBytes(),
+		compute_budget.SetComputeUnitPrice(10_000),
+		compute_budget.SetComputeUnitLimit(1_000),
+		system.Transfer(
+			source.PublicKey().ToBytes(),
+			destination.PublicKey().ToBytes(),
+			lamports,
+		),
+	)
+	txn.SetBlockhash(bh)
+	return txn, nil
 }
 
 type MergedMemoryBankResult struct {

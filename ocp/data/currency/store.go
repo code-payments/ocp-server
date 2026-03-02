@@ -47,17 +47,28 @@ type Store interface {
 
 	// SaveMetadata creates or updates currency creator metadata in the store.
 	// On insert, Version is set to 1. On update, only mutable fields (Description,
-	// ImageUrl, BillColors, SocialLinks, State) are updated and Version is incremented.
+	// ImageUrl, BillColors, SocialLinks, Alt, State) are updated and Version is incremented.
 	// ErrStaleMetadataVersion is returned when the provided version doesn't match.
 	SaveMetadata(ctx context.Context, record *MetadataRecord) error
 
 	// GetMetadata gets currency creator mint metadata by the mint address
 	GetMetadata(ctx context.Context, mint string) (*MetadataRecord, error)
 
+	// GetAllMetadataByState returns all currency metadata records in a given state
+	//
+	// ErrNotFound is returned if no metadata records exist for the given state
+	GetAllMetadataByState(ctx context.Context, state MetadataState, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*MetadataRecord, error)
+
+	// CountMetadataByState returns the count of currency metadata records in the requested state
+	CountMetadataByState(ctx context.Context, state MetadataState) (uint64, error)
+
 	// GetAllMints returns the public keys of all currency creator mints
 	//
 	// ErrNotFound is returned if no mints exist
 	GetAllMints(ctx context.Context) ([]string, error)
+
+	// CountMints returns the total number of currency creator mints
+	CountMints(ctx context.Context) (uint64, error)
 
 	// PutReserveRecord puts a currency creator mint reserve records into the store.
 	PutReserveRecord(ctx context.Context, record *ReserveRecord) error

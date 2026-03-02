@@ -1,4 +1,4 @@
-package currency
+package exchange_rate
 
 import (
 	"context"
@@ -21,7 +21,7 @@ type exchangeRateRuntime struct {
 	data ocp_data.Provider
 }
 
-func NewExchangeRateRuntime(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
 	return &exchangeRateRuntime{
 		log:  log,
 		data: data,

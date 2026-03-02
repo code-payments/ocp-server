@@ -7,8 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 
 	pg "github.com/code-payments/ocp-server/database/postgres"
 )
@@ -124,8 +124,29 @@ func (s *store) GetMetadata(ctx context.Context, mint string) (*currency.Metadat
 	return fromMetadataModel(model), nil
 }
 
+func (s *store) GetAllMetadataByState(ctx context.Context, state currency.MetadataState, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*currency.MetadataRecord, error) {
+	models, err := dbGetAllMetadataByState(ctx, s.db, state, cursor, limit, direction)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]*currency.MetadataRecord, len(models))
+	for i, model := range models {
+		res[i] = fromMetadataModel(model)
+	}
+	return res, nil
+}
+
 func (s *store) GetAllMints(ctx context.Context) ([]string, error) {
 	return dbGetAllMints(ctx, s.db)
+}
+
+func (s *store) CountMints(ctx context.Context) (uint64, error) {
+	return dbCountMints(ctx, s.db)
+}
+
+func (s *store) CountMetadataByState(ctx context.Context, state currency.MetadataState) (uint64, error) {
+	return dbCountMetadataByState(ctx, s.db, state)
 }
 
 func (s *store) PutReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {

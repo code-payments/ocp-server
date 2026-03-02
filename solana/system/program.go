@@ -112,6 +112,62 @@ func DecompileCreateAccount(m solana.Message, index int) (*DecompiledCreateAccou
 	return v, nil
 }
 
+// Reference: https://github.com/solana-labs/solana/blob/f02a78d8fff2dd7297dc6ce6eb5a68a3002f5359/sdk/src/system_instruction.rs#L76-L84
+func Transfer(sender, recipient ed25519.PublicKey, lamports uint64) solana.Instruction {
+	// # Account references
+	//   0. [WRITE, SIGNER] Funding account
+	//   1. [WRITE] Recipient account
+	//
+	// Transfer { lamports: u64 }
+	data := make([]byte, 4+8)
+	binary.LittleEndian.PutUint32(data, commandTransfer)
+	binary.LittleEndian.PutUint64(data[4:], lamports)
+
+	return solana.NewInstruction(
+		ProgramKey[:],
+		data,
+		solana.NewAccountMeta(sender, true),
+		solana.NewAccountMeta(recipient, false),
+	)
+}
+
+type DecompiledTransfer struct {
+	Sender    ed25519.PublicKey
+	Recipient ed25519.PublicKey
+
+	Lamports uint64
+}
+
+func DecompileTransfer(m solana.Message, index int) (*DecompiledTransfer, error) {
+	if index >= len(m.Instructions) {
+		return nil, errors.Errorf("instruction doesn't exist at %d", index)
+	}
+
+	var prefix [4]byte
+	binary.LittleEndian.PutUint32(prefix[:], commandTransfer)
+	i := m.Instructions[index]
+
+	if !bytes.Equal(m.Accounts[i.ProgramIndex], ProgramKey[:]) {
+		return nil, solana.ErrIncorrectProgram
+	}
+	if !bytes.HasPrefix(i.Data, prefix[:]) {
+		return nil, solana.ErrIncorrectInstruction
+	}
+
+	if len(i.Accounts) != 2 {
+		return nil, errors.Errorf("invalid number of accounts: %d", len(i.Accounts))
+	}
+	if len(i.Data) != 12 {
+		return nil, errors.Errorf("invalid instruction data size: %d", len(i.Data))
+	}
+
+	return &DecompiledTransfer{
+		Sender:    m.Accounts[i.Accounts[0]],
+		Recipient: m.Accounts[i.Accounts[1]],
+		Lamports:  binary.LittleEndian.Uint64(i.Data[4:]),
+	}, nil
+}
+
 // Reference: https://github.com/solana-labs/solana/blob/f02a78d8fff2dd7297dc6ce6eb5a68a3002f5359/sdk/src/system_instruction.rs#L113-L119
 func AdvanceNonce(nonce, authority ed25519.PublicKey) solana.Instruction {
 	/// # Account references

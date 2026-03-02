@@ -55,26 +55,28 @@ func fromKeyModel(obj *vaultModel) *vault.Record {
 }
 
 func (m *vaultModel) dbSave(ctx context.Context, db *sqlx.DB) error {
-	query := `INSERT INTO ` + vaultTableName + `
-		(public_key, private_key, state, created_at)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (public_key)
-		DO UPDATE
-			SET state = $3
-			WHERE ` + vaultTableName + `.public_key = $1 
-		RETURNING
-			id, public_key, private_key, state, created_at`
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		query := `INSERT INTO ` + vaultTableName + `
+			(public_key, private_key, state, created_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (public_key)
+			DO UPDATE
+				SET state = $3
+				WHERE ` + vaultTableName + `.public_key = $1
+			RETURNING
+				id, public_key, private_key, state, created_at`
 
-	err := db.QueryRowxContext(
-		ctx,
-		query,
-		m.PublicKey,
-		m.PrivateKey,
-		m.State,
-		m.CreatedAt,
-	).StructScan(m)
+		err := tx.QueryRowxContext(
+			ctx,
+			query,
+			m.PublicKey,
+			m.PrivateKey,
+			m.State,
+			m.CreatedAt,
+		).StructScan(m)
 
-	return pgutil.CheckNoRows(err, vault.ErrInvalidKey)
+		return pgutil.CheckNoRows(err, vault.ErrInvalidKey)
+	})
 }
 
 func dbGetCount(ctx context.Context, db *sqlx.DB) (uint64, error) {

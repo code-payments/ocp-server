@@ -2,12 +2,14 @@ package currency
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mr-tron/base58"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -22,13 +24,19 @@ import (
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/grpc/client"
+	"github.com/code-payments/ocp-server/ocp/antispam"
+	auth_util "github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/vault"
+	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/system"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
@@ -46,8 +54,15 @@ type cachedProtoMint struct {
 }
 
 type currencyServer struct {
-	log  *zap.Logger
+	log *zap.Logger
+
+	conf *conf
+
 	data ocp_data.Provider
+
+	auth *auth_util.RPCSignatureVerifier
+
+	antispamGuard *antispam.Guard
 
 	exchangeRateHistoryCache cache.Cache
 	reserveHistoryCache      cache.Cache
@@ -63,14 +78,24 @@ type currencyServer struct {
 func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	antispamGuard *antispam.Guard,
 	configProvider ConfigProvider,
 ) currencypb.CurrencyServer {
-	liveMintStateWorker := newLiveMintStateWorker(log, data, configProvider())
+	conf := configProvider()
+
+	liveMintStateWorker := newLiveMintStateWorker(log, data, conf)
 	liveMintStateWorker.start(context.Background())
 
 	return &currencyServer{
-		log:  log,
+		log: log,
+
+		conf: conf,
+
 		data: data,
+
+		auth: auth_util.NewRPCSignatureVerifier(log, data),
+
+		antispamGuard: antispamGuard,
 
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
@@ -782,4 +807,225 @@ func (s *currencyServer) StreamLiveMintData(
 			return status.Error(codes.Canceled, "")
 		}
 	}
+}
+
+func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchRequest) (*currencypb.LaunchResponse, error) {
+	log := s.log.With(zap.String("method", "Launch"))
+	log = client.InjectLoggingMetadata(ctx, log)
+
+	ownerAccount, err := common.NewAccountFromProto(req.Owner)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid owner address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	signature := req.Signature
+	req.Signature = nil
+	err = s.auth.Authenticate(ctx, ownerAccount, req, signature)
+	if err != nil {
+		return nil, err
+	}
+
+	// Restrict currency launch internally for now
+	if ownerAccount.PublicKey().ToBase58() != s.conf.adminPublicKey.Get(ctx) {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
+	count, err := s.data.CountCurrencyMints(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to count currency mints")
+		return nil, status.Error(codes.Internal, "")
+	}
+	if count > s.conf.maxCurrencyCount.Get(ctx) {
+		log.Info("exceeded max currencies")
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
+	name := strings.TrimSpace(req.Name)
+
+	switch name {
+	case common.CoreMintName:
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
+	symbol := req.Symbol
+	if len(symbol) == 0 {
+		symbol = strings.ToUpper(name)
+	}
+	symbol = strings.ToUpper(strings.Map(
+		func(r rune) rune {
+			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+				return -1
+			}
+			return r
+		},
+		req.Symbol,
+	))
+	if len(symbol) > currencycreator.MaxCurrencyConfigAccountSymbolLength {
+		symbol = symbol[0:currencycreator.MaxCurrencyConfigAccountSymbolLength]
+	}
+
+	allow, err := s.antispamGuard.AllowCurrencyLaunch(ctx, ownerAccount, name, symbol)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to perform antispam checks")
+		return nil, status.Error(codes.Internal, "")
+	} else if !allow {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
+	authority, err := common.NewRandomAccount()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to generate authority key")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	seed, err := common.NewRandomAccount()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to generating seed")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	targetMintAddress, targetMintBump, err := currencycreator.GetMintAddress(&currencycreator.GetMintAddressArgs{
+		Authority: authority.PublicKey().ToBytes(),
+		Name:      name,
+		Seed:      seed.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive mint address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	currencyAddress, currencyBump, err := currencycreator.GetCurrencyAddress(&currencycreator.GetCurrencyAddressArgs{
+		Mint: targetMintAddress,
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive currency config address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	poolAddress, poolBump, err := currencycreator.GetPoolAddress(&currencycreator.GetPoolAddressArgs{
+		Currency: currencyAddress,
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive liquidity pool address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	vaultBaseAddress, vaultBaseBump, err := currencycreator.GetVaultAddress(&currencycreator.GetVaultAddressArgs{
+		Pool: poolAddress,
+		Mint: common.CoreMintAccount.PublicKey().ToBytes(),
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive base vault address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	vaultTargetAddress, vaultTargetBump, err := currencycreator.GetVaultAddress(&currencycreator.GetVaultAddressArgs{
+		Pool: poolAddress,
+		Mint: targetMintAddress,
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive target vault address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	vmAddress, vmBump, err := vm.GetVmAddress(&vm.GetVmAddressArgs{
+		Mint:         targetMintAddress,
+		VmAuthority:  authority.PublicKey().ToBytes(),
+		LockDuration: timelock_token.DefaultNumDaysLocked,
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive vm address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	vmOmnibusAddress, vmOmnibusBump, err := vm.GetVmObnibusAddress(&vm.GetVmObnibusAddressArgs{
+		Vm: vmAddress,
+	})
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to derive vm omnibus address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	creationTs := time.Now()
+
+	authorityVaultRecord := vault.Record{
+		PublicKey:  authority.PublicKey().ToBase58(),
+		PrivateKey: authority.PrivateKey().ToBase58(),
+		State:      vault.StateReserved,
+		CreatedAt:  creationTs,
+	}
+
+	currencyMetadataRecord := &currency.MetadataRecord{
+		Name:        name,
+		Symbol:      symbol,
+		Description: " ",
+		ImageUrl:    "https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/default/icon.jpg",
+
+		Seed: seed.PublicKey().ToBase58(),
+
+		Authority: authority.PublicKey().ToBase58(),
+
+		Mint:     base58.Encode(targetMintAddress),
+		MintBump: targetMintBump,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     base58.Encode(currencyAddress),
+		CurrencyConfigBump: currencyBump,
+
+		LiquidityPool:     base58.Encode(poolAddress),
+		LiquidityPoolBump: poolBump,
+
+		VaultMint:     base58.Encode(vaultTargetAddress),
+		VaultMintBump: vaultTargetBump,
+
+		VaultCore:     base58.Encode(vaultBaseAddress),
+		VaultCoreBump: vaultBaseBump,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: base58.Encode(system.ProgramKey[:]), // ALT filled in later due to recent slot requirements
+
+		State: currency.MetadataStateUnknown,
+
+		CreatedBy: ownerAccount.PublicKey().ToBase58(),
+		CreatedAt: creationTs,
+	}
+
+	vmMetadataRecord := &vm_metadata.Record{
+		Mint:        base58.Encode(targetMintAddress),
+		Authority:   authority.PublicKey().ToBase58(),
+		Vm:          base58.Encode(vmAddress),
+		VmBump:      vmBump,
+		Omnibus:     base58.Encode(vmOmnibusAddress),
+		OmnibusBump: vmOmnibusBump,
+		DaysLocked:  timelock_token.DefaultNumDaysLocked,
+		State:       vm_metadata.StateUnknown,
+		CreatedAt:   creationTs,
+	}
+
+	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		err := s.data.SaveKey(ctx, &authorityVaultRecord)
+		if err != nil {
+			return err
+		}
+
+		err = s.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
+		if err != nil {
+			return err
+		}
+
+		return s.data.SaveVmMetadata(ctx, vmMetadataRecord)
+	})
+	if err == currency.ErrDuplicateCurrency {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_EXISTS}, nil
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failed to save currency and vm metadata")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	return &currencypb.LaunchResponse{
+		Result: currencypb.LaunchResponse_OK,
+		Mint:   &commonpb.SolanaAccountId{Value: targetMintAddress},
+	}, nil
 }
