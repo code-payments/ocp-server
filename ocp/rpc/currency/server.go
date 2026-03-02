@@ -850,19 +850,18 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 	symbol := req.Symbol
 	if len(symbol) == 0 {
-		symbol = strings.ToUpper(name)
-	}
-	symbol = strings.ToUpper(strings.Map(
-		func(r rune) rune {
-			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-				return -1
-			}
-			return r
-		},
-		req.Symbol,
-	))
-	if len(symbol) > currencycreator.MaxCurrencyConfigAccountSymbolLength {
-		symbol = symbol[0:currencycreator.MaxCurrencyConfigAccountSymbolLength]
+		symbol = strings.ToUpper(strings.Map(
+			func(r rune) rune {
+				if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+					return -1
+				}
+				return r
+			},
+			name,
+		))
+		if len(symbol) > currencycreator.MaxCurrencyConfigAccountSymbolLength {
+			symbol = symbol[0:currencycreator.MaxCurrencyConfigAccountSymbolLength]
+		}
 	}
 
 	allow, err := s.antispamGuard.AllowCurrencyLaunch(ctx, ownerAccount, name, symbol)
