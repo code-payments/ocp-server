@@ -17,8 +17,6 @@ const (
 	actionDistribution    = "Distribution"
 
 	actionSwap = "Swap"
-
-	actionWelcomeBonus = "WelcomeBonus"
 )
 
 func recordDenialEvent(ctx context.Context, action, reason string) {
