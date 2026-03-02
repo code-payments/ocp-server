@@ -66,7 +66,7 @@ func (m *vaultModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 			RETURNING
 				id, public_key, private_key, state, created_at`
 
-		err := db.QueryRowxContext(
+		err := tx.QueryRowxContext(
 			ctx,
 			query,
 			m.PublicKey,
