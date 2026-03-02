@@ -78,7 +78,7 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.CreatedAt = time.Now()
 		}
 
-		err := db.QueryRowxContext(ctx,
+		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+tableName+`
 		(mint, authority, vm, vm_bump, omnibus, omnibus_bump, days_locked, state, version, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9 + 1, $10)
