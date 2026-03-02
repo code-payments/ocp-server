@@ -5,8 +5,6 @@ import (
 
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
-	currency_lib "github.com/code-payments/ocp-server/currency"
-	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 )
 
@@ -34,22 +32,4 @@ func (i *defaultSubmitIntentIntegration) AllowCreation(ctx context.Context, inte
 
 func (i *defaultSubmitIntentIntegration) OnSuccess(ctx context.Context, intentRecord *intent.Record) error {
 	return nil
-}
-
-type AirdropIntegration interface {
-	// GetWelcomeBonusAmount returns the amount that should be paid for the
-	// welcome bonus. Return 0 amount if the airdrop should not be sent.
-	GetWelcomeBonusAmount(ctx context.Context, owner *common.Account) (float64, currency_lib.Code, error)
-}
-
-type defaultAirdropIntegration struct{}
-
-// NewDefaultAirdropIntegration retuns an AirdropIntegration that sends $1 USD
-// to everyone
-func NewDefaultAirdropIntegration() AirdropIntegration {
-	return &defaultAirdropIntegration{}
-}
-
-func (i *defaultAirdropIntegration) GetWelcomeBonusAmount(ctx context.Context, owner *common.Account) (float64, currency_lib.Code, error) {
-	return 1.0, currency_lib.USD, nil
 }
