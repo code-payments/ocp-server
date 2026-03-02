@@ -17,18 +17,11 @@ func recordReserveStateEvent(ctx context.Context, mint *common.Account, supply u
 		return
 	}
 
-	sellValueInQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
-		CurrentSupplyInQuarks: supply,
-		SellAmountInQuarks:    supply,
-		ValueMintDecimals:     uint8(common.CoreMintDecimals),
-		SellFeeBps:            0,
-	})
-
-	usdMarketValue := float64(sellValueInQuarks) / float64(common.CoreMintQuarksPerUnit)
-
+	price, _ := currencycreator.EstimateCurrentPrice(supply).Float64()
+	usdMarketCap := price * (float64(supply) / float64(currencycreator.DefaultMintQuarksPerUnit))
 	metrics.RecordEvent(ctx, reserveStateEventName, map[string]interface{}{
-		"mint":             mint.PublicKey().ToBase58(),
-		"supply":           supply,
-		"usd_market_value": usdMarketValue,
+		"mint":           mint.PublicKey().ToBase58(),
+		"supply":         supply,
+		"usd_market_cap": usdMarketCap,
 	})
 }
