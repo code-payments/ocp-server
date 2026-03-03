@@ -232,6 +232,84 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 	return resp, nil
 }
 
+func (s *currencyServer) UpdateMetadata(ctx context.Context, req *currencypb.UpdateMetadataRequest) (*currencypb.UpdateMetadataResponse, error) {
+	log := s.log.With(zap.String("method", "UpdateMetadata"))
+	log = client.InjectLoggingMetadata(ctx, log)
+
+	ownerAccount, err := common.NewAccountFromProto(req.Owner)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid owner address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	signature := req.Signature
+	req.Signature = nil
+	err = s.auth.Authenticate(ctx, ownerAccount, req, signature)
+	if err != nil {
+		return nil, err
+	}
+
+	mintAccount, err := common.NewAccountFromProto(req.Mint)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid mint address")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	metadataRecord, err := s.data.GetCurrencyMetadata(ctx, mintAccount.PublicKey().ToBase58())
+	if err == currency.ErrNotFound {
+		return &currencypb.UpdateMetadataResponse{Result: currencypb.UpdateMetadataResponse_NOT_FOUND}, nil
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failed to load currency metadata record")
+		return nil, status.Error(codes.Internal, "")
+	}
+	if metadataRecord.State != currency.MetadataStateAvailable {
+		return &currencypb.UpdateMetadataResponse{Result: currencypb.UpdateMetadataResponse_NOT_FOUND}, nil
+	}
+
+	if ownerAccount.PublicKey().ToBase58() != metadataRecord.CreatedBy {
+		return &currencypb.UpdateMetadataResponse{Result: currencypb.UpdateMetadataResponse_DENIED}, nil
+	}
+
+	if req.NewDescription != nil {
+		metadataRecord.Description = req.NewDescription.Value
+	}
+
+	if req.NewBillCustomization != nil {
+		var colors []string
+		for _, c := range req.NewBillCustomization.Value.Colors {
+			colors = append(colors, c.Hex)
+		}
+		metadataRecord.BillColors = colors
+	}
+
+	if req.NewSocialLinks != nil {
+		var socialLinks []currency.SocialLink
+		for _, link := range req.NewSocialLinks.Value {
+			switch t := link.Type.(type) {
+			case *currencypb.SocialLink_Website_:
+				socialLinks = append(socialLinks, currency.SocialLink{
+					Type:  currency.SocialLinkTypeWebsite,
+					Value: t.Website.Url,
+				})
+			case *currencypb.SocialLink_X_:
+				socialLinks = append(socialLinks, currency.SocialLink{
+					Type:  currency.SocialLinkTypeX,
+					Value: t.X.Username,
+				})
+			}
+		}
+		metadataRecord.SocialLinks = socialLinks
+	}
+
+	err = s.data.SaveCurrencyMetadata(ctx, metadataRecord)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to save currency metadata")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	return &currencypb.UpdateMetadataResponse{Result: currencypb.UpdateMetadataResponse_OK}, nil
+}
+
 func (s *currencyServer) getCachedProtoMint(mintAccount *common.Account) (*currencypb.Mint, bool) {
 	s.getMintsCacheMu.RLock()
 	defer s.getMintsCacheMu.RUnlock()
