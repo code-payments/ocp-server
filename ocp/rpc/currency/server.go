@@ -52,13 +52,13 @@ func NewCurrencyServer(
 	antispamGuard *antispam.Guard,
 	s3Client *s3.Client,
 	configProvider ConfigProvider,
-) currencypb.CurrencyServer {
+) (currencypb.CurrencyServer, func()) {
 	conf := configProvider()
 
 	liveMintStateWorker := newLiveMintStateWorker(log, data, conf)
 	liveMintStateWorker.start(context.Background())
 
-	return &currencyServer{
+	s := &currencyServer{
 		log: log,
 
 		conf: conf,
@@ -78,4 +78,6 @@ func NewCurrencyServer(
 
 		liveMintStateWorker: liveMintStateWorker,
 	}
+
+	return s, s.liveMintStateWorker.stop
 }
