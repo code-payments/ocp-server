@@ -23,14 +23,16 @@ const (
 	CoreMintVmAccountPublicKey = "JACkaKsm2Rd6TNJwH4UB7G6tHrWUATJPTgNNnRVsg4ip"
 	CoreMintVmOmnibusPublicKey = "D8oUTXRvarxhx9cjYdFJqWAVj2rmzry58bS6JSTiQsv5"
 
-	DefaultCurrencyIconImageUrl = "https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/default/icon.jpg"
+	CurrencyAssetsS3BucketName   = "flipcash-currency-assets"
+	CurrencyAssetsS3BucketRegion = "us-east-1"
 )
 
 var (
-	CoreMintImageUrl       = fmt.Sprintf("https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/%s/icon.png", CoreMintPublicKeyString)
+	CoreMintImageUrl       = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s/icon.png", CurrencyAssetsS3BucketName, CurrencyAssetsS3BucketRegion, CoreMintPublicKeyString)
 	CoreMintPublicKeyBytes []byte
 
-	DefaultBillColors = []string{"#AAAAAA", "#2C2C2C"}
+	DefaultCurrencyIconImageUrl = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/default/icon.jpg", CurrencyAssetsS3BucketName, CurrencyAssetsS3BucketRegion)
+	DefaultBillColors           = []string{"#AAAAAA", "#2C2C2C"}
 )
 
 func init() {
