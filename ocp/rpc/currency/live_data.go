@@ -67,6 +67,9 @@ func (s *currencyServer) StreamLiveMintData(
 
 	// Register stream with state worker
 	stream := s.liveMintStateWorker.registerStream(streamID, requestedMints)
+	if stream == nil {
+		return status.Error(codes.Unavailable, "server is shutting down")
+	}
 	defer s.liveMintStateWorker.unregisterStream(streamID)
 
 	log.Debug("stream registered")

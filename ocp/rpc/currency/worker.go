@@ -55,6 +55,7 @@ type liveMintStateWorker struct {
 
 	streamsMu sync.RWMutex
 	streams   map[string]*liveMintDataStream
+	stopped   bool
 
 	exchangeRatesReady     chan struct{}
 	exchangeRatesReadyOnce sync.Once
@@ -89,12 +90,15 @@ func (m *liveMintStateWorker) start(ctx context.Context) error {
 	return nil
 }
 
-// stop cancels the polling goroutines and closes all streams
+// stop cancels the polling goroutines and closes all streams.
+// After stop is called, no new streams can be registered.
 func (m *liveMintStateWorker) stop() {
 	m.cancel()
 
 	m.streamsMu.Lock()
 	defer m.streamsMu.Unlock()
+
+	m.stopped = true
 
 	for _, stream := range m.streams {
 		stream.close()
@@ -152,13 +156,18 @@ func (m *liveMintStateWorker) trackMints(ctx context.Context, mints []*common.Ac
 	return nil
 }
 
-// registerStream creates and registers a new stream for the given mints
+// registerStream creates and registers a new stream for the given mints.
+// Returns nil if the worker has been stopped.
 func (m *liveMintStateWorker) registerStream(id string, mints []*common.Account) *liveMintDataStream {
-	stream := newLiveMintDataStream(id, mints, streamBufferSize)
-
 	m.streamsMu.Lock()
+	defer m.streamsMu.Unlock()
+
+	if m.stopped {
+		return nil
+	}
+
+	stream := newLiveMintDataStream(id, mints, streamBufferSize)
 	m.streams[id] = stream
-	m.streamsMu.Unlock()
 
 	return stream
 }
