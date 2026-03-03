@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
