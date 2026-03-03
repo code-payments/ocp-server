@@ -7,6 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 
 	"github.com/code-payments/ocp-server/cache"
@@ -31,6 +33,8 @@ type currencyServer struct {
 
 	antispamGuard *antispam.Guard
 
+	s3Client *s3.Client
+
 	exchangeRateHistoryCache cache.Cache
 	reserveHistoryCache      cache.Cache
 
@@ -46,6 +50,7 @@ func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
 	antispamGuard *antispam.Guard,
+	s3Client *s3.Client,
 	configProvider ConfigProvider,
 ) currencypb.CurrencyServer {
 	conf := configProvider()
@@ -63,6 +68,8 @@ func NewCurrencyServer(
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
 		antispamGuard: antispamGuard,
+
+		s3Client: s3Client,
 
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),

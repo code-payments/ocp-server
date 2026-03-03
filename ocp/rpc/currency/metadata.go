@@ -254,6 +254,7 @@ func (s *currencyServer) UpdateMetadata(ctx context.Context, req *currencypb.Upd
 		log.With(zap.Error(err)).Warn("invalid mint address")
 		return nil, status.Error(codes.Internal, "")
 	}
+	log = log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
 
 	metadataRecord, err := s.data.GetCurrencyMetadata(ctx, mintAccount.PublicKey().ToBase58())
 	if err == currency.ErrNotFound {
