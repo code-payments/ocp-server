@@ -22,11 +22,15 @@ const (
 
 	CoreMintVmAccountPublicKey = "JACkaKsm2Rd6TNJwH4UB7G6tHrWUATJPTgNNnRVsg4ip"
 	CoreMintVmOmnibusPublicKey = "D8oUTXRvarxhx9cjYdFJqWAVj2rmzry58bS6JSTiQsv5"
+
+	DefaultCurrencyIconImageUrl = "https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/default/icon.jpg"
 )
 
 var (
 	CoreMintImageUrl       = fmt.Sprintf("https://flipcash-currency-assets.s3.us-east-1.amazonaws.com/%s/icon.png", CoreMintPublicKeyString)
 	CoreMintPublicKeyBytes []byte
+
+	DefaultBillColors = []string{"#AAAAAA", "#2C2C2C"}
 )
 
 func init() {
