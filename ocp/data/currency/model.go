@@ -24,6 +24,8 @@ const (
 	SocialLinkTypeUnknown SocialLinkType = iota
 	SocialLinkTypeWebsite
 	SocialLinkTypeX
+	SocialLinkTypeTelegram
+	SocialLinkTypeDiscord
 )
 
 type SocialLink struct {
