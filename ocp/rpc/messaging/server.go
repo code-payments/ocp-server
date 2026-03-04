@@ -47,7 +47,9 @@ const (
 type server struct {
 	log  *zap.Logger
 	conf *conf
-	data ocp_data.Provider
+
+	data         ocp_data.Provider
+	messageStore messaging.Store
 
 	streamsMu          sync.RWMutex
 	streams            map[string]*messageStream
@@ -66,10 +68,12 @@ type server struct {
 func NewMessagingClient(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	messageStore messaging.Store,
 ) InternalMessageClient {
 	return &server{
-		log:  log,
-		data: data,
+		log:          log,
+		data:         data,
+		messageStore: messageStore,
 	}
 }
 
@@ -79,6 +83,7 @@ func NewMessagingClient(
 func NewMessagingClientAndServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	messageStore messaging.Store,
 	rpcSignatureVerifier *auth.RPCSignatureVerifier,
 	broadcastAddress string,
 	configProvider ConfigProvider,
@@ -87,6 +92,7 @@ func NewMessagingClientAndServer(
 		log:                  log,
 		conf:                 configProvider(),
 		data:                 data,
+		messageStore:         messageStore,
 		streams:              make(map[string]*messageStream),
 		individualStreamMu:   make(map[string]*sync.Mutex),
 		rpcSignatureVerifier: rpcSignatureVerifier,
@@ -505,7 +511,7 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 		return nil, err
 	}
 
-	records, err := s.data.GetMessages(ctx, rendezvousAccount.PublicKey().ToBase58())
+	records, err := s.messageStore.Get(ctx, rendezvousAccount.PublicKey().ToBase58())
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load undelivered messages")
 		return nil, status.Error(codes.Internal, "")
@@ -556,7 +562,7 @@ func (s *server) AckMessages(ctx context.Context, req *messagingpb.AckMessagesRe
 			return nil, status.Error(codes.Internal, "")
 		}
 
-		if err := s.data.DeleteMessage(ctx, account, converted); err != nil {
+		if err := s.messageStore.Delete(ctx, account, converted); err != nil {
 			log.With(zap.Error(err)).Warn("Failed to delete message")
 			return nil, status.Error(codes.Internal, "")
 		}
@@ -688,7 +694,7 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 			Message:   messageWithGeneratedIDAndSignatureBytes,
 		}
 
-		err = s.data.CreateMessage(ctx, record)
+		err = s.messageStore.Insert(ctx, record)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to create message")
 			return err
@@ -750,7 +756,7 @@ func (s *server) flush(ctx context.Context, accountID *messagingpb.RendezvousKey
 		zap.String("account_id", accountStr),
 	)
 
-	records, err := s.data.GetMessages(ctx, accountStr)
+	records, err := s.messageStore.Get(ctx, accountStr)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("Failed to load undelivered messages")
 		return

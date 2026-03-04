@@ -26,6 +26,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/messaging"
+	"github.com/code-payments/ocp-server/ocp/data/messaging/memory"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
 	"github.com/code-payments/ocp-server/testutil"
 )
@@ -47,6 +48,7 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 	require.NoError(t, err)
 
 	data := ocp_data.NewTestDataProvider()
+	messageStore := memory.New()
 
 	env.client1 = &clientEnv{
 		ctx:              context.Background(),
@@ -75,14 +77,14 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 		},
 	}))
 
-	s1 := NewMessagingClientAndServer(log, data, auth.NewRPCSignatureVerifier(log, data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
+	s1 := NewMessagingClientAndServer(log, data, messageStore, auth.NewRPCSignatureVerifier(log, data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
 	env.server1 = &serverEnv{
 		ctx:        context.Background(),
 		server:     s1,
 		subsidizer: subsidizer,
 	}
 
-	s2 := NewMessagingClientAndServer(log, data, auth.NewRPCSignatureVerifier(log, data), conn2.Target(), withManualTestOverrides(&testOverrides{}))
+	s2 := NewMessagingClientAndServer(log, data, messageStore, auth.NewRPCSignatureVerifier(log, data), conn2.Target(), withManualTestOverrides(&testOverrides{}))
 	env.server2 = &serverEnv{
 		ctx:        context.Background(),
 		server:     s2,
@@ -115,13 +117,13 @@ type serverEnv struct {
 }
 
 func (s *serverEnv) getMessages(t *testing.T, rendezvousKey *common.Account) []*messaging.Record {
-	messages, err := s.server.data.GetMessages(s.ctx, rendezvousKey.PublicKey().ToBase58())
+	messages, err := s.server.messageStore.Get(s.ctx, rendezvousKey.PublicKey().ToBase58())
 	require.NoError(t, err)
 	return messages
 }
 
 func (s *serverEnv) assertNoMessages(t *testing.T, rendezvousKey *common.Account) {
-	messages, err := s.server.data.GetMessages(s.ctx, rendezvousKey.PublicKey().ToBase58())
+	messages, err := s.server.messageStore.Get(s.ctx, rendezvousKey.PublicKey().ToBase58())
 	require.NoError(t, err)
 	assert.Empty(t, messages)
 }

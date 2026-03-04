@@ -15,10 +15,10 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	messagingpb "github.com/code-payments/ocp-protobuf-api/generated/go/messaging/v1"
 
+	"github.com/code-payments/ocp-server/grpc/headers"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/messaging"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
-	"github.com/code-payments/ocp-server/grpc/headers"
 	"github.com/code-payments/ocp-server/retry"
 	"github.com/code-payments/ocp-server/retry/backoff"
 )
@@ -81,7 +81,7 @@ func (s *server) InternallyCreateMessage(ctx context.Context, rendezvousKey *com
 	}
 
 	// Save the message to the DB
-	err = s.data.CreateMessage(ctx, record)
+	err = s.messageStore.Insert(ctx, record)
 	if err != nil {
 		return uuid.Nil, errors.Wrap(err, "error saving message to db")
 	}

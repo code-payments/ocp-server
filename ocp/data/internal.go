@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/code-payments/ocp-server/cache"
@@ -27,7 +26,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
-	"github.com/code-payments/ocp-server/ocp/data/messaging"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
@@ -45,7 +43,6 @@ import (
 	deposit_memory_client "github.com/code-payments/ocp-server/ocp/data/deposit/memory"
 	fulfillment_memory_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/memory"
 	intent_memory_client "github.com/code-payments/ocp-server/ocp/data/intent/memory"
-	messaging_memory_client "github.com/code-payments/ocp-server/ocp/data/messaging/memory"
 	nonce_memory_client "github.com/code-payments/ocp-server/ocp/data/nonce/memory"
 	rendezvous_memory_client "github.com/code-payments/ocp-server/ocp/data/rendezvous/memory"
 	swap_memory_client "github.com/code-payments/ocp-server/ocp/data/swap/memory"
@@ -63,7 +60,6 @@ import (
 	deposit_postgres_client "github.com/code-payments/ocp-server/ocp/data/deposit/postgres"
 	fulfillment_postgres_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/postgres"
 	intent_postgres_client "github.com/code-payments/ocp-server/ocp/data/intent/postgres"
-	messaging_postgres_client "github.com/code-payments/ocp-server/ocp/data/messaging/postgres"
 	nonce_postgres_client "github.com/code-payments/ocp-server/ocp/data/nonce/postgres"
 	rendezvous_postgres_client "github.com/code-payments/ocp-server/ocp/data/rendezvous/postgres"
 	swap_postgres_client "github.com/code-payments/ocp-server/ocp/data/swap/postgres"
@@ -182,12 +178,6 @@ type DatabaseData interface {
 	GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, owner string, since time.Time) (uint64, float64, error)
 	GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error)
 
-	// Messaging
-	// --------------------------------------------------------------------------------
-	CreateMessage(ctx context.Context, record *messaging.Record) error
-	GetMessages(ctx context.Context, account string) ([]*messaging.Record, error)
-	DeleteMessage(ctx context.Context, account string, messageID uuid.UUID) error
-
 	// Nonces
 	// --------------------------------------------------------------------------------
 	GetNonce(ctx context.Context, address string) (*nonce.Record, error)
@@ -276,7 +266,6 @@ type DatabaseProvider struct {
 	deposits     deposit.Store
 	fulfillments fulfillment.Store
 	intents      intent.Store
-	messages     messaging.Store
 	nonces       nonce.Store
 	rendezvous   rendezvous.Store
 	swaps        swap.Store
@@ -322,7 +311,6 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		deposits:     deposit_postgres_client.New(db),
 		fulfillments: fulfillment_postgres_client.New(db),
 		intents:      intent_postgres_client.New(db),
-		messages:     messaging_postgres_client.New(db),
 		nonces:       nonce_postgres_client.New(db),
 		rendezvous:   rendezvous_postgres_client.New(db),
 		swaps:        swap_postgres_client.New(db),
@@ -349,7 +337,6 @@ func NewTestDatabaseProvider() DatabaseData {
 		deposits:     deposit_memory_client.New(),
 		fulfillments: fulfillment_memory_client.New(),
 		intents:      intent_memory_client.New(),
-		messages:     messaging_memory_client.New(),
 		nonces:       nonce_memory_client.New(),
 		rendezvous:   rendezvous_memory_client.New(),
 		swaps:        swap_memory_client.New(),
@@ -675,18 +662,6 @@ func (dp *DatabaseProvider) GetTransactedAmountForAntiMoneyLaundering(ctx contex
 }
 func (dp *DatabaseProvider) GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error) {
 	return dp.intents.GetUsdCostBasis(ctx, owner, mint)
-}
-
-// Messaging
-// --------------------------------------------------------------------------------
-func (dp *DatabaseProvider) CreateMessage(ctx context.Context, record *messaging.Record) error {
-	return dp.messages.Insert(ctx, record)
-}
-func (dp *DatabaseProvider) GetMessages(ctx context.Context, account string) ([]*messaging.Record, error) {
-	return dp.messages.Get(ctx, account)
-}
-func (dp *DatabaseProvider) DeleteMessage(ctx context.Context, account string, messageID uuid.UUID) error {
-	return dp.messages.Delete(ctx, account, messageID)
 }
 
 // Nonces

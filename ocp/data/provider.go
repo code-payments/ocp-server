@@ -8,6 +8,7 @@ const (
 	maxCurrencyHistoryReqSize = 1024
 )
 
+// todo: Deprecate Provider in favour of per-store interfaces
 type Provider interface {
 	BlockchainData
 	DatabaseData
