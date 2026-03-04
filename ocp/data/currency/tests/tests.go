@@ -152,6 +152,8 @@ func testMetadataRoundTrip(t *testing.T, s currency.Store) {
 		SocialLinks: []currency.SocialLink{
 			{Type: currency.SocialLinkTypeWebsite, Value: "https://flipcash.com"},
 			{Type: currency.SocialLinkTypeX, Value: "jeffycurrency"},
+			{Type: currency.SocialLinkTypeTelegram, Value: "jeffycurrency"},
+			{Type: currency.SocialLinkTypeDiscord, Value: "abc123"},
 		},
 
 		Seed: "H7WNaHtCa5h2k7AwZ8DbdLfM6bU2bi2jmWiUkFqgeBYk",
@@ -765,6 +767,8 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 	record.SocialLinks = []currency.SocialLink{
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
+		{Type: currency.SocialLinkTypeTelegram, Value: "updatedtelegram"},
+		{Type: currency.SocialLinkTypeDiscord, Value: "updateddiscord"},
 	}
 	record.Alt = "updatedalt1111111111111111111111111111111111111"
 	require.NoError(t, s.SaveMetadata(context.Background(), record))
@@ -782,6 +786,8 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 	assert.Equal(t, []currency.SocialLink{
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
+		{Type: currency.SocialLinkTypeTelegram, Value: "updatedtelegram"},
+		{Type: currency.SocialLinkTypeDiscord, Value: "updateddiscord"},
 	}, actual.SocialLinks)
 	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 
@@ -796,6 +802,8 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 	record.SocialLinks = []currency.SocialLink{
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated2.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle2"},
+		{Type: currency.SocialLinkTypeTelegram, Value: "staletelegram"},
+		{Type: currency.SocialLinkTypeDiscord, Value: "stalediscord"},
 	}
 	record.Alt = "stalealt1111111111111111111111111111111111111111"
 	record.State = currency.MetadataStateUnknown
@@ -813,6 +821,8 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 	assert.Equal(t, []currency.SocialLink{
 		{Type: currency.SocialLinkTypeWebsite, Value: "https://updated.example.com"},
 		{Type: currency.SocialLinkTypeX, Value: "updatedhandle"},
+		{Type: currency.SocialLinkTypeTelegram, Value: "updatedtelegram"},
+		{Type: currency.SocialLinkTypeDiscord, Value: "updateddiscord"},
 	}, actual.SocialLinks)
 	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 }

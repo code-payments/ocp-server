@@ -222,6 +222,18 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 							X: &currencypb.SocialLink_X{Username: link.Value},
 						},
 					})
+				case currency.SocialLinkTypeTelegram:
+					protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+						Type: &currencypb.SocialLink_Telegram_{
+							Telegram: &currencypb.SocialLink_Telegram{Username: link.Value},
+						},
+					})
+				case currency.SocialLinkTypeDiscord:
+					protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+						Type: &currencypb.SocialLink_Discord_{
+							Discord: &currencypb.SocialLink_Discord{InviteCode: link.Value},
+						},
+					})
 				}
 			}
 		}
@@ -296,6 +308,16 @@ func (s *currencyServer) UpdateMetadata(ctx context.Context, req *currencypb.Upd
 				socialLinks = append(socialLinks, currency.SocialLink{
 					Type:  currency.SocialLinkTypeX,
 					Value: t.X.Username,
+				})
+			case *currencypb.SocialLink_Telegram_:
+				socialLinks = append(socialLinks, currency.SocialLink{
+					Type:  currency.SocialLinkTypeTelegram,
+					Value: t.Telegram.Username,
+				})
+			case *currencypb.SocialLink_Discord_:
+				socialLinks = append(socialLinks, currency.SocialLink{
+					Type:  currency.SocialLinkTypeDiscord,
+					Value: t.Discord.InviteCode,
 				})
 			}
 		}
