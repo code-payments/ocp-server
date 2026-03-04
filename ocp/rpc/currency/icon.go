@@ -115,7 +115,6 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(encoded.Bytes()),
 		ContentType: aws.String(contentType),
-		ACL:         s3.ObjectCannedACLPublicRead,
 	})
 	_, err = putReq.Send(ctx)
 	if err != nil {
