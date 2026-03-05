@@ -273,7 +273,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 			defer cancel()
 
-			if records.General.AccountType == commonpb.AccountType_PRIMARY && !records.General.RequiresDepositSync {
+			if records.General.AccountType == commonpb.AccountType_PRIMARY && !records.General.RequiresDepositSync && time.Since(records.General.DepositsLastSyncedAt) > 5*time.Minute {
 				records.General.RequiresDepositSync = true
 				err = s.data.UpdateAccountInfo(ctx, records.General)
 				if err != nil {
