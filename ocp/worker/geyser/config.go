@@ -25,8 +25,14 @@ const (
 	BackupTimelockWorkerIntervalConfigEnvName = envConfigPrefix + "BACKUP_TIMELOCK_WORKER_INTERVAL"
 	defaultBackupTimelockWorkerInterval       = time.Second
 
+	BackupTimelockWorkerBatchSizeConfigEnvName = envConfigPrefix + "BACKUP_TIMELOCK_WORKER_BATCH_SIZE"
+	defaultBackupTimelockWorkerBatchSize       = 100
+
 	BackupExternalDepositWorkerIntervalConfigEnvName = envConfigPrefix + "BACKUP_EXTERNAL_DEPOSIT_WORKER_INTERVAL"
 	defaultBackupExternalDepositWorkerInterval       = time.Second
+
+	BackupExternalDepositWorkerBatchSizeConfigEnvName = envConfigPrefix + "BACKUP_EXTERNAL_DEPOSIT_WORKER_BATCH_SIZE"
+	defaultBackupExternalDepositWorkerBatchSize       = 100
 )
 
 type conf struct {
@@ -36,9 +42,11 @@ type conf struct {
 	programUpdateWorkerCount config.Uint64
 	programUpdateQueueSize   config.Uint64
 
-	backupExternalDepositWorkerInterval config.Duration
+	backupExternalDepositWorkerInterval  config.Duration
+	backupExternalDepositWorkerBatchSize config.Uint64
 
-	backupTimelockWorkerInterval config.Duration
+	backupTimelockWorkerInterval  config.Duration
+	backupTimelockWorkerBatchSize config.Uint64
 }
 
 // ConfigProvider defines how config values are pulled
@@ -54,9 +62,11 @@ func WithEnvConfigs() ConfigProvider {
 			programUpdateWorkerCount: env.NewUint64Config(ProgramUpdateWorkerCountConfigEnvName, defaultProgramUpdateWorkerCount),
 			programUpdateQueueSize:   env.NewUint64Config(ProgramUpdateQueueSizeConfigEnvName, defaultProgramUpdateQueueSize),
 
-			backupExternalDepositWorkerInterval: env.NewDurationConfig(BackupExternalDepositWorkerIntervalConfigEnvName, defaultBackupExternalDepositWorkerInterval),
+			backupExternalDepositWorkerInterval:  env.NewDurationConfig(BackupExternalDepositWorkerIntervalConfigEnvName, defaultBackupExternalDepositWorkerInterval),
+			backupExternalDepositWorkerBatchSize: env.NewUint64Config(BackupExternalDepositWorkerBatchSizeConfigEnvName, defaultBackupExternalDepositWorkerBatchSize),
 
-			backupTimelockWorkerInterval: env.NewDurationConfig(BackupTimelockWorkerIntervalConfigEnvName, defaultBackupTimelockWorkerInterval),
+			backupTimelockWorkerInterval:  env.NewDurationConfig(BackupTimelockWorkerIntervalConfigEnvName, defaultBackupTimelockWorkerInterval),
+			backupTimelockWorkerBatchSize: env.NewUint64Config(BackupTimelockWorkerBatchSizeConfigEnvName, defaultBackupTimelockWorkerBatchSize),
 		}
 	}
 }

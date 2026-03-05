@@ -55,7 +55,7 @@ func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state ti
 					state,
 					query.WithDirection(query.Ascending),
 					query.WithCursor(cursor),
-					query.WithLimit(256),
+					query.WithLimit(p.conf.backupTimelockWorkerBatchSize.Get(runtimeCtx)),
 				)
 				if err == timelock.ErrTimelockNotFound {
 					p.metricStatusLock.Lock()
@@ -125,7 +125,7 @@ func (p *runtime) backupExternalDepositWorker(runtimeCtx context.Context, interv
 				defer trace.End()
 				tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
-				accountInfoRecords, err := p.data.GetPrioritizedAccountInfosRequiringDepositSync(tracedCtx, 256)
+				accountInfoRecords, err := p.data.GetPrioritizedAccountInfosRequiringDepositSync(tracedCtx, p.conf.backupExternalDepositWorkerBatchSize.Get(runtimeCtx))
 				if err == account.ErrAccountInfoNotFound {
 					return
 				} else if err != nil {
