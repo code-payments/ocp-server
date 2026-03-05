@@ -10,8 +10,8 @@ import (
 const (
 	envConfigPrefix = "SWAP_RUNTIME_"
 
-	BatchSizeConfigEnvName      = envConfigPrefix + "WORKER_BATCH_SIZE"
-	defaultFulfillmentBatchSize = 100
+	BatchSizeConfigEnvName = envConfigPrefix + "WORKER_BATCH_SIZE"
+	defaultBatchSize       = 100
 
 	ClientTimeoutToFundConfigEnvName = envConfigPrefix + "CLIENT_TIMEOUT_TO_FUND"
 	defaultClientTimeoutToFund       = 30 * time.Second
@@ -33,7 +33,7 @@ type ConfigProvider func() *conf
 func WithEnvConfigs() ConfigProvider {
 	return func() *conf {
 		return &conf{
-			batchSize:                         env.NewUint64Config(BatchSizeConfigEnvName, defaultFulfillmentBatchSize),
+			batchSize:                         env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
 			clientTimeoutToFund:               env.NewDurationConfig(ClientTimeoutToFundConfigEnvName, defaultClientTimeoutToFund),
 			externalWalletFinalizationTimeout: env.NewDurationConfig(ExternalWalletFinalizationTimeoutConfigEnvName, defaultExternalWalletFinalizationTimeout),
 		}

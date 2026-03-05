@@ -18,10 +18,6 @@ import (
 
 // todo: We can generalize nonce handling by environment using an interface
 
-const (
-	nonceBatchSize = 100
-)
-
 func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, state nonce.State, interval time.Duration) error {
 	var cursor query.Cursor
 	delay := interval
@@ -39,7 +35,7 @@ func (p *runtime) worker(runtimeCtx context.Context, env nonce.Environment, stat
 				tracedCtx,
 				env,
 				state,
-				query.WithLimit(nonceBatchSize),
+				query.WithLimit(p.conf.batchSize.Get(runtimeCtx)),
 				query.WithCursor(cursor),
 			)
 			if err != nil {

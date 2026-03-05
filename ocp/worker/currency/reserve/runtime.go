@@ -13,8 +13,6 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/worker"
-	"github.com/code-payments/ocp-server/retry"
-	"github.com/code-payments/ocp-server/retry/backoff"
 )
 
 type reserveRuntime struct {
@@ -33,42 +31,28 @@ func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
 }
 
 func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duration) error {
+	p.refreshMints(runtimeCtx)
 	go p.pollMints(runtimeCtx, interval/3)
 
 	for {
-		_, err := retry.Retry(
-			func() error {
-				p.log.Debug("updating reserves")
+		start := time.Now()
 
-				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
-				trace := provider.StartTrace("currency_reserve_runtime")
-				defer trace.End()
-				tracedCtx := metrics.NewContext(runtimeCtx, trace)
+		func() {
+			p.log.Debug("updating reserves")
 
-				err := p.UpdateAllLaunchpadCurrencyReserves(tracedCtx)
-				if err != nil {
-					trace.OnError(err)
-					p.log.With(zap.Error(err)).Warn("failed to process current reserve data")
-				}
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("currency_reserve_runtime")
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
-				return err
-			},
-			retry.NonRetriableErrors(context.Canceled),
-			retry.BackoffWithJitter(backoff.BinaryExponential(time.Second), interval, 0.1),
-		)
-		if err != nil {
-			if err != context.Canceled {
-				// Should not happen since only non-retriable error is context.Canceled
-				p.log.With(zap.Error(err)).Warn("unexpected error when processing current reserve data")
-			}
+			p.UpdateAllLaunchpadCurrencyReserves(tracedCtx)
+		}()
 
-			return err
-		}
-
+		delay := max(interval-time.Since(start), 0)
 		select {
 		case <-runtimeCtx.Done():
 			return runtimeCtx.Err()
-		case <-time.After(interval):
+		case <-time.After(delay):
 		}
 	}
 }
@@ -121,37 +105,28 @@ func (p *reserveRuntime) getMints() []*common.Account {
 	return p.mints
 }
 
-func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) error {
+func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) {
 	mints := p.getMints()
 
-	var wg sync.WaitGroup
-	wg.Add(len(mints))
 	for _, mint := range mints {
-		go func(mint *common.Account) {
-			defer wg.Done()
+		log := p.log.With(zap.String("mint", mint.PublicKey().ToBase58()))
 
-			log := p.log.With(zap.String("mint", mint.PublicKey().ToBase58()))
+		circulatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, mint)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to get circulating supply")
+			continue
+		}
 
-			circulatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, mint)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to get circulating supply")
-				return
-			}
+		err = p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              mint.PublicKey().ToBase58(),
+			SupplyFromBonding: circulatingSupply,
+			Time:              ts,
+		})
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to put currency reserve")
+			continue
+		}
 
-			err = p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
-				Mint:              mint.PublicKey().ToBase58(),
-				SupplyFromBonding: circulatingSupply,
-				Time:              ts,
-			})
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to put currency reserve")
-				return
-			}
-
-			recordReserveStateEvent(ctx, mint, circulatingSupply)
-		}(mint)
+		recordReserveStateEvent(ctx, mint, circulatingSupply)
 	}
-	wg.Wait()
-
-	return nil
 }
