@@ -75,11 +75,6 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		return errors.Wrap(err, "invalid owner account")
 	}
 
-	// Not an ATA, so filter it out. It cannot be a VM deposit ATA
-	if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
-		return nil
-	}
-
 	mintAccount, err := common.NewAccountFromPublicKeyBytes(unmarshalled.Mint)
 	if err != nil {
 		return errors.Wrap(err, "invalid mint account")
@@ -90,6 +85,16 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		return errors.Wrap(err, "error checking if mint is supported")
 	}
 	if !isSupportedMint {
+		return nil
+	}
+
+	err = processPotentialCirculatingSupplyUpdate(ctx, h.data, tokenAccount, mintAccount, unmarshalled.Amount, update.Slot)
+	if err != nil {
+		return errors.Wrap(err, "error processing potential currency circulating supply update")
+	}
+
+	// Not an ATA, so filter it out. It cannot be a VM deposit ATA
+	if bytes.Equal(tokenAccount.PublicKey().ToBytes(), ownerAccount.PublicKey().ToBytes()) {
 		return nil
 	}
 
