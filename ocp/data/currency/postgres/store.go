@@ -149,8 +149,8 @@ func (s *store) CountMetadataByState(ctx context.Context, state currency.Metadat
 	return dbCountMetadataByState(ctx, s.db, state)
 }
 
-func (s *store) PutReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {
-	model, err := toReserveModel(record)
+func (s *store) PutHistoricalReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {
+	model, err := toHistoricalReserveModel(record)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (s *store) PutReserveRecord(ctx context.Context, record *currency.ReserveRe
 		return err
 	}
 
-	fromReserveModel(model).CopyTo(record)
+	fromHistoricalReserveModel(model).CopyTo(record)
 
 	return nil
 }
@@ -170,7 +170,7 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 	if err != nil {
 		return nil, err
 	}
-	return fromReserveModel(model), nil
+	return fromHistoricalReserveModel(model), nil
 }
 
 func (s *store) GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
@@ -198,8 +198,43 @@ func (s *store) GetReservesInRange(ctx context.Context, mint string, interval qu
 
 	res := []*currency.ReserveRecord{}
 	for _, item := range list {
-		res = append(res, fromReserveModel(item))
+		res = append(res, fromHistoricalReserveModel(item))
 	}
 
+	return res, nil
+}
+
+func (s *store) PutLiveReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {
+	model := toLiveReserveModel(record)
+
+	err := model.dbSave(ctx, s.db)
+	if err != nil {
+		return err
+	}
+
+	fromLiveReserveModel(model).CopyTo(record)
+
+	return nil
+}
+
+func (s *store) GetLiveReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error) {
+	model, err := dbGetLiveReserveByMint(ctx, s.db, mint)
+	if err != nil {
+		return nil, err
+	}
+	return fromLiveReserveModel(model), nil
+}
+
+func (s *store) GetAllLiveReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error) {
+	models, err := dbGetAllLiveReserves(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*currency.ReserveRecord, len(models))
+	for _, model := range models {
+		record := fromLiveReserveModel(model)
+		res[record.Mint] = record
+	}
 	return res, nil
 }

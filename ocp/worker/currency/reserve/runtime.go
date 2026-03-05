@@ -117,7 +117,7 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 			continue
 		}
 
-		err = p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
+		err = p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
 			Mint:              mint.PublicKey().ToBase58(),
 			SupplyFromBonding: circulatingSupply,
 			Time:              ts,
