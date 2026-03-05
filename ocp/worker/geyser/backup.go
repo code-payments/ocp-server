@@ -73,8 +73,16 @@ func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state ti
 					return
 				}
 
+				reprocessDelay := p.conf.backupTimelockWorkerReprocessDelay.Get(runtimeCtx)
+
 				var wg sync.WaitGroup
 				for _, timelockRecord := range timelockRecords {
+					if lastProcessed, ok := p.backupTimelockProcessedCache.Load(timelockRecord.Address); ok {
+						if time.Since(lastProcessed.(time.Time)) < reprocessDelay {
+							continue
+						}
+					}
+
 					wg.Add(1)
 
 					go func(timelockRecord *timelock.Record) {
@@ -85,7 +93,10 @@ func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state ti
 						err := updateTimelockAccountRecord(tracedCtx, p.data, timelockRecord)
 						if err != nil {
 							log.With(zap.Error(err)).Warn("failed to update timelock account")
+							return
 						}
+
+						p.backupTimelockProcessedCache.Store(timelockRecord.Address, time.Now())
 					}(timelockRecord)
 				}
 

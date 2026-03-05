@@ -28,6 +28,9 @@ const (
 	BackupTimelockWorkerBatchSizeConfigEnvName = envConfigPrefix + "BACKUP_TIMELOCK_WORKER_BATCH_SIZE"
 	defaultBackupTimelockWorkerBatchSize       = 100
 
+	BackupTimelockWorkerReprocessDelayConfigEnvName = envConfigPrefix + "BACKUP_TIMELOCK_WORKER_REPROCESS_DELAY"
+	defaultBackupTimelockWorkerReprocessDelay       = time.Hour
+
 	BackupExternalDepositWorkerIntervalConfigEnvName = envConfigPrefix + "BACKUP_EXTERNAL_DEPOSIT_WORKER_INTERVAL"
 	defaultBackupExternalDepositWorkerInterval       = time.Second
 
@@ -45,8 +48,9 @@ type conf struct {
 	backupExternalDepositWorkerInterval  config.Duration
 	backupExternalDepositWorkerBatchSize config.Uint64
 
-	backupTimelockWorkerInterval  config.Duration
-	backupTimelockWorkerBatchSize config.Uint64
+	backupTimelockWorkerInterval       config.Duration
+	backupTimelockWorkerBatchSize      config.Uint64
+	backupTimelockWorkerReprocessDelay config.Duration
 }
 
 // ConfigProvider defines how config values are pulled
@@ -65,8 +69,9 @@ func WithEnvConfigs() ConfigProvider {
 			backupExternalDepositWorkerInterval:  env.NewDurationConfig(BackupExternalDepositWorkerIntervalConfigEnvName, defaultBackupExternalDepositWorkerInterval),
 			backupExternalDepositWorkerBatchSize: env.NewUint64Config(BackupExternalDepositWorkerBatchSizeConfigEnvName, defaultBackupExternalDepositWorkerBatchSize),
 
-			backupTimelockWorkerInterval:  env.NewDurationConfig(BackupTimelockWorkerIntervalConfigEnvName, defaultBackupTimelockWorkerInterval),
-			backupTimelockWorkerBatchSize: env.NewUint64Config(BackupTimelockWorkerBatchSizeConfigEnvName, defaultBackupTimelockWorkerBatchSize),
+			backupTimelockWorkerInterval:       env.NewDurationConfig(BackupTimelockWorkerIntervalConfigEnvName, defaultBackupTimelockWorkerInterval),
+			backupTimelockWorkerBatchSize:      env.NewUint64Config(BackupTimelockWorkerBatchSizeConfigEnvName, defaultBackupTimelockWorkerBatchSize),
+			backupTimelockWorkerReprocessDelay: env.NewDurationConfig(BackupTimelockWorkerReprocessDelayConfigEnvName, defaultBackupTimelockWorkerReprocessDelay),
 		}
 	}
 }

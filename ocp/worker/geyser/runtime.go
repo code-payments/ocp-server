@@ -40,6 +40,7 @@ type runtime struct {
 
 	backupTimelockStateWorkerDuration *time.Duration
 	backupTimelockStateWorkerStatus   bool
+	backupTimelockProcessedCache      sync.Map // address -> time.Time
 
 	backupExternalDepositWorkerStatus bool
 }
