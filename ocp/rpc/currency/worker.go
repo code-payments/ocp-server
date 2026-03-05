@@ -316,7 +316,7 @@ func (m *liveMintStateWorker) fetchAndUpdateExchangeRates(ctx context.Context, l
 	m.stateMu.Lock()
 	m.exchangeRates = &liveExchangeRateData{
 		Rates:          rates.Rates,
-		Timestamp:      rates.Time,
+		Timestamp:      time.Now(),
 		SignedResponse: signedResponse,
 	}
 	m.stateMu.Unlock()
@@ -459,13 +459,15 @@ func (m *liveMintStateWorker) notifyReserveStates(states []*liveReserveStateData
 func (m *liveMintStateWorker) signExchangeRates(rates *currency.MultiRateRecord) (*currencypb.StreamLiveMintDataResponse, error) {
 	subsidizer := common.GetSubsidizer()
 
+	now := time.Now()
+
 	// Build and sign each exchange rate individually
 	var verifiedRates []*currencypb.VerifiedCoreMintFiatExchangeRate
 	for code, rate := range rates.Rates {
 		exchangeRate := &currencypb.CoreMintFiatExchangeRate{
 			CurrencyCode: code,
 			ExchangeRate: rate,
-			Timestamp:    timestamppb.New(rates.Time),
+			Timestamp:    timestamppb.New(now),
 		}
 
 		// Sign the individual exchange rate
