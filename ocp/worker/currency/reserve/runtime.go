@@ -2,13 +2,13 @@ package reserve
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/worker"
@@ -16,15 +16,14 @@ import (
 
 type reserveRuntime struct {
 	log  *zap.Logger
+	conf *conf
 	data ocp_data.Provider
-
-	mintsMu sync.RWMutex
-	mints   []*common.Account
 }
 
-func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, configProvider ConfigProvider) worker.Runtime {
 	return &reserveRuntime{
 		log:  log,
+		conf: configProvider(),
 		data: data,
 	}
 }
@@ -34,14 +33,14 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 		start := time.Now()
 
 		func() {
-			p.log.Debug("updating historical reserves")
+			p.log.Debug("updating reserves")
 
 			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
 			trace := provider.StartTrace("currency_reserve_runtime")
 			defer trace.End()
 			tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
-			p.UpdateAllHistoricalLaunchpadCurrencyReserves(tracedCtx)
+			p.UpdateAllLaunchpadCurrencyReserves(tracedCtx)
 		}()
 
 		delay := max(interval-time.Since(start), 0)
@@ -53,8 +52,8 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 	}
 }
 
-func (p *reserveRuntime) UpdateAllHistoricalLaunchpadCurrencyReserves(ctx context.Context) {
-	now := time.Now()
+func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) {
+	staleThreshold := p.conf.staleThreshold.Get(ctx)
 
 	liveReserveStatesByMint, err := p.data.GetAllLiveCurrencyReserves(ctx)
 	if err != nil {
@@ -62,12 +61,20 @@ func (p *reserveRuntime) UpdateAllHistoricalLaunchpadCurrencyReserves(ctx contex
 		return
 	}
 
-	for mint, reserveRecord := range liveReserveStatesByMint {
+	for mint, liveReserveRecord := range liveReserveStatesByMint {
 		log := p.log.With(zap.String("mint", mint))
+
+		now := time.Now()
+		if now.Sub(liveReserveRecord.Time) >= staleThreshold {
+			newReserveRecord, err := p.refreshLiveReserveState(ctx, log, mint)
+			if err == nil {
+				liveReserveRecord = newReserveRecord
+			}
+		}
 
 		err = p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
 			Mint:              mint,
-			SupplyFromBonding: reserveRecord.SupplyFromBonding,
+			SupplyFromBonding: liveReserveRecord.SupplyFromBonding,
 			Time:              now,
 		})
 		if err != nil {
@@ -75,6 +82,33 @@ func (p *reserveRuntime) UpdateAllHistoricalLaunchpadCurrencyReserves(ctx contex
 			continue
 		}
 
-		recordReserveStateEvent(ctx, mint, reserveRecord.SupplyFromBonding)
+		recordReserveStateEvent(ctx, mint, liveReserveRecord.SupplyFromBonding)
 	}
+}
+
+func (p *reserveRuntime) refreshLiveReserveState(ctx context.Context, log *zap.Logger, mint string) (*currency.ReserveRecord, error) {
+	mintAccount, err := common.NewAccountFromPublicKeyString(mint)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid mint public key")
+		return nil, err
+	}
+
+	circulatingSupply, slot, _, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, mintAccount)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to get circulating supply from blockchain")
+		return nil, err
+	}
+
+	record := &currency.ReserveRecord{
+		Mint:              mint,
+		SupplyFromBonding: circulatingSupply,
+		Slot:              slot,
+		Time:              time.Now(),
+	}
+	err = p.data.PutLiveCurrencyReserve(ctx, record)
+	if err != nil && err != currency.ErrStaleReserveState {
+		log.With(zap.Error(err)).Warn("failed to update live reserve state")
+		return nil, err
+	}
+	return record, nil
 }

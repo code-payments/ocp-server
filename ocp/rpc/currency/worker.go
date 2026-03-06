@@ -349,7 +349,7 @@ func (m *liveMintStateWorker) pollReserveState(ctx context.Context) {
 func (m *liveMintStateWorker) fetchAndUpdateReserveState(ctx context.Context, mint *common.Account) *liveReserveStateData {
 	mintAddr := mint.PublicKey().ToBase58()
 
-	supply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, m.data, mint)
+	supply, _, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, m.data, mint)
 	if err != nil {
 		m.log.With(
 			zap.Error(err),
