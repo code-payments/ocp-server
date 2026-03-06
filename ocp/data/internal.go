@@ -141,9 +141,12 @@ type DatabaseData interface {
 	GetCurrencyMetadataCountByState(ctx context.Context, state currency.MetadataState) (uint64, error)
 	GetAllCurrencyMints(ctx context.Context) ([]string, error)
 	CountCurrencyMints(ctx context.Context) (uint64, error)
-	PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
+	PutHistoricalCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
 	GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
 	GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error)
+	PutLiveCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
+	GetLiveCurrencyReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error)
+	GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error)
 
 	// Deposits
 	// --------------------------------------------------------------------------------
@@ -544,8 +547,8 @@ func (dp *DatabaseProvider) GetAllCurrencyMints(ctx context.Context) ([]string, 
 func (dp *DatabaseProvider) CountCurrencyMints(ctx context.Context) (uint64, error) {
 	return dp.currencies.CountMints(ctx)
 }
-func (dp *DatabaseProvider) PutCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
-	return dp.currencies.PutReserveRecord(ctx, record)
+func (dp *DatabaseProvider) PutHistoricalCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
+	return dp.currencies.PutHistoricalReserveRecord(ctx, record)
 }
 func (dp *DatabaseProvider) GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error) {
 	return dp.currencies.GetReserveAtTime(ctx, mint, t)
@@ -567,6 +570,15 @@ func (dp *DatabaseProvider) GetCurrencyReserveHistory(ctx context.Context, mint 
 	}
 
 	return dp.currencies.GetReservesInRange(ctx, mint, req.Interval, req.Start, req.End, req.SortBy)
+}
+func (dp *DatabaseProvider) PutLiveCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
+	return dp.currencies.PutLiveReserveRecord(ctx, record)
+}
+func (dp *DatabaseProvider) GetLiveCurrencyReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error) {
+	return dp.currencies.GetLiveReserve(ctx, mint)
+}
+func (dp *DatabaseProvider) GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error) {
+	return dp.currencies.GetAllLiveReserves(ctx)
 }
 
 // Deposits

@@ -19,6 +19,7 @@ const (
 	exchangeRateTableName = "ocp__core_exchangerate"
 	metadataTableName     = "ocp__core_currencymetadata"
 	reserveTableName      = "ocp__core_currencyreserve"
+	liveReserveTableName  = "ocp__core_currencyreserve2"
 
 	dateFormat = "2006-01-02"
 )
@@ -186,7 +187,7 @@ func fromMetadataModel(obj *metadataModel) *currency.MetadataRecord {
 	}
 }
 
-type reserveModel struct {
+type historicalReserveModel struct {
 	Id                sql.NullInt64 `db:"id"`
 	ForDate           string        `db:"for_date"`
 	ForTimestamp      time.Time     `db:"for_timestamp"`
@@ -194,12 +195,12 @@ type reserveModel struct {
 	SupplyFromBonding uint64        `db:"supply_from_bonding"`
 }
 
-func toReserveModel(obj *currency.ReserveRecord) (*reserveModel, error) {
+func toHistoricalReserveModel(obj *currency.ReserveRecord) (*historicalReserveModel, error) {
 	if err := obj.Validate(); err != nil {
 		return nil, err
 	}
 
-	return &reserveModel{
+	return &historicalReserveModel{
 		Id:                sql.NullInt64{Int64: int64(obj.Id), Valid: obj.Id > 0},
 		ForDate:           obj.Time.UTC().Format(dateFormat),
 		ForTimestamp:      obj.Time.UTC(),
@@ -208,12 +209,40 @@ func toReserveModel(obj *currency.ReserveRecord) (*reserveModel, error) {
 	}, nil
 }
 
-func fromReserveModel(obj *reserveModel) *currency.ReserveRecord {
+func fromHistoricalReserveModel(obj *historicalReserveModel) *currency.ReserveRecord {
 	return &currency.ReserveRecord{
 		Id:                uint64(obj.Id.Int64),
 		Time:              obj.ForTimestamp.UTC(),
 		Mint:              obj.Mint,
 		SupplyFromBonding: obj.SupplyFromBonding,
+	}
+}
+
+type liveReserveModel struct {
+	Id                sql.NullInt64 `db:"id"`
+	Mint              string        `db:"mint"`
+	SupplyFromBonding uint64        `db:"supply_from_bonding"`
+	Slot              uint64        `db:"slot"`
+	LastUpdatedAt     time.Time     `db:"last_updated_at"`
+}
+
+func toLiveReserveModel(obj *currency.ReserveRecord) *liveReserveModel {
+	return &liveReserveModel{
+		Id:                sql.NullInt64{Int64: int64(obj.Id), Valid: obj.Id > 0},
+		Mint:              obj.Mint,
+		SupplyFromBonding: obj.SupplyFromBonding,
+		Slot:              obj.Slot,
+		LastUpdatedAt:     obj.Time.UTC(),
+	}
+}
+
+func fromLiveReserveModel(obj *liveReserveModel) *currency.ReserveRecord {
+	return &currency.ReserveRecord{
+		Id:                uint64(obj.Id.Int64),
+		Mint:              obj.Mint,
+		SupplyFromBonding: obj.SupplyFromBonding,
+		Slot:              obj.Slot,
+		Time:              obj.LastUpdatedAt.UTC(),
 	}
 }
 
@@ -327,7 +356,7 @@ func (m *metadataModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	})
 }
 
-func (m *reserveModel) dbSave(ctx context.Context, db *sqlx.DB) error {
+func (m *historicalReserveModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+reserveTableName+`
@@ -462,8 +491,8 @@ func dbCountMetadataByState(ctx context.Context, db *sqlx.DB, state currency.Met
 	return res, nil
 }
 
-func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t time.Time, ordering q.Ordering) (*reserveModel, error) {
-	res := &reserveModel{}
+func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t time.Time, ordering q.Ordering) (*historicalReserveModel, error) {
+	res := &historicalReserveModel{}
 	err := db.GetContext(ctx, res,
 		makeTimeBasedGetQuery(reserveTableName, "mint = $1 AND for_date = $2 AND for_timestamp <= $3", ordering),
 		mint,
@@ -473,8 +502,8 @@ func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t 
 	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
 }
 
-func dbGetAllReservesForRange(ctx context.Context, db *sqlx.DB, mint string, interval q.Interval, start time.Time, end time.Time, ordering q.Ordering) ([]*reserveModel, error) {
-	res := []*reserveModel{}
+func dbGetAllReservesForRange(ctx context.Context, db *sqlx.DB, mint string, interval q.Interval, start time.Time, end time.Time, ordering q.Ordering) ([]*historicalReserveModel, error) {
+	res := []*historicalReserveModel{}
 	err := db.SelectContext(ctx, &res,
 		makeTimeBasedRangeQuery(reserveTableName, "mint = $1 AND for_timestamp >= $2 AND for_timestamp <= $3", ordering, interval),
 		mint, start.UTC(), end.UTC(),
@@ -487,5 +516,53 @@ func dbGetAllReservesForRange(ctx context.Context, db *sqlx.DB, mint string, int
 		return nil, currency.ErrNotFound
 	}
 
+	return res, nil
+}
+
+func (m *liveReserveModel) dbSave(ctx context.Context, db *sqlx.DB) error {
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		err := tx.QueryRowxContext(ctx,
+			`INSERT INTO `+liveReserveTableName+`
+			(mint, supply_from_bonding, slot, last_updated_at)
+			VALUES ($1, $2, $3, $4)
+
+			ON CONFLICT (mint)
+			DO UPDATE SET supply_from_bonding = $2, slot = $3, last_updated_at = $4
+				WHERE `+liveReserveTableName+`.slot < $3
+
+			RETURNING id, mint, supply_from_bonding, slot, last_updated_at`,
+			m.Mint,
+			m.SupplyFromBonding,
+			m.Slot,
+			m.LastUpdatedAt,
+		).StructScan(m)
+
+		return pgutil.CheckNoRows(err, currency.ErrStaleReserveState)
+	})
+}
+
+func dbGetLiveReserveByMint(ctx context.Context, db *sqlx.DB, mint string) (*liveReserveModel, error) {
+	res := &liveReserveModel{}
+	err := db.GetContext(ctx, res,
+		`SELECT id, mint, supply_from_bonding, slot, last_updated_at
+		FROM `+liveReserveTableName+`
+		WHERE mint = $1`,
+		mint,
+	)
+	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
+}
+
+func dbGetAllLiveReserves(ctx context.Context, db *sqlx.DB) ([]*liveReserveModel, error) {
+	var res []*liveReserveModel
+	err := db.SelectContext(ctx, &res,
+		`SELECT id, mint, supply_from_bonding, slot, last_updated_at
+		FROM `+liveReserveTableName,
+	)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)
+	}
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
 	return res, nil
 }

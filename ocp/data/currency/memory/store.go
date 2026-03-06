@@ -16,13 +16,15 @@ const (
 )
 
 type store struct {
-	mu                    sync.Mutex
-	exchangeRateRecords   []*currency.ExchangeRateRecord
-	lastExchangeRateIndex uint64
-	metadataRecords       []*currency.MetadataRecord
-	lastMetadataIndex     uint64
-	reserveRecords        []*currency.ReserveRecord
-	lastReserveIndex      uint64
+	mu                         sync.Mutex
+	exchangeRateRecords        []*currency.ExchangeRateRecord
+	lastExchangeRateIndex      uint64
+	metadataRecords            []*currency.MetadataRecord
+	lastMetadataIndex          uint64
+	historicalReserveRecords   []*currency.ReserveRecord
+	lastHistoricalReserveIndex uint64
+	liveReserveRecords         map[string]*currency.ReserveRecord
+	lastLiveReserveIndex       uint64
 }
 
 type RateByTime []*currency.ExchangeRateRecord
@@ -47,6 +49,8 @@ func New() currency.Store {
 	return &store{
 		exchangeRateRecords:   make([]*currency.ExchangeRateRecord, 0),
 		lastExchangeRateIndex: 1,
+		liveReserveRecords:    make(map[string]*currency.ReserveRecord),
+		lastLiveReserveIndex:  1,
 	}
 }
 
@@ -56,8 +60,10 @@ func (s *store) reset() {
 	s.lastExchangeRateIndex = 1
 	s.metadataRecords = make([]*currency.MetadataRecord, 0)
 	s.lastMetadataIndex = 1
-	s.reserveRecords = make([]*currency.ReserveRecord, 0)
-	s.lastReserveIndex = 1
+	s.historicalReserveRecords = make([]*currency.ReserveRecord, 0)
+	s.lastHistoricalReserveIndex = 1
+	s.liveReserveRecords = make(map[string]*currency.ReserveRecord)
+	s.lastLiveReserveIndex = 1
 	s.mu.Unlock()
 }
 
@@ -306,7 +312,7 @@ func (s *store) CountMints(ctx context.Context) (uint64, error) {
 	return uint64(len(s.metadataRecords)), nil
 }
 
-func (s *store) PutReserveRecord(ctx context.Context, data *currency.ReserveRecord) error {
+func (s *store) PutHistoricalReserveRecord(ctx context.Context, data *currency.ReserveRecord) error {
 	if err := data.Validate(); err != nil {
 		return err
 	}
@@ -315,15 +321,15 @@ func (s *store) PutReserveRecord(ctx context.Context, data *currency.ReserveReco
 	defer s.mu.Unlock()
 
 	// Not ideal but fine for testing the currency store
-	for _, item := range s.reserveRecords {
+	for _, item := range s.historicalReserveRecords {
 		if item.Mint == data.Mint && item.Time.Unix() == data.Time.Unix() {
 			return currency.ErrExists
 		}
 	}
 
-	data.Id = s.lastReserveIndex
-	s.reserveRecords = append(s.reserveRecords, data.Clone())
-	s.lastReserveIndex = s.lastReserveIndex + 1
+	data.Id = s.lastHistoricalReserveIndex
+	s.historicalReserveRecords = append(s.historicalReserveRecords, data.Clone())
+	s.lastHistoricalReserveIndex = s.lastHistoricalReserveIndex + 1
 
 	return nil
 }
@@ -334,7 +340,7 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 
 	// Not ideal but fine for testing the currency store
 	var results []*currency.ReserveRecord
-	for _, item := range s.reserveRecords {
+	for _, item := range s.historicalReserveRecords {
 		if item.Mint == mint && item.Time.Unix() <= t.Unix() && item.Time.Format(dateFormat) == t.Format(dateFormat) {
 			results = append(results, item)
 		}
@@ -353,11 +359,11 @@ func (s *store) GetReservesInRange(ctx context.Context, mint string, interval qu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sort.Sort(ReserveByTime(s.reserveRecords))
+	sort.Sort(ReserveByTime(s.historicalReserveRecords))
 
 	// Not ideal but fine for testing the currency store
 	var all []*currency.ReserveRecord
-	for _, item := range s.reserveRecords {
+	for _, item := range s.historicalReserveRecords {
 		if item.Mint == mint && item.Time.Unix() >= start.Unix() && item.Time.Unix() <= end.Unix() {
 			all = append(all, item.Clone())
 		}
@@ -376,4 +382,58 @@ func (s *store) GetReservesInRange(ctx context.Context, mint string, interval qu
 	}
 
 	return all, nil
+}
+
+func (s *store) PutLiveReserveRecord(ctx context.Context, data *currency.ReserveRecord) error {
+	if err := data.Validate(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing, ok := s.liveReserveRecords[data.Mint]; ok {
+		if data.Slot <= existing.Slot {
+			return currency.ErrStaleReserveState
+		}
+
+		cloned := data.Clone()
+		cloned.Id = existing.Id
+		s.liveReserveRecords[data.Mint] = cloned
+		cloned.CopyTo(data)
+		return nil
+	}
+
+	data.Id = s.lastLiveReserveIndex
+	s.liveReserveRecords[data.Mint] = data.Clone()
+	s.lastLiveReserveIndex++
+
+	return nil
+}
+
+func (s *store) GetLiveReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.liveReserveRecords[mint]
+	if !ok {
+		return nil, currency.ErrNotFound
+	}
+
+	return record.Clone(), nil
+}
+
+func (s *store) GetAllLiveReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.liveReserveRecords) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	res := make(map[string]*currency.ReserveRecord, len(s.liveReserveRecords))
+	for mint, record := range s.liveReserveRecords {
+		res[mint] = record.Clone()
+	}
+	return res, nil
 }

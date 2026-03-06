@@ -14,6 +14,7 @@ var (
 	ErrInvalidInterval      = errors.New("the provided interval is not valid")
 	ErrExists               = errors.New("record exists")
 	ErrStaleMetadataVersion = errors.New("metadata version is stale")
+	ErrStaleReserveState    = errors.New("reserve state is stale")
 	ErrDuplicateCurrency    = errors.New("duplicate currency detected")
 )
 
@@ -70,8 +71,8 @@ type Store interface {
 	// CountMints returns the total number of currency creator mints
 	CountMints(ctx context.Context) (uint64, error)
 
-	// PutReserveRecord puts a currency creator mint reserve records into the store.
-	PutReserveRecord(ctx context.Context, record *ReserveRecord) error
+	// PutHistoricalReserveRecord puts a currency creator mint reserve records into the store.
+	PutHistoricalReserveRecord(ctx context.Context, record *ReserveRecord) error
 
 	// GetReserveAtTime gets reserve state for a given currency creator mint at a point
 	// in time. If the exact time is not available, the most recent data prior to the
@@ -88,4 +89,23 @@ type Store interface {
 	// ErrInvalidRange is returned if the range is not valid
 	// ErrInvalidInterval is returned if the interval is not valid
 	GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*ReserveRecord, error)
+
+	// PutLiveReserveRecord upserts the latest reserve record for a currency creator
+	// mint. An upsert is only performed if the provided slot is greater than the slot
+	// currently stored.
+	//
+	// ErrStaleReserveState is returned if the provided slot is not greater than the
+	// stored slot.
+	PutLiveReserveRecord(ctx context.Context, record *ReserveRecord) error
+
+	// GetLiveReserve gets the latest live reserve record for a currency creator mint.
+	//
+	// ErrNotFound is returned if no live reserve record exists for the provided mint.
+	GetLiveReserve(ctx context.Context, mint string) (*ReserveRecord, error)
+
+	// GetAllLiveReserves gets the latest live reserve records for all currency
+	// creator mints.
+	//
+	// ErrNotFound is returned if no live reserve records exist.
+	GetAllLiveReserves(ctx context.Context) (map[string]*ReserveRecord, error)
 }

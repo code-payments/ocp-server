@@ -2,7 +2,6 @@ package reserve
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,23 +16,19 @@ import (
 
 type reserveRuntime struct {
 	log  *zap.Logger
+	conf *conf
 	data ocp_data.Provider
-
-	mintsMu sync.RWMutex
-	mints   []*common.Account
 }
 
-func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, configProvider ConfigProvider) worker.Runtime {
 	return &reserveRuntime{
 		log:  log,
+		conf: configProvider(),
 		data: data,
 	}
 }
 
 func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duration) error {
-	p.refreshMints(runtimeCtx)
-	go p.pollMints(runtimeCtx, interval/3)
-
 	for {
 		start := time.Now()
 
@@ -57,76 +52,63 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 	}
 }
 
-func (p *reserveRuntime) pollMints(ctx context.Context, interval time.Duration) {
-	// Initial fetch before the first reserve update
-	p.refreshMints(ctx)
+func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) {
+	staleThreshold := p.conf.staleThreshold.Get(ctx)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(interval):
-			p.refreshMints(ctx)
-		}
-	}
-}
-
-func (p *reserveRuntime) refreshMints(ctx context.Context) {
-	mintStrings, err := p.data.GetAllCurrencyMints(ctx)
+	liveReserveStatesByMint, err := p.data.GetAllLiveCurrencyReserves(ctx)
 	if err != nil {
-		p.log.With(zap.Error(err)).Warn("failed to refresh currency mints")
+		p.log.With(zap.Error(err)).Warn("failed getting all live reserve states")
 		return
 	}
 
-	var mints []*common.Account
-	for _, mint := range mintStrings {
-		account, err := common.NewAccountFromPublicKeyString(mint)
-		if err != nil {
-			p.log.With(zap.Error(err), zap.String("mint", mint)).Warn("invalid mint public key")
-			continue
+	for mint, liveReserveRecord := range liveReserveStatesByMint {
+		log := p.log.With(zap.String("mint", mint))
+
+		now := time.Now()
+		if now.Sub(liveReserveRecord.Time) >= staleThreshold {
+			newReserveRecord, err := p.refreshLiveReserveState(ctx, log, mint)
+			if err == nil {
+				liveReserveRecord = newReserveRecord
+			}
 		}
 
-		if common.IsCoreMint(account) {
-			continue
-		}
-
-		mints = append(mints, account)
-	}
-
-	p.mintsMu.Lock()
-	p.mints = mints
-	p.mintsMu.Unlock()
-}
-
-func (p *reserveRuntime) getMints() []*common.Account {
-	p.mintsMu.RLock()
-	defer p.mintsMu.RUnlock()
-
-	return p.mints
-}
-
-func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) {
-	mints := p.getMints()
-
-	for _, mint := range mints {
-		log := p.log.With(zap.String("mint", mint.PublicKey().ToBase58()))
-
-		circulatingSupply, ts, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, mint)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failed to get circulating supply")
-			continue
-		}
-
-		err = p.data.PutCurrencyReserve(ctx, &currency.ReserveRecord{
-			Mint:              mint.PublicKey().ToBase58(),
-			SupplyFromBonding: circulatingSupply,
-			Time:              ts,
+		err = p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              mint,
+			SupplyFromBonding: liveReserveRecord.SupplyFromBonding,
+			Time:              now,
 		})
 		if err != nil {
-			log.With(zap.Error(err)).Warn("failed to put currency reserve")
+			log.With(zap.Error(err)).Warn("failed to put historical currency reserve")
 			continue
 		}
 
-		recordReserveStateEvent(ctx, mint, circulatingSupply)
+		recordReserveStateEvent(ctx, mint, liveReserveRecord.SupplyFromBonding)
 	}
+}
+
+func (p *reserveRuntime) refreshLiveReserveState(ctx context.Context, log *zap.Logger, mint string) (*currency.ReserveRecord, error) {
+	mintAccount, err := common.NewAccountFromPublicKeyString(mint)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid mint public key")
+		return nil, err
+	}
+
+	circulatingSupply, slot, _, err := currency_util.GetLaunchpadCurrencyCirculatingSupply(ctx, p.data, mintAccount)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to get circulating supply from blockchain")
+		return nil, err
+	}
+
+	record := &currency.ReserveRecord{
+		Mint:              mint,
+		SupplyFromBonding: circulatingSupply,
+		Slot:              slot,
+		Time:              time.Now(),
+	}
+	err = p.data.PutLiveCurrencyReserve(ctx, record)
+	if err != nil && err != currency.ErrStaleReserveState {
+		log.With(zap.Error(err)).Warn("failed to update live reserve state")
+		return nil, err
+	}
+	return record, nil
 }

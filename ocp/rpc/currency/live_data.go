@@ -55,12 +55,6 @@ func (s *currencyServer) StreamLiveMintData(
 		requestedMints = append(requestedMints, mint)
 	}
 
-	// Track requested mints so the worker polls their reserve state
-	if err := s.liveMintStateWorker.trackMints(ctx, requestedMints); err != nil {
-		log.With(zap.Error(err)).Warn("failed to track requested mints")
-		return status.Error(codes.Internal, "")
-	}
-
 	// Generate unique stream ID
 	streamID := uuid.New().String()
 	log = log.With(zap.String("stream_id", streamID))
@@ -97,10 +91,19 @@ func (s *currencyServer) StreamLiveMintData(
 			continue
 		}
 
-		err := s.liveMintStateWorker.waitForReserveState(ctx, mint)
+		isSupported, err := common.IsSupportedMint(ctx, s.data, mint)
 		if err != nil {
-			log.With(zap.Error(err)).Debug("context cancelled while waiting for reserve state")
-			return status.Error(codes.Canceled, "")
+			log.With(zap.Error(err)).Warn("failed to validate mint")
+			return status.Error(codes.Internal, "")
+		}
+		if !isSupported {
+			continue
+		}
+
+		err = s.liveMintStateWorker.waitForReserveState(ctx, mint, 2*s.conf.reserveStatePollInterval.Get(ctx))
+		if err != nil {
+			log.With(zap.Error(err)).Debug("failed to wait for live mint reserve state")
+			return status.Error(codes.Internal, "")
 		}
 
 		state, err := s.liveMintStateWorker.getReserveState(mint)

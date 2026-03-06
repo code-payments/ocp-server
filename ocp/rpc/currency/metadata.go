@@ -29,23 +29,6 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 	log := s.log.With(zap.String("method", "GetMints"))
 	log = client.InjectLoggingMetadata(ctx, log)
 
-	// Track all requested mints so the worker polls their reserve state
-	var requestedMints []*common.Account
-	for _, protoMintAddress := range req.Addresses {
-		mintAccount, err := common.NewAccountFromProto(protoMintAddress)
-		if err != nil {
-			continue
-		}
-		requestedMints = append(requestedMints, mintAccount)
-	}
-	if err := s.liveMintStateWorker.trackMints(ctx, requestedMints); err != nil {
-		if err == errMintNotSupported {
-			return &currencypb.GetMintsResponse{Result: currencypb.GetMintsResponse_NOT_FOUND}, nil
-		}
-		log.With(zap.Error(err)).Warn("failed to track requested mints")
-		return nil, status.Error(codes.Internal, "")
-	}
-
 	resp := &currencypb.GetMintsResponse{
 		MetadataByAddress: make(map[string]*currencypb.Mint),
 	}
@@ -153,7 +136,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			err = s.liveMintStateWorker.waitForReserveState(ctx, mintAccount)
+			err = s.liveMintStateWorker.waitForReserveState(ctx, mintAccount, 2*s.conf.reserveStatePollInterval.Get(ctx))
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failed to wait for live mint reserve state")
 				return nil, status.Error(codes.Internal, "")

@@ -108,6 +108,29 @@ func (p *runtime) markCurrencyMetadataAvailable(ctx context.Context, record *cur
 	return p.data.SaveCurrencyMetadata(ctx, record)
 }
 
+func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.MetadataRecord) error {
+	err := p.data.PutLiveCurrencyReserve(ctx, &currency.ReserveRecord{
+		Mint:              record.Mint,
+		SupplyFromBonding: 0,
+		Slot:              0,
+		Time:              record.CreatedAt,
+	})
+	if err != nil {
+		return errors.Wrap(err, "error putting initial live reserve state")
+	}
+
+	err = p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
+		Mint:              record.Mint,
+		SupplyFromBonding: 0,
+		Time:              record.CreatedAt,
+	})
+	if err != nil {
+		return errors.Wrap(err, "error putting initial historical reserve state")
+	}
+
+	return nil
+}
+
 func (p *runtime) validateVmMetadataState(record *vm_metadata.Record, states ...vm_metadata.State) error {
 	if slices.Contains(states, record.State) {
 		return nil

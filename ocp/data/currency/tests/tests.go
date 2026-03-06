@@ -26,6 +26,8 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testCountMetadataByState,
 		testReserveRoundTrip,
 		testGetReservesInRange,
+		testLiveReserveRoundTrip,
+		testGetAllLiveReserves,
 	} {
 		tf(t, s)
 		teardown()
@@ -636,9 +638,9 @@ func testReserveRoundTrip(t *testing.T, s currency.Store) {
 		SupplyFromBonding: 1,
 		Time:              now,
 	}
-	require.NoError(t, s.PutReserveRecord(context.Background(), expected))
+	require.NoError(t, s.PutHistoricalReserveRecord(context.Background(), expected))
 
-	assert.Equal(t, currency.ErrExists, s.PutReserveRecord(context.Background(), expected))
+	assert.Equal(t, currency.ErrExists, s.PutHistoricalReserveRecord(context.Background(), expected))
 
 	actual, err := s.GetReserveAtTime(context.Background(), "mint", now)
 	require.NoError(t, err)
@@ -677,7 +679,7 @@ func testGetReservesInRange(t *testing.T, s currency.Store) {
 
 	for _, item := range reserves {
 		itemCopy := item
-		require.NoError(t, s.PutReserveRecord(context.Background(), &itemCopy))
+		require.NoError(t, s.PutHistoricalReserveRecord(context.Background(), &itemCopy))
 	}
 
 	result, err := s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[99].Time, query.Ascending)
@@ -825,6 +827,142 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 		{Type: currency.SocialLinkTypeDiscord, Value: "updateddiscord"},
 	}, actual.SocialLinks)
 	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
+}
+
+func testLiveReserveRoundTrip(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+	mint := "live-reserve-mint"
+
+	// No record should exist initially
+	_, err := s.GetLiveReserve(ctx, mint)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	// Insert the first live reserve record
+	record := &currency.ReserveRecord{
+		Mint:              mint,
+		SupplyFromBonding: 1000,
+		Slot:              100,
+		Time:              time.Now(),
+	}
+	require.NoError(t, s.PutLiveReserveRecord(ctx, record))
+
+	// Verify the record was stored
+	actual, err := s.GetLiveReserve(ctx, mint)
+	require.NoError(t, err)
+	assert.Equal(t, mint, actual.Mint)
+	assert.EqualValues(t, 1000, actual.SupplyFromBonding)
+	assert.EqualValues(t, 100, actual.Slot)
+
+	// Update with a higher slot should succeed
+	record = &currency.ReserveRecord{
+		Mint:              mint,
+		SupplyFromBonding: 2000,
+		Slot:              200,
+		Time:              time.Now(),
+	}
+	require.NoError(t, s.PutLiveReserveRecord(ctx, record))
+
+	actual, err = s.GetLiveReserve(ctx, mint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2000, actual.SupplyFromBonding)
+	assert.EqualValues(t, 200, actual.Slot)
+
+	// Update with same slot should return stale error
+	record = &currency.ReserveRecord{
+		Mint:              mint,
+		SupplyFromBonding: 3000,
+		Slot:              200,
+		Time:              time.Now(),
+	}
+	assert.Equal(t, currency.ErrStaleReserveState, s.PutLiveReserveRecord(ctx, record))
+
+	// Update with lower slot should return stale error
+	record = &currency.ReserveRecord{
+		Mint:              mint,
+		SupplyFromBonding: 3000,
+		Slot:              50,
+		Time:              time.Now(),
+	}
+	assert.Equal(t, currency.ErrStaleReserveState, s.PutLiveReserveRecord(ctx, record))
+
+	// Verify original record unchanged after stale attempts
+	actual, err = s.GetLiveReserve(ctx, mint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2000, actual.SupplyFromBonding)
+	assert.EqualValues(t, 200, actual.Slot)
+
+	// Different mint should work independently
+	otherMint := "other-live-mint"
+	record = &currency.ReserveRecord{
+		Mint:              otherMint,
+		SupplyFromBonding: 5000,
+		Slot:              50,
+		Time:              time.Now(),
+	}
+	require.NoError(t, s.PutLiveReserveRecord(ctx, record))
+
+	actual, err = s.GetLiveReserve(ctx, otherMint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 5000, actual.SupplyFromBonding)
+	assert.EqualValues(t, 50, actual.Slot)
+}
+
+func testGetAllLiveReserves(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+
+	// No records should exist initially
+	_, err := s.GetAllLiveReserves(ctx)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	// Insert live reserves for two mints
+	record1 := &currency.ReserveRecord{
+		Mint:              "mint-all-live-1",
+		SupplyFromBonding: 1000,
+		Slot:              100,
+		Time:              time.Now(),
+	}
+	require.NoError(t, s.PutLiveReserveRecord(ctx, record1))
+
+	// Should return one record
+	reserves, err := s.GetAllLiveReserves(ctx)
+	require.NoError(t, err)
+	assert.Len(t, reserves, 1)
+	assert.EqualValues(t, 1000, reserves["mint-all-live-1"].SupplyFromBonding)
+	assert.EqualValues(t, 100, reserves["mint-all-live-1"].Slot)
+
+	record2 := &currency.ReserveRecord{
+		Mint:              "mint-all-live-2",
+		SupplyFromBonding: 2000,
+		Slot:              200,
+		Time:              time.Now(),
+	}
+	require.NoError(t, s.PutLiveReserveRecord(ctx, record2))
+
+	// Should return both records
+	reserves, err = s.GetAllLiveReserves(ctx)
+	require.NoError(t, err)
+	assert.Len(t, reserves, 2)
+	assert.EqualValues(t, 1000, reserves["mint-all-live-1"].SupplyFromBonding)
+	assert.EqualValues(t, 100, reserves["mint-all-live-1"].Slot)
+	assert.EqualValues(t, 2000, reserves["mint-all-live-2"].SupplyFromBonding)
+	assert.EqualValues(t, 200, reserves["mint-all-live-2"].Slot)
+
+	// Update one mint and verify the change is reflected
+	record1Updated := &currency.ReserveRecord{
+		Mint:              "mint-all-live-1",
+		SupplyFromBonding: 1500,
+		Slot:              150,
+		Time:              time.Now(),
+	}
+	require.NoError(t, s.PutLiveReserveRecord(ctx, record1Updated))
+
+	reserves, err = s.GetAllLiveReserves(ctx)
+	require.NoError(t, err)
+	assert.Len(t, reserves, 2)
+	assert.EqualValues(t, 1500, reserves["mint-all-live-1"].SupplyFromBonding)
+	assert.EqualValues(t, 150, reserves["mint-all-live-1"].Slot)
+	assert.EqualValues(t, 2000, reserves["mint-all-live-2"].SupplyFromBonding)
+	assert.EqualValues(t, 200, reserves["mint-all-live-2"].Slot)
 }
 
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {

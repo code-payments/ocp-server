@@ -81,6 +81,14 @@ const (
 
 		CONSTRAINT ocp__core_currencyreserve__uniq__timestamp__and__mint UNIQUE (for_timestamp, mint)
 	);
+	CREATE TABLE ocp__core_currencyreserve2 (
+		id serial NOT NULL PRIMARY KEY,
+
+		mint TEXT UNIQUE NOT NULL,
+		supply_from_bonding BIGINT NOT NULL,
+		slot BIGINT NOT NULL,
+		last_updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+	);
 	`
 
 	// Used for testing ONLY, the table and migrations are external to this repository
@@ -88,6 +96,7 @@ const (
 		DROP TABLE ocp__core_exchangerate;
 		DROP TABLE ocp__core_currencymetadata;
 		DROP TABLE ocp__core_currencyreserve;
+		DROP TABLE ocp__core_currencyreserve2;
 	`
 )
 
