@@ -345,6 +345,12 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 		if err != nil {
 			return err
 		}
-		return p.markCurrencyMetadataAvailable(ctx, currencyMetadataRecord)
+
+		err = p.markCurrencyMetadataAvailable(ctx, currencyMetadataRecord)
+		if err != nil {
+			return err
+		}
+
+		return p.putInitialReserveState(ctx, currencyMetadataRecord)
 	})
 }
