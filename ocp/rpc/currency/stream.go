@@ -2,7 +2,6 @@ package currency
 
 import (
 	"sync"
-	"time"
 
 	"github.com/pkg/errors"
 
@@ -12,8 +11,7 @@ import (
 )
 
 const (
-	streamNotifyTimeout = 10 * time.Second
-	streamBufferSize    = 100
+	streamBufferSize = 100
 )
 
 // streamUpdate represents an update to send to streams (pre-signed)
@@ -44,17 +42,17 @@ func newLiveMintDataStream(id string, mints []*common.Account, bufferSize int) *
 	}
 }
 
-func (s *liveMintDataStream) notifyExchangeRates(data *liveExchangeRateData, timeout time.Duration) error {
+func (s *liveMintDataStream) notifyExchangeRates(data *liveExchangeRateData) error {
 	if data.SignedResponse == nil {
 		return errors.New("exchange rates missing pre-signed response")
 	}
 	update := &streamUpdate{
 		response: data.SignedResponse,
 	}
-	return s.notify(update, timeout)
+	return s.notify(update)
 }
 
-func (s *liveMintDataStream) notifyReserveStates(states []*liveReserveStateData, timeout time.Duration) error {
+func (s *liveMintDataStream) notifyReserveStates(states []*liveReserveStateData) error {
 	// Filter reserve states based on subscribed mints
 	var filtered []*currencypb.VerifiedLaunchpadCurrencyReserveState
 	for _, state := range states {
@@ -87,10 +85,10 @@ func (s *liveMintDataStream) notifyReserveStates(states []*liveReserveStateData,
 	update := &streamUpdate{
 		response: response,
 	}
-	return s.notify(update, timeout)
+	return s.notify(update)
 }
 
-func (s *liveMintDataStream) notify(update *streamUpdate, timeout time.Duration) error {
+func (s *liveMintDataStream) notify(update *streamUpdate) error {
 	s.Lock()
 
 	if s.closed {
@@ -100,10 +98,10 @@ func (s *liveMintDataStream) notify(update *streamUpdate, timeout time.Duration)
 
 	select {
 	case s.streamCh <- update:
-	case <-time.After(timeout):
+	default:
 		s.Unlock()
 		s.close()
-		return errors.New("timed out sending data to streamCh")
+		return errors.New("streamCh is full; closing stream that's falling behind")
 	}
 
 	s.Unlock()
