@@ -213,7 +213,17 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 			// todo: Recovery flow to put back source funds into the source VM
 			return p.markSwapFailed(ctx, record)
 		} else {
-			quarksBought, err := p.updateBalancesForFinalizedSwap(ctx, record)
+			tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, record.TransactionSignature)
+			if err != nil {
+				return errors.Wrap(err, "error getting transaction token balances")
+			}
+
+			err = p.updateLiveReserveStateForFinalizedSwap(ctx, record, tokenBalances)
+			if err != nil {
+				return errors.Wrap(err, "error updating live reserve state")
+			}
+
+			quarksBought, err := p.updateBalancesForFinalizedSwap(ctx, record, tokenBalances)
 			if err != nil {
 				return errors.Wrap(err, "error updating balances")
 			}

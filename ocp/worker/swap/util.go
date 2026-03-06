@@ -15,6 +15,7 @@ import (
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
@@ -23,6 +24,7 @@ import (
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
 func (p *runtime) validateSwapState(record *swap.Record, states ...swap.State) error {
@@ -132,7 +134,7 @@ func (p *runtime) submitTransaction(ctx context.Context, record *swap.Record) er
 	return nil
 }
 
-func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord *swap.Record) (uint64, error) {
+func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, error) {
 	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
 		return 0, err
@@ -161,11 +163,6 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 	}
 
 	ownerDestinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
-	if err != nil {
-		return 0, err
-	}
-
-	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, swapRecord.TransactionSignature)
 	if err != nil {
 		return 0, err
 	}
@@ -524,6 +521,61 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 	}
 
 	return vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, p.data, destinationTimelockVault, true)
+}
+
+func (p *runtime) updateLiveReserveStateForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) error {
+	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+	if err != nil {
+		return err
+	}
+
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return err
+	}
+
+	var currencyMints []*common.Account
+	if !common.IsCoreMint(fromMint) {
+		currencyMints = append(currencyMints, fromMint)
+	}
+	if !common.IsCoreMint(toMint) {
+		currencyMints = append(currencyMints, toMint)
+	}
+
+	for _, mint := range currencyMints {
+		metadataRecord, err := p.data.GetCurrencyMetadata(ctx, mint.PublicKey().ToBase58())
+		if err != nil {
+			return err
+		}
+
+		vaultMint, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultMint)
+		if err != nil {
+			return err
+		}
+
+		postBalance, ok, err := transaction_util.GetPostQuarksFromTokenBalances(vaultMint, tokenBalances)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		err = p.data.PutLiveCurrencyReserve(ctx, &currency.ReserveRecord{
+			Mint:              mint.PublicKey().ToBase58(),
+			SupplyFromBonding: currencycreator.DefaultMintMaxQuarkSupply - postBalance,
+			Slot:              tokenBalances.Slot,
+			Time:              time.Now(),
+		})
+		if err == currency.ErrStaleReserveState {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func getSwapDepositIntentID(signature string, destination *common.Account) string {
