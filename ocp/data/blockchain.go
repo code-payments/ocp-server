@@ -53,6 +53,16 @@ func NewBlockchainProvider(solanaEndpoint string) (BlockchainData, error) {
 	}, nil
 }
 
+func NewBlockchainProviderWithFallback(primaryEndpoint, fallbackEndpoint string) (BlockchainData, error) {
+	sc := solana.NewWithFallback(primaryEndpoint, fallbackEndpoint)
+	tc := token.NewClient(sc)
+
+	return &BlockchainProvider{
+		sc: sc,
+		tc: tc,
+	}, nil
+}
+
 // Solana
 // --------------------------------------------------------------------------------
 

@@ -24,8 +24,14 @@ type DataProvider struct {
 	*WebProvider
 }
 
-func NewDataProvider(dbConfig *pg.Config, solanaEnv string, configProvider ConfigProvider) (Provider, error) {
-	blockchain, err := NewBlockchainProvider(solanaEnv)
+func NewDataProvider(dbConfig *pg.Config, primarySolanaEnv, fallbackSolanaEnv string, configProvider ConfigProvider) (Provider, error) {
+	var blockchain BlockchainData
+	var err error
+	if len(fallbackSolanaEnv) > 0 {
+		blockchain, err = NewBlockchainProviderWithFallback(primarySolanaEnv, fallbackSolanaEnv)
+	} else {
+		blockchain, err = NewBlockchainProvider(primarySolanaEnv)
+	}
 	if err != nil {
 		return nil, err
 	}
