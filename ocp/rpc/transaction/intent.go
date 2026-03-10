@@ -788,9 +788,8 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 
 	if req.Owner != nil {
 		if signer.PublicKey().ToBase58() != intentRecord.InitiatorOwnerAccount && signer.PublicKey().ToBase58() != destinationOwnerAccount {
-			// Owner is not involved in this intent. Don't reveal anything.
 			return &transactionpb.GetIntentMetadataResponse{
-				Result: transactionpb.GetIntentMetadataResponse_NOT_FOUND,
+				Result: transactionpb.GetIntentMetadataResponse_DENIED,
 			}, nil
 		}
 	}
@@ -878,9 +877,8 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 			},
 		}
 	default:
-		// Don't reveal anything for these intent types
 		return &transactionpb.GetIntentMetadataResponse{
-			Result: transactionpb.GetIntentMetadataResponse_NOT_FOUND,
+			Result: transactionpb.GetIntentMetadataResponse_DENIED,
 		}, nil
 	}
 
