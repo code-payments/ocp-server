@@ -179,27 +179,12 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, err
 		}
 
+		currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(metadataRecord)
+		if err != nil {
+			return nil, err
+		}
+
 		seed, err := common.NewAccountFromPublicKeyString(metadataRecord.Seed)
-		if err != nil {
-			return nil, err
-		}
-		currencyAuthorityAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.Authority)
-		if err != nil {
-			return nil, err
-		}
-		currencyConfigAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.CurrencyConfig)
-		if err != nil {
-			return nil, err
-		}
-		liquidityPoolAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.LiquidityPool)
-		if err != nil {
-			return nil, err
-		}
-		mintVaultAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultMint)
-		if err != nil {
-			return nil, err
-		}
-		coreMintVaultAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultCore)
 		if err != nil {
 			return nil, err
 		}
@@ -231,12 +216,12 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 				LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
 			},
 			LaunchpadMetadata: &currencypb.LaunchpadMetadata{
-				CurrencyConfig:    currencyConfigAccount.ToProto(),
-				LiquidityPool:     liquidityPoolAccount.ToProto(),
+				CurrencyConfig:    currencyAccounts.CurrencyConfig.ToProto(),
+				LiquidityPool:     currencyAccounts.LiquidityPool.ToProto(),
 				Seed:              seed.ToProto(),
-				Authority:         currencyAuthorityAccount.ToProto(),
-				MintVault:         mintVaultAccount.ToProto(),
-				CoreMintVault:     coreMintVaultAccount.ToProto(),
+				Authority:         currencyAccounts.Authority.ToProto(),
+				MintVault:         currencyAccounts.VaultMint.ToProto(),
+				CoreMintVault:     currencyAccounts.VaultBase.ToProto(),
 				SupplyFromBonding: liveReserveState.SupplyFromBonding,
 				SellFeeBps:        uint32(metadataRecord.SellFeeBps),
 				Price:             spotPrice,
