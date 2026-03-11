@@ -127,7 +127,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 	if cached, ok := m.getCachedProtoMint(mint); ok {
 		// Always overlay fresh circulating supply for launchpad currencies
 		if cached.LaunchpadMetadata != nil {
-			liveReserveState, err := m.GetLiveReserveState(mint)
+			liveReserveState, err := m.GetLiveReserveState(ctx, mint)
 			if err != nil {
 				return nil, err
 			}
@@ -189,12 +189,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, err
 		}
 
-		err = m.WaitForReserveState(ctx, mint, 2*m.reserveStatePollInterval)
-		if err != nil {
-			return nil, err
-		}
-
-		liveReserveState, err := m.GetLiveReserveState(mint)
+		liveReserveState, err := m.GetLiveReserveState(ctx, mint)
 		if err != nil {
 			return nil, err
 		}
@@ -328,8 +323,50 @@ func (m *MintDataProvider) UnregisterStream(id string) {
 	}
 }
 
-// WaitForExchangeRates blocks until exchange rate data is available or context is cancelled
-func (m *MintDataProvider) WaitForExchangeRates(ctx context.Context) error {
+// GetLiveExchangeRates returns the current pre-signed live exchange rate data
+func (m *MintDataProvider) GetLiveExchangeRates(ctx context.Context) (*LiveExchangeRateData, error) {
+	err := m.waitForExchangeRates(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	if m.exchangeRates == nil {
+		return nil, errors.New("not found")
+	}
+
+	return m.exchangeRates, nil
+}
+
+// GetLiveReserveState returns a current pre-signed live launchpad currency reserve state for a mint
+func (m *MintDataProvider) GetLiveReserveState(ctx context.Context, mint *common.Account) (*LiveReserveStateData, error) {
+	isSupported, err := common.IsSupportedMint(ctx, m.data, mint)
+	if err != nil {
+		return nil, err
+	}
+	if !isSupported {
+		return nil, common.ErrUnsupportedMint
+	}
+
+	err = m.waitForReserveState(ctx, mint)
+	if err != nil {
+		return nil, err
+	}
+
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	data, ok := m.launchpadReserves[mint.PublicKey().ToBase58()]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return data, nil
+}
+
+// waitForExchangeRates blocks until exchange rate data is available or context is cancelled
+func (m *MintDataProvider) waitForExchangeRates(ctx context.Context) error {
 	select {
 	case <-m.exchangeRatesReady:
 		return nil
@@ -338,10 +375,10 @@ func (m *MintDataProvider) WaitForExchangeRates(ctx context.Context) error {
 	}
 }
 
-// WaitForReserveState blocks until reserve state data for a specific mint is
+// waitForReserveState blocks until reserve state data for a specific mint is
 // available, the context is cancelled, or the timeout is exceeded. Triggers
 // an immediate poll if the mint isn't cached yet.
-func (m *MintDataProvider) WaitForReserveState(ctx context.Context, mint *common.Account, timeout time.Duration) error {
+func (m *MintDataProvider) waitForReserveState(ctx context.Context, mint *common.Account) error {
 	ch := m.getOrCreateReserveReadyChan(mint)
 
 	select {
@@ -354,7 +391,7 @@ func (m *MintDataProvider) WaitForReserveState(ctx context.Context, mint *common
 	select {
 	case <-ch:
 		return nil
-	case <-time.After(timeout):
+	case <-time.After(2 * m.reserveStatePollInterval):
 		return errors.New("timed out waiting for reserve state")
 	case <-ctx.Done():
 		return ctx.Err()
@@ -381,30 +418,6 @@ func (m *MintDataProvider) getOrCreateReserveReadyChan(mint *common.Account) cha
 		m.reserveReadyChans[mint.PublicKey().ToBase58()] = ch
 	}
 	return ch
-}
-
-// GetLiveExchangeRates returns the current pre-signed live exchange rate data
-func (m *MintDataProvider) GetLiveExchangeRates() (*LiveExchangeRateData, error) {
-	m.stateMu.RLock()
-	defer m.stateMu.RUnlock()
-
-	if m.exchangeRates == nil {
-		return nil, errors.New("not found")
-	}
-
-	return m.exchangeRates, nil
-}
-
-// GetLiveReserveState returns a current pre-signed live launchpad currency reserve state for a mint
-func (m *MintDataProvider) GetLiveReserveState(mint *common.Account) (*LiveReserveStateData, error) {
-	m.stateMu.RLock()
-	defer m.stateMu.RUnlock()
-
-	data, ok := m.launchpadReserves[mint.PublicKey().ToBase58()]
-	if !ok {
-		return nil, errors.New("not found")
-	}
-	return data, nil
 }
 
 func (m *MintDataProvider) markExchangeRatesReady() {
@@ -643,12 +656,4 @@ func (m *MintDataProvider) signReserveState(mint *common.Account, supplyFromBond
 		ReserveState: reserveState,
 		Signature:    &commonpb.Signature{Value: signature},
 	}, nil
-}
-
-func (m *MintDataProvider) GetExchangeRatePollInterval() time.Duration {
-	return m.exchangeRatePollInterval
-}
-
-func (m *MintDataProvider) GetReserveStatePollInterval() time.Duration {
-	return m.reserveStatePollInterval
 }
