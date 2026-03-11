@@ -75,7 +75,7 @@ func (s *currencyServer) StreamLiveMintData(
 			return status.Error(codes.Canceled, "")
 		}
 
-		exchangeRates, err := s.mintDataProvider.GetExchangeRates()
+		exchangeRates, err := s.mintDataProvider.GetLiveExchangeRates()
 		if err == nil {
 			log.With(zap.Error(err)).Warn("failed to get exchange rates for initial flush")
 			return status.Error(codes.Internal, "")
@@ -124,7 +124,7 @@ func (s *currencyServer) StreamLiveMintData(
 			return status.Error(codes.Internal, "")
 		}
 
-		state, err := s.mintDataProvider.GetReserveState(mint)
+		state, err := s.mintDataProvider.GetLiveReserveState(mint)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to get reserve state for initial flush")
 			continue

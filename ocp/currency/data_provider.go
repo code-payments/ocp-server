@@ -127,7 +127,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 	if cached, ok := m.getCachedProtoMint(mint); ok {
 		// Always overlay fresh circulating supply for launchpad currencies
 		if cached.LaunchpadMetadata != nil {
-			liveReserveState, err := m.GetReserveState(mint)
+			liveReserveState, err := m.GetLiveReserveState(mint)
 			if err != nil {
 				return nil, err
 			}
@@ -194,7 +194,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, err
 		}
 
-		liveReserveState, err := m.GetReserveState(mint)
+		liveReserveState, err := m.GetLiveReserveState(mint)
 		if err != nil {
 			return nil, err
 		}
@@ -383,8 +383,8 @@ func (m *MintDataProvider) getOrCreateReserveReadyChan(mint *common.Account) cha
 	return ch
 }
 
-// GetExchangeRates returns the current pre-signed exchange rate data
-func (m *MintDataProvider) GetExchangeRates() (*LiveExchangeRateData, error) {
+// GetLiveExchangeRates returns the current pre-signed live exchange rate data
+func (m *MintDataProvider) GetLiveExchangeRates() (*LiveExchangeRateData, error) {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
@@ -395,8 +395,8 @@ func (m *MintDataProvider) GetExchangeRates() (*LiveExchangeRateData, error) {
 	return m.exchangeRates, nil
 }
 
-// GetReserveState returns a current pre-signed launchpad currency reserve state for a mint
-func (m *MintDataProvider) GetReserveState(mint *common.Account) (*LiveReserveStateData, error) {
+// GetLiveReserveState returns a current pre-signed live launchpad currency reserve state for a mint
+func (m *MintDataProvider) GetLiveReserveState(mint *common.Account) (*LiveReserveStateData, error) {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
