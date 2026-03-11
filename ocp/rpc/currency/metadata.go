@@ -46,7 +46,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 		if cached, ok := s.getCachedProtoMint(mintAccount); ok {
 			// Always overlay fresh circulating supply for launchpad currencies
 			if cached.LaunchpadMetadata != nil {
-				liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
+				liveReserveState, err := s.mintDataManager.GetReserveState(mintAccount)
 				if err != nil {
 					log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
 					return nil, status.Error(codes.Internal, "")
@@ -136,13 +136,13 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			err = s.liveMintStateWorker.waitForReserveState(ctx, mintAccount, 2*s.conf.reserveStatePollInterval.Get(ctx))
+			err = s.mintDataManager.WaitForReserveState(ctx, mintAccount, 2*s.mintDataManager.GetReserveStatePollInterval())
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failed to wait for live mint reserve state")
 				return nil, status.Error(codes.Internal, "")
 			}
 
-			liveReserveState, err := s.liveMintStateWorker.getReserveState(mintAccount)
+			liveReserveState, err := s.mintDataManager.GetReserveState(mintAccount)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failed to get live mint reserve state")
 				return nil, status.Error(codes.Internal, "")

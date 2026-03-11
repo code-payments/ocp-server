@@ -1,7 +1,6 @@
 package currency
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/code-payments/ocp-server/cache"
 	"github.com/code-payments/ocp-server/ocp/antispam"
 	auth_util "github.com/code-payments/ocp-server/ocp/auth"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 )
 
@@ -41,7 +41,7 @@ type currencyServer struct {
 	getMintsCacheMu sync.RWMutex
 	getMintsCache   map[string]*cachedProtoMint
 
-	liveMintStateWorker *liveMintStateWorker
+	mintDataManager *currency_util.MintDataManager
 
 	currencypb.UnimplementedCurrencyServer
 }
@@ -49,21 +49,20 @@ type currencyServer struct {
 func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	mintDataManager *currency_util.MintDataManager,
 	antispamGuard *antispam.Guard,
 	s3Client *s3.Client,
 	configProvider ConfigProvider,
-) (currencypb.CurrencyServer, func()) {
+) currencypb.CurrencyServer {
 	conf := configProvider()
-
-	liveMintStateWorker := newLiveMintStateWorker(log, data, conf)
-	liveMintStateWorker.start(context.Background())
 
 	s := &currencyServer{
 		log: log,
 
 		conf: conf,
 
-		data: data,
+		data:            data,
+		mintDataManager: mintDataManager,
 
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
@@ -75,9 +74,7 @@ func NewCurrencyServer(
 		reserveHistoryCache:      cache.NewCache(1_000),
 
 		getMintsCache: make(map[string]*cachedProtoMint),
-
-		liveMintStateWorker: liveMintStateWorker,
 	}
 
-	return s, s.liveMintStateWorker.stop
+	return s
 }

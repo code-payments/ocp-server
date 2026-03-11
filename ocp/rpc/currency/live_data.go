@@ -60,24 +60,35 @@ func (s *currencyServer) StreamLiveMintData(
 	log = log.With(zap.String("stream_id", streamID))
 
 	// Register stream with state worker
-	stream := s.liveMintStateWorker.registerStream(streamID, requestedMints)
+	stream := s.mintDataManager.RegisterStream(streamID, requestedMints)
 	if stream == nil {
 		return status.Error(codes.Unavailable, "server is shutting down")
 	}
-	defer s.liveMintStateWorker.unregisterStream(streamID)
+	defer s.mintDataManager.UnregisterStream(streamID)
 
 	log.Debug("stream registered")
 
 	// Wait for and flush initial exchange rates if the stream wants them
-	if stream.wantsExchangeRates() {
-		if err := s.liveMintStateWorker.waitForExchangeRates(ctx); err != nil {
+	if stream.WantsExchangeRates() {
+		if err := s.mintDataManager.WaitForExchangeRates(ctx); err != nil {
 			log.With(zap.Error(err)).Debug("context cancelled while waiting for exchange rates")
 			return status.Error(codes.Canceled, "")
 		}
 
-		exchangeRates := s.liveMintStateWorker.getExchangeRates()
-		if exchangeRates != nil && exchangeRates.SignedResponse != nil {
-			if err := streamer.Send(exchangeRates.SignedResponse); err != nil {
+		exchangeRates := s.mintDataManager.GetExchangeRates()
+		if exchangeRates != nil && len(exchangeRates.SignedRates) > 0 {
+			resp := &currencypb.StreamLiveMintDataResponse{
+				Type: &currencypb.StreamLiveMintDataResponse_Data{
+					Data: &currencypb.StreamLiveMintDataResponse_LiveData{
+						Type: &currencypb.StreamLiveMintDataResponse_LiveData_CoreMintFiatExchangeRates{
+							CoreMintFiatExchangeRates: &currencypb.VerifiedCoreMintFiatExchangeRateBatch{
+								ExchangeRates: exchangeRates.SignedRates,
+							},
+						},
+					},
+				},
+			}
+			if err := streamer.Send(resp); err != nil {
 				log.With(zap.Error(err)).Debug("failed to send initial exchange rates")
 				return err
 			}
@@ -100,13 +111,13 @@ func (s *currencyServer) StreamLiveMintData(
 			continue
 		}
 
-		err = s.liveMintStateWorker.waitForReserveState(ctx, mint, 2*s.conf.reserveStatePollInterval.Get(ctx))
+		err = s.mintDataManager.WaitForReserveState(ctx, mint, 2*s.mintDataManager.GetReserveStatePollInterval())
 		if err != nil {
 			log.With(zap.Error(err)).Debug("failed to wait for live mint reserve state")
 			return status.Error(codes.Internal, "")
 		}
 
-		state, err := s.liveMintStateWorker.getReserveState(mint)
+		state, err := s.mintDataManager.GetReserveState(mint)
 		if err != nil {
 			continue
 		}
@@ -143,21 +154,54 @@ func (s *currencyServer) StreamLiveMintData(
 	// Main loop: listen on stream channel and send updates
 	for {
 		select {
-		case update, ok := <-stream.streamCh:
+		case update, ok := <-stream.GetUpdateChannel():
 			if !ok {
 				log.Debug("stream channel closed")
 				return status.Error(codes.Aborted, "stream closed")
 			}
 
-			if update.response == nil {
-				continue
+			if update.ExchangeRates != nil {
+				resp := &currencypb.StreamLiveMintDataResponse{
+					Type: &currencypb.StreamLiveMintDataResponse_Data{
+						Data: &currencypb.StreamLiveMintDataResponse_LiveData{
+							Type: &currencypb.StreamLiveMintDataResponse_LiveData_CoreMintFiatExchangeRates{
+								CoreMintFiatExchangeRates: &currencypb.VerifiedCoreMintFiatExchangeRateBatch{
+									ExchangeRates: update.ExchangeRates.SignedRates,
+								},
+							},
+						},
+					},
+				}
+
+				if err := streamer.Send(resp); err != nil {
+					log.With(zap.Error(err)).Debug("failed to send update")
+					return err
+				}
 			}
 
-			if err := streamer.Send(update.response); err != nil {
-				log.With(zap.Error(err)).Debug("failed to send update")
-				return err
-			}
+			if len(update.ReserveStates) > 0 {
+				signedStates := make([]*currencypb.VerifiedLaunchpadCurrencyReserveState, len(update.ReserveStates))
+				for i, reserveState := range update.ReserveStates {
+					signedStates[i] = reserveState.SignedState
+				}
 
+				resp := &currencypb.StreamLiveMintDataResponse{
+					Type: &currencypb.StreamLiveMintDataResponse_Data{
+						Data: &currencypb.StreamLiveMintDataResponse_LiveData{
+							Type: &currencypb.StreamLiveMintDataResponse_LiveData_LaunchpadCurrencyReserveStates{
+								LaunchpadCurrencyReserveStates: &currencypb.VerifiedLaunchapdCurrencyReserveStateBatch{
+									ReserveStates: signedStates,
+								},
+							},
+						},
+					},
+				}
+
+				if err := streamer.Send(resp); err != nil {
+					log.With(zap.Error(err)).Debug("failed to send update")
+					return err
+				}
+			}
 		case <-sendPingCh:
 			log.Debug("sending ping to client")
 			sendPingCh = time.After(streamPingDelay)
