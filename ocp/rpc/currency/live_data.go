@@ -60,22 +60,22 @@ func (s *currencyServer) StreamLiveMintData(
 	log = log.With(zap.String("stream_id", streamID))
 
 	// Register stream with state worker
-	stream := s.mintDataManager.RegisterStream(streamID, requestedMints)
+	stream := s.mintDataProvider.RegisterStream(streamID, requestedMints)
 	if stream == nil {
 		return status.Error(codes.Unavailable, "server is shutting down")
 	}
-	defer s.mintDataManager.UnregisterStream(streamID)
+	defer s.mintDataProvider.UnregisterStream(streamID)
 
 	log.Debug("stream registered")
 
 	// Wait for and flush initial exchange rates if the stream wants them
 	if stream.WantsExchangeRates() {
-		if err := s.mintDataManager.WaitForExchangeRates(ctx); err != nil {
+		if err := s.mintDataProvider.WaitForExchangeRates(ctx); err != nil {
 			log.With(zap.Error(err)).Debug("context cancelled while waiting for exchange rates")
 			return status.Error(codes.Canceled, "")
 		}
 
-		exchangeRates := s.mintDataManager.GetExchangeRates()
+		exchangeRates := s.mintDataProvider.GetExchangeRates()
 		if exchangeRates != nil && len(exchangeRates.SignedRates) > 0 {
 			resp := &currencypb.StreamLiveMintDataResponse{
 				Type: &currencypb.StreamLiveMintDataResponse_Data{
@@ -111,13 +111,13 @@ func (s *currencyServer) StreamLiveMintData(
 			continue
 		}
 
-		err = s.mintDataManager.WaitForReserveState(ctx, mint, 2*s.mintDataManager.GetReserveStatePollInterval())
+		err = s.mintDataProvider.WaitForReserveState(ctx, mint, 2*s.mintDataProvider.GetReserveStatePollInterval())
 		if err != nil {
 			log.With(zap.Error(err)).Debug("failed to wait for live mint reserve state")
 			return status.Error(codes.Internal, "")
 		}
 
-		state, err := s.mintDataManager.GetReserveState(mint)
+		state, err := s.mintDataProvider.GetReserveState(mint)
 		if err != nil {
 			continue
 		}

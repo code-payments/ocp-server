@@ -32,7 +32,7 @@ type LiveReserveStateData struct {
 	SignedState       *currencypb.VerifiedLaunchpadCurrencyReserveState
 }
 
-type MintDataManager struct {
+type MintDataProvider struct {
 	log  *zap.Logger
 	data ocp_data.Provider
 
@@ -59,9 +59,9 @@ type MintDataManager struct {
 	cancel context.CancelFunc
 }
 
-func NewMintDataManager(log *zap.Logger, data ocp_data.Provider, exchangeRatePollInterval, reserveStatePollInterval time.Duration) *MintDataManager {
+func NewMintDataProvider(log *zap.Logger, data ocp_data.Provider, exchangeRatePollInterval, reserveStatePollInterval time.Duration) *MintDataProvider {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &MintDataManager{
+	return &MintDataProvider{
 		log:                      log,
 		data:                     data,
 		launchpadReserves:        make(map[string]*LiveReserveStateData),
@@ -77,7 +77,7 @@ func NewMintDataManager(log *zap.Logger, data ocp_data.Provider, exchangeRatePol
 }
 
 // Start begins the polling goroutines for exchange rates and reserve state
-func (m *MintDataManager) Start(ctx context.Context) error {
+func (m *MintDataProvider) Start(ctx context.Context) error {
 	go m.pollExchangeRates(ctx)
 	go m.pollReserveState(ctx)
 	return nil
@@ -85,7 +85,7 @@ func (m *MintDataManager) Start(ctx context.Context) error {
 
 // stop cancels the polling goroutines and closes all streams.
 // After stop is called, no new streams can be registered.
-func (m *MintDataManager) Stop() {
+func (m *MintDataProvider) Stop() {
 	m.cancel()
 
 	m.streamsMu.Lock()
@@ -101,7 +101,7 @@ func (m *MintDataManager) Stop() {
 
 // RegisterStream creates and registers a new stream for the given mints.
 // Returns nil if the worker has been stopped.
-func (m *MintDataManager) RegisterStream(id string, mints []*common.Account) *LiveMintDataStream {
+func (m *MintDataProvider) RegisterStream(id string, mints []*common.Account) *LiveMintDataStream {
 	m.streamsMu.Lock()
 	defer m.streamsMu.Unlock()
 
@@ -116,7 +116,7 @@ func (m *MintDataManager) RegisterStream(id string, mints []*common.Account) *Li
 }
 
 // UnregisterStream removes a stream and closes it
-func (m *MintDataManager) UnregisterStream(id string) {
+func (m *MintDataProvider) UnregisterStream(id string) {
 	m.streamsMu.Lock()
 	stream, ok := m.streams[id]
 	if ok {
@@ -130,7 +130,7 @@ func (m *MintDataManager) UnregisterStream(id string) {
 }
 
 // WaitForExchangeRates blocks until exchange rate data is available or context is cancelled
-func (m *MintDataManager) WaitForExchangeRates(ctx context.Context) error {
+func (m *MintDataProvider) WaitForExchangeRates(ctx context.Context) error {
 	select {
 	case <-m.exchangeRatesReady:
 		return nil
@@ -142,7 +142,7 @@ func (m *MintDataManager) WaitForExchangeRates(ctx context.Context) error {
 // WaitForReserveState blocks until reserve state data for a specific mint is
 // available, the context is cancelled, or the timeout is exceeded. Triggers
 // an immediate poll if the mint isn't cached yet.
-func (m *MintDataManager) WaitForReserveState(ctx context.Context, mint *common.Account, timeout time.Duration) error {
+func (m *MintDataProvider) WaitForReserveState(ctx context.Context, mint *common.Account, timeout time.Duration) error {
 	ch := m.getOrCreateReserveReadyChan(mint)
 
 	select {
@@ -164,7 +164,7 @@ func (m *MintDataManager) WaitForReserveState(ctx context.Context, mint *common.
 
 // triggerReservePoll sends a non-blocking signal to the reserve poll loop
 // to run immediately.
-func (m *MintDataManager) triggerReservePoll() {
+func (m *MintDataProvider) triggerReservePoll() {
 	select {
 	case m.reservePollTrigger <- struct{}{}:
 	default:
@@ -172,7 +172,7 @@ func (m *MintDataManager) triggerReservePoll() {
 	}
 }
 
-func (m *MintDataManager) getOrCreateReserveReadyChan(mint *common.Account) chan struct{} {
+func (m *MintDataProvider) getOrCreateReserveReadyChan(mint *common.Account) chan struct{} {
 	m.reserveReadyMu.Lock()
 	defer m.reserveReadyMu.Unlock()
 
@@ -185,7 +185,7 @@ func (m *MintDataManager) getOrCreateReserveReadyChan(mint *common.Account) chan
 }
 
 // GetExchangeRates returns the current pre-signed exchange rate data
-func (m *MintDataManager) GetExchangeRates() *LiveExchangeRateData {
+func (m *MintDataProvider) GetExchangeRates() *LiveExchangeRateData {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
@@ -193,7 +193,7 @@ func (m *MintDataManager) GetExchangeRates() *LiveExchangeRateData {
 }
 
 // GetReserveState returns a current pre-signed launchpad currency reserve state for a mint
-func (m *MintDataManager) GetReserveState(mint *common.Account) (*LiveReserveStateData, error) {
+func (m *MintDataProvider) GetReserveState(mint *common.Account) (*LiveReserveStateData, error) {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
@@ -204,13 +204,13 @@ func (m *MintDataManager) GetReserveState(mint *common.Account) (*LiveReserveSta
 	return data, nil
 }
 
-func (m *MintDataManager) markExchangeRatesReady() {
+func (m *MintDataProvider) markExchangeRatesReady() {
 	m.exchangeRatesReadyOnce.Do(func() {
 		close(m.exchangeRatesReady)
 	})
 }
 
-func (m *MintDataManager) markReserveStateReady(mint *common.Account) {
+func (m *MintDataProvider) markReserveStateReady(mint *common.Account) {
 	m.reserveReadyMu.Lock()
 	defer m.reserveReadyMu.Unlock()
 
@@ -228,7 +228,7 @@ func (m *MintDataManager) markReserveStateReady(mint *common.Account) {
 	}
 }
 
-func (m *MintDataManager) pollExchangeRates(ctx context.Context) {
+func (m *MintDataProvider) pollExchangeRates(ctx context.Context) {
 	log := m.log.With(zap.String("poller", "exchange_rates"))
 
 	// Initial poll immediately
@@ -249,7 +249,7 @@ func (m *MintDataManager) pollExchangeRates(ctx context.Context) {
 	}
 }
 
-func (m *MintDataManager) fetchAndUpdateExchangeRates(ctx context.Context, log *zap.Logger) {
+func (m *MintDataProvider) fetchAndUpdateExchangeRates(ctx context.Context, log *zap.Logger) {
 	rates, err := m.data.GetAllExchangeRates(ctx, time.Now())
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to fetch exchange rates")
@@ -274,7 +274,7 @@ func (m *MintDataManager) fetchAndUpdateExchangeRates(ctx context.Context, log *
 	m.markExchangeRatesReady()
 }
 
-func (m *MintDataManager) pollReserveState(ctx context.Context) {
+func (m *MintDataProvider) pollReserveState(ctx context.Context) {
 	// Initial poll immediately
 	m.fetchAndUpdateReserveStates(ctx)
 
@@ -295,7 +295,7 @@ func (m *MintDataManager) pollReserveState(ctx context.Context) {
 	}
 }
 
-func (m *MintDataManager) fetchAndUpdateReserveStates(ctx context.Context) {
+func (m *MintDataProvider) fetchAndUpdateReserveStates(ctx context.Context) {
 	liveReserves, err := m.data.GetAllLiveCurrencyReserves(ctx)
 	if err == currency.ErrNotFound {
 		return
@@ -344,7 +344,7 @@ func (m *MintDataManager) fetchAndUpdateReserveStates(ctx context.Context) {
 	}
 }
 
-func (m *MintDataManager) notifyExchangeRates() {
+func (m *MintDataProvider) notifyExchangeRates() {
 	m.stateMu.RLock()
 	data := m.exchangeRates
 	m.stateMu.RUnlock()
@@ -372,7 +372,7 @@ func (m *MintDataManager) notifyExchangeRates() {
 	}
 }
 
-func (m *MintDataManager) notifyReserveStates(states []*LiveReserveStateData) {
+func (m *MintDataProvider) notifyReserveStates(states []*LiveReserveStateData) {
 	m.streamsMu.RLock()
 	streams := make([]*LiveMintDataStream, 0, len(m.streams))
 	for _, stream := range m.streams {
@@ -391,7 +391,7 @@ func (m *MintDataManager) notifyReserveStates(states []*LiveReserveStateData) {
 }
 
 // signExchangeRates creates a pre-signed response for exchange rates.
-func (m *MintDataManager) signExchangeRates(rates *currency.MultiRateRecord) ([]*currencypb.VerifiedCoreMintFiatExchangeRate, error) {
+func (m *MintDataProvider) signExchangeRates(rates *currency.MultiRateRecord) ([]*currencypb.VerifiedCoreMintFiatExchangeRate, error) {
 	subsidizer := common.GetSubsidizer()
 
 	now := time.Now()
@@ -422,7 +422,7 @@ func (m *MintDataManager) signExchangeRates(rates *currency.MultiRateRecord) ([]
 }
 
 // signReserveState creates a pre-signed verified state for a reserve state.
-func (m *MintDataManager) signReserveState(mint *common.Account, supplyFromBonding uint64, ts time.Time) (*currencypb.VerifiedLaunchpadCurrencyReserveState, error) {
+func (m *MintDataProvider) signReserveState(mint *common.Account, supplyFromBonding uint64, ts time.Time) (*currencypb.VerifiedLaunchpadCurrencyReserveState, error) {
 	reserveState := &currencypb.LaunchpadCurrencyReserveState{
 		Mint:              mint.ToProto(),
 		SupplyFromBonding: supplyFromBonding,
@@ -442,10 +442,10 @@ func (m *MintDataManager) signReserveState(mint *common.Account, supplyFromBondi
 	}, nil
 }
 
-func (m *MintDataManager) GetExchangeRatePollInterval() time.Duration {
+func (m *MintDataProvider) GetExchangeRatePollInterval() time.Duration {
 	return m.exchangeRatePollInterval
 }
 
-func (m *MintDataManager) GetReserveStatePollInterval() time.Duration {
+func (m *MintDataProvider) GetReserveStatePollInterval() time.Duration {
 	return m.reserveStatePollInterval
 }

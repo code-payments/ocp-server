@@ -41,7 +41,7 @@ type currencyServer struct {
 	getMintsCacheMu sync.RWMutex
 	getMintsCache   map[string]*cachedProtoMint
 
-	mintDataManager *currency_util.MintDataManager
+	mintDataProvider *currency_util.MintDataProvider
 
 	currencypb.UnimplementedCurrencyServer
 }
@@ -49,7 +49,7 @@ type currencyServer struct {
 func NewCurrencyServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
-	mintDataManager *currency_util.MintDataManager,
+	mintDataProvider *currency_util.MintDataProvider,
 	antispamGuard *antispam.Guard,
 	s3Client *s3.Client,
 	configProvider ConfigProvider,
@@ -61,8 +61,8 @@ func NewCurrencyServer(
 
 		conf: conf,
 
-		data:            data,
-		mintDataManager: mintDataManager,
+		data:             data,
+		mintDataProvider: mintDataProvider,
 
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
