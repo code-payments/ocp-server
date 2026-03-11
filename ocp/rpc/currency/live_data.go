@@ -75,7 +75,12 @@ func (s *currencyServer) StreamLiveMintData(
 			return status.Error(codes.Canceled, "")
 		}
 
-		exchangeRates := s.mintDataProvider.GetExchangeRates()
+		exchangeRates, err := s.mintDataProvider.GetExchangeRates()
+		if err == nil {
+			log.With(zap.Error(err)).Warn("failed to get exchange rates for initial flush")
+			return status.Error(codes.Internal, "")
+		}
+
 		if exchangeRates != nil && len(exchangeRates.SignedRates) > 0 {
 			resp := &currencypb.StreamLiveMintDataResponse{
 				Type: &currencypb.StreamLiveMintDataResponse_Data{
@@ -98,6 +103,8 @@ func (s *currencyServer) StreamLiveMintData(
 	// Wait for and flush initial reserve states for each requested mint
 	var filtered []*currencypb.VerifiedLaunchpadCurrencyReserveState
 	for _, mint := range requestedMints {
+		log := log.With(zap.String("mint", mint.PublicKey().ToBase58()))
+
 		if common.IsCoreMint(mint) {
 			continue
 		}
@@ -119,6 +126,7 @@ func (s *currencyServer) StreamLiveMintData(
 
 		state, err := s.mintDataProvider.GetReserveState(mint)
 		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to get reserve state for initial flush")
 			continue
 		}
 		if state.SignedState != nil {

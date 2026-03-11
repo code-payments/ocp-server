@@ -3,20 +3,25 @@ package currency
 import (
 	"context"
 	"crypto/ed25519"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
-	"github.com/pkg/errors"
 
 	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
+	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 )
 
 // LiveExchangeRateData represents live exchange rate data with its pre-signed response
@@ -32,9 +37,21 @@ type LiveReserveStateData struct {
 	SignedState       *currencypb.VerifiedLaunchpadCurrencyReserveState
 }
 
+type cachedProtoMint struct {
+	mint          *currencypb.Mint
+	lastUpdatedAt time.Time
+}
+
 type MintDataProvider struct {
 	log  *zap.Logger
 	data ocp_data.Provider
+
+	protoMintCacheTTL        time.Duration
+	exchangeRatePollInterval time.Duration
+	reserveStatePollInterval time.Duration
+
+	protoMintsCacheMu sync.RWMutex
+	protoMintsCache   map[string]*cachedProtoMint
 
 	stateMu           sync.RWMutex
 	exchangeRates     *LiveExchangeRateData
@@ -52,25 +69,30 @@ type MintDataProvider struct {
 
 	reservePollTrigger chan struct{}
 
-	exchangeRatePollInterval time.Duration
-	reserveStatePollInterval time.Duration
-
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewMintDataProvider(log *zap.Logger, data ocp_data.Provider, exchangeRatePollInterval, reserveStatePollInterval time.Duration) *MintDataProvider {
+func NewMintDataProvider(
+	log *zap.Logger,
+	data ocp_data.Provider,
+	protoMintCacheTTL,
+	exchangeRatePollInterval,
+	reserveStatePollInterval time.Duration,
+) *MintDataProvider {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &MintDataProvider{
 		log:                      log,
 		data:                     data,
+		protoMintCacheTTL:        protoMintCacheTTL,
+		exchangeRatePollInterval: exchangeRatePollInterval,
+		reserveStatePollInterval: reserveStatePollInterval,
+		protoMintsCache:          make(map[string]*cachedProtoMint),
 		launchpadReserves:        make(map[string]*LiveReserveStateData),
 		streams:                  make(map[string]*LiveMintDataStream),
 		exchangeRatesReady:       make(chan struct{}),
 		reserveReadyChans:        make(map[string]chan struct{}),
 		reservePollTrigger:       make(chan struct{}, 1),
-		exchangeRatePollInterval: exchangeRatePollInterval,
-		reserveStatePollInterval: reserveStatePollInterval,
 		ctx:                      ctx,
 		cancel:                   cancel,
 	}
@@ -97,6 +119,198 @@ func (m *MintDataProvider) Stop() {
 		stream.close()
 	}
 	m.streams = make(map[string]*LiveMintDataStream)
+}
+
+// GetProtoMint gets a proto Mint object. Static and infrequently updated metadata is
+// heavily cached.
+func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Account) (*currencypb.Mint, error) {
+	if cached, ok := m.getCachedProtoMint(mint); ok {
+		// Always overlay fresh circulating supply for launchpad currencies
+		if cached.LaunchpadMetadata != nil {
+			liveReserveState, err := m.GetReserveState(mint)
+			if err != nil {
+				return nil, err
+			}
+
+			spotPrice, _ := currencycreator.EstimateCurrentPrice(liveReserveState.SupplyFromBonding).Float64()
+			marketCap := CalculateMarketCap(liveReserveState.SupplyFromBonding, 1.0)
+			cached.LaunchpadMetadata.SupplyFromBonding = liveReserveState.SupplyFromBonding
+			cached.LaunchpadMetadata.Price = spotPrice
+			cached.LaunchpadMetadata.MarketCap = marketCap
+		}
+
+		return cached, nil
+	}
+
+	var protoMetadata *currencypb.Mint
+	switch mint.PublicKey().ToBase58() {
+	case common.CoreMintAccount.PublicKey().ToBase58():
+		vmConfig, err := common.GetVmConfigForMint(ctx, m.data, common.CoreMintAccount)
+		if err != nil {
+			return nil, err
+		}
+
+		protoMetadata = &currencypb.Mint{
+			Address:     mint.ToProto(),
+			Decimals:    uint32(common.CoreMintDecimals),
+			Name:        common.CoreMintName,
+			Symbol:      strings.ToUpper(string(common.CoreMintSymbol)),
+			Description: config.CoreMintDescription,
+			ImageUrl:    config.CoreMintImageUrl,
+			VmMetadata: &currencypb.VmMetadata{
+				Vm:                 vmConfig.Vm.ToProto(),
+				Omnibus:            vmConfig.Omnibus.ToProto(),
+				Authority:          vmConfig.Authority.ToProto(),
+				LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
+			},
+			CreatedAt: timestamppb.New(time.Time{}),
+		}
+	default:
+		metadataRecord, err := m.data.GetCurrencyMetadata(ctx, mint.PublicKey().ToBase58())
+		if err == currency.ErrNotFound {
+			return nil, err
+		}
+		if metadataRecord.State != currency.MetadataStateAvailable {
+			return nil, currency.ErrNotFound
+		}
+
+		vmConfig, err := common.GetVmConfigForMint(ctx, m.data, mint)
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := common.NewAccountFromPublicKeyString(metadataRecord.Seed)
+		if err != nil {
+			return nil, err
+		}
+		currencyAuthorityAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.Authority)
+		if err != nil {
+			return nil, err
+		}
+		currencyConfigAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.CurrencyConfig)
+		if err != nil {
+			return nil, err
+		}
+		liquidityPoolAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.LiquidityPool)
+		if err != nil {
+			return nil, err
+		}
+		mintVaultAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultMint)
+		if err != nil {
+			return nil, err
+		}
+		coreMintVaultAccount, err := common.NewAccountFromPublicKeyString(metadataRecord.VaultCore)
+		if err != nil {
+			return nil, err
+		}
+
+		err = m.WaitForReserveState(ctx, mint, 2*m.reserveStatePollInterval)
+		if err != nil {
+			return nil, err
+		}
+
+		liveReserveState, err := m.GetReserveState(mint)
+		if err != nil {
+			return nil, err
+		}
+
+		spotPrice, _ := currencycreator.EstimateCurrentPrice(liveReserveState.SupplyFromBonding).Float64()
+		marketCap := CalculateMarketCap(liveReserveState.SupplyFromBonding, 1.0)
+
+		protoMetadata = &currencypb.Mint{
+			Address:     mint.ToProto(),
+			Decimals:    uint32(metadataRecord.Decimals),
+			Name:        metadataRecord.Name,
+			Symbol:      metadataRecord.Symbol,
+			Description: metadataRecord.Description,
+			ImageUrl:    metadataRecord.ImageUrl,
+			VmMetadata: &currencypb.VmMetadata{
+				Vm:                 vmConfig.Vm.ToProto(),
+				Omnibus:            vmConfig.Omnibus.ToProto(),
+				Authority:          vmConfig.Authority.ToProto(),
+				LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
+			},
+			LaunchpadMetadata: &currencypb.LaunchpadMetadata{
+				CurrencyConfig:    currencyConfigAccount.ToProto(),
+				LiquidityPool:     liquidityPoolAccount.ToProto(),
+				Seed:              seed.ToProto(),
+				Authority:         currencyAuthorityAccount.ToProto(),
+				MintVault:         mintVaultAccount.ToProto(),
+				CoreMintVault:     coreMintVaultAccount.ToProto(),
+				SupplyFromBonding: liveReserveState.SupplyFromBonding,
+				SellFeeBps:        uint32(metadataRecord.SellFeeBps),
+				Price:             spotPrice,
+				MarketCap:         marketCap,
+			},
+			CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
+		}
+
+		billColors := metadataRecord.BillColors
+		if len(billColors) == 0 {
+			billColors = config.DefaultBillColors
+		}
+		var protoColors []*currencypb.Color
+		for _, hex := range billColors {
+			protoColors = append(protoColors, &currencypb.Color{Hex: hex})
+		}
+		protoMetadata.BillCustomization = &currencypb.BillCustomization{
+			Colors: protoColors,
+		}
+
+		for _, link := range metadataRecord.SocialLinks {
+			switch link.Type {
+			case currency.SocialLinkTypeWebsite:
+				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+					Type: &currencypb.SocialLink_Website_{
+						Website: &currencypb.SocialLink_Website{Url: link.Value},
+					},
+				})
+			case currency.SocialLinkTypeX:
+				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+					Type: &currencypb.SocialLink_X_{
+						X: &currencypb.SocialLink_X{Username: link.Value},
+					},
+				})
+			case currency.SocialLinkTypeTelegram:
+				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+					Type: &currencypb.SocialLink_Telegram_{
+						Telegram: &currencypb.SocialLink_Telegram{Username: link.Value},
+					},
+				})
+			case currency.SocialLinkTypeDiscord:
+				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
+					Type: &currencypb.SocialLink_Discord_{
+						Discord: &currencypb.SocialLink_Discord{InviteCode: link.Value},
+					},
+				})
+			}
+		}
+	}
+
+	m.setCachedProtoMint(mint, protoMetadata)
+
+	return protoMetadata, nil
+}
+
+func (m *MintDataProvider) getCachedProtoMint(mint *common.Account) (*currencypb.Mint, bool) {
+	m.protoMintsCacheMu.RLock()
+	defer m.protoMintsCacheMu.RUnlock()
+
+	entry, ok := m.protoMintsCache[mint.PublicKey().ToBase58()]
+	if !ok || time.Since(entry.lastUpdatedAt) >= m.protoMintCacheTTL {
+		return nil, false
+	}
+	return proto.Clone(entry.mint).(*currencypb.Mint), true
+}
+
+func (m *MintDataProvider) setCachedProtoMint(mint *common.Account, protoMint *currencypb.Mint) {
+	m.protoMintsCacheMu.Lock()
+	defer m.protoMintsCacheMu.Unlock()
+
+	m.protoMintsCache[mint.PublicKey().ToBase58()] = &cachedProtoMint{
+		mint:          proto.Clone(protoMint).(*currencypb.Mint),
+		lastUpdatedAt: time.Now(),
+	}
 }
 
 // RegisterStream creates and registers a new stream for the given mints.
@@ -185,11 +399,15 @@ func (m *MintDataProvider) getOrCreateReserveReadyChan(mint *common.Account) cha
 }
 
 // GetExchangeRates returns the current pre-signed exchange rate data
-func (m *MintDataProvider) GetExchangeRates() *LiveExchangeRateData {
+func (m *MintDataProvider) GetExchangeRates() (*LiveExchangeRateData, error) {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
-	return m.exchangeRates
+	if m.exchangeRates == nil {
+		return nil, errors.New("not found")
+	}
+
+	return m.exchangeRates, nil
 }
 
 // GetReserveState returns a current pre-signed launchpad currency reserve state for a mint

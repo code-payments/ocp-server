@@ -1,7 +1,6 @@
 package currency
 
 import (
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,9 +37,6 @@ type currencyServer struct {
 	exchangeRateHistoryCache cache.Cache
 	reserveHistoryCache      cache.Cache
 
-	getMintsCacheMu sync.RWMutex
-	getMintsCache   map[string]*cachedProtoMint
-
 	mintDataProvider *currency_util.MintDataProvider
 
 	currencypb.UnimplementedCurrencyServer
@@ -72,8 +68,6 @@ func NewCurrencyServer(
 
 		exchangeRateHistoryCache: cache.NewCache(1_000),
 		reserveHistoryCache:      cache.NewCache(1_000),
-
-		getMintsCache: make(map[string]*cachedProtoMint),
 	}
 
 	return s

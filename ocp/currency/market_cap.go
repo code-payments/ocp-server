@@ -2,9 +2,9 @@ package currency
 
 import "github.com/code-payments/ocp-server/solana/currencycreator"
 
-// calculateMarketCap calculates the market cap for a currency creator mint.
+// CalculateMarketCap calculates the market cap for a currency creator mint.
 // Market cap = price per token × circulating supply.
-func calculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 {
+func CalculateMarketCap(supplyFromBonding uint64, exchangeRate float64) float64 {
 	// Calculate the spot price per token using the bonding curve
 	// This returns the price in core mint tokens per currency creator token
 	spotPrice := currencycreator.EstimateCurrentPrice(supplyFromBonding)
