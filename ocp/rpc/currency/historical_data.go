@@ -17,6 +17,7 @@ import (
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 )
 
@@ -158,7 +159,7 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 
 		data = append(data, &currencypb.HistoricalMintData{
 			Timestamp: timestamppb.New(reserve.Time),
-			MarketCap: calculateMarketCap(reserve.SupplyFromBonding, exchangeRate),
+			MarketCap: currency_util.CalculateMarketCap(reserve.SupplyFromBonding, exchangeRate),
 		})
 	}
 
@@ -181,7 +182,7 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 
 			data = append(data, &currencypb.HistoricalMintData{
 				Timestamp: timestamppb.New(latestTime),
-				MarketCap: calculateMarketCap(latestReserve.SupplyFromBonding, latestExchangeRate.Rate),
+				MarketCap: currency_util.CalculateMarketCap(latestReserve.SupplyFromBonding, latestExchangeRate.Rate),
 			})
 		}()
 	}
