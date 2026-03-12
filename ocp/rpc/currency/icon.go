@@ -122,7 +122,7 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		return nil, status.Error(codes.Internal, "")
 	}
 
-	metadataRecord.ImageUrl = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucket, config.CurrencyAssetsS3BucketRegion, key)
+	metadataRecord.ImageUrl = fmt.Sprintf("%s/%s", config.CurrencyAssetsBaseUrl, key)
 
 	err = s.data.SaveCurrencyMetadata(ctx, metadataRecord)
 	if err != nil {
