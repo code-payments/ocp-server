@@ -121,22 +121,141 @@ func (m *MintDataProvider) Stop() {
 	m.streams = make(map[string]*LiveMintDataStream)
 }
 
+// ToProtoMint converts a currency MetadataRecord into a proto Mint object with
+// live launchpad data (supply, price, market cap) injected from the provider's
+// cached reserve state.
+func (m *MintDataProvider) ToProtoMint(ctx context.Context, metadataRecord *currency.MetadataRecord) (*currencypb.Mint, error) {
+	mint, err := common.NewAccountFromPublicKeyString(metadataRecord.Mint)
+	if err != nil {
+		return nil, err
+	}
+
+	vmConfig, err := common.GetVmConfigForMint(ctx, m.data, mint)
+	if err != nil {
+		return nil, err
+	}
+
+	currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(metadataRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	seed, err := common.NewAccountFromPublicKeyString(metadataRecord.Seed)
+	if err != nil {
+		return nil, err
+	}
+
+	protoMint := &currencypb.Mint{
+		Address:     mint.ToProto(),
+		Decimals:    uint32(metadataRecord.Decimals),
+		Name:        metadataRecord.Name,
+		Symbol:      metadataRecord.Symbol,
+		Description: metadataRecord.Description,
+		ImageUrl:    metadataRecord.ImageUrl,
+		VmMetadata: &currencypb.VmMetadata{
+			Vm:                 vmConfig.Vm.ToProto(),
+			Omnibus:            vmConfig.Omnibus.ToProto(),
+			Authority:          vmConfig.Authority.ToProto(),
+			LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
+		},
+		LaunchpadMetadata: &currencypb.LaunchpadMetadata{
+			CurrencyConfig: currencyAccounts.CurrencyConfig.ToProto(),
+			LiquidityPool:  currencyAccounts.LiquidityPool.ToProto(),
+			Seed:           seed.ToProto(),
+			Authority:      currencyAccounts.Authority.ToProto(),
+			MintVault:      currencyAccounts.VaultMint.ToProto(),
+			CoreMintVault:  currencyAccounts.VaultBase.ToProto(),
+			SellFeeBps:     uint32(metadataRecord.SellFeeBps),
+		},
+		CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
+	}
+
+	err = m.InjectLiveLaunchpadData(ctx, protoMint)
+	if err != nil {
+		return nil, err
+	}
+
+	billColors := metadataRecord.BillColors
+	if len(billColors) == 0 {
+		billColors = config.DefaultBillColors
+	}
+	var protoColors []*currencypb.Color
+	for _, hex := range billColors {
+		protoColors = append(protoColors, &currencypb.Color{Hex: hex})
+	}
+	protoMint.BillCustomization = &currencypb.BillCustomization{
+		Colors: protoColors,
+	}
+
+	for _, link := range metadataRecord.SocialLinks {
+		switch link.Type {
+		case currency.SocialLinkTypeWebsite:
+			protoMint.SocialLinks = append(protoMint.SocialLinks, &currencypb.SocialLink{
+				Type: &currencypb.SocialLink_Website_{
+					Website: &currencypb.SocialLink_Website{Url: link.Value},
+				},
+			})
+		case currency.SocialLinkTypeX:
+			protoMint.SocialLinks = append(protoMint.SocialLinks, &currencypb.SocialLink{
+				Type: &currencypb.SocialLink_X_{
+					X: &currencypb.SocialLink_X{Username: link.Value},
+				},
+			})
+		case currency.SocialLinkTypeTelegram:
+			protoMint.SocialLinks = append(protoMint.SocialLinks, &currencypb.SocialLink{
+				Type: &currencypb.SocialLink_Telegram_{
+					Telegram: &currencypb.SocialLink_Telegram{Username: link.Value},
+				},
+			})
+		case currency.SocialLinkTypeDiscord:
+			protoMint.SocialLinks = append(protoMint.SocialLinks, &currencypb.SocialLink{
+				Type: &currencypb.SocialLink_Discord_{
+					Discord: &currencypb.SocialLink_Discord{InviteCode: link.Value},
+				},
+			})
+		}
+	}
+
+	return protoMint, nil
+}
+
+// InjectLiveLaunchpadData sets the live supply, price, and market cap fields
+// on a proto Mint's LaunchpadMetadata.
+func (m *MintDataProvider) InjectLiveLaunchpadData(ctx context.Context, protoMint *currencypb.Mint) error {
+	if protoMint.LaunchpadMetadata == nil {
+		return errors.New("no launchpad metadata")
+	}
+
+	mint, err := common.NewAccountFromProto(protoMint.Address)
+	if err != nil {
+		return errors.New("invalid proto mint")
+	}
+
+	liveReserveState, err := m.GetLiveReserveState(ctx, mint)
+	if err != nil {
+		return err
+	}
+	supplyFromBonding := liveReserveState.SupplyFromBonding
+
+	spotPrice, _ := currencycreator.EstimateCurrentPrice(supplyFromBonding).Float64()
+
+	protoMint.LaunchpadMetadata.SupplyFromBonding = supplyFromBonding
+	protoMint.LaunchpadMetadata.Price = spotPrice
+	protoMint.LaunchpadMetadata.MarketCap = CalculateMarketCap(supplyFromBonding, 1.0)
+
+	return nil
+}
+
 // GetProtoMint gets a proto Mint object. Static and infrequently updated metadata is
 // heavily cached.
 func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Account) (*currencypb.Mint, error) {
 	if cached, ok := m.getCachedProtoMint(mint); ok {
 		// Always overlay fresh circulating supply for launchpad currencies
 		if cached.LaunchpadMetadata != nil {
-			liveReserveState, err := m.GetLiveReserveState(ctx, mint)
+			err := m.InjectLiveLaunchpadData(ctx, cached)
 			if err != nil {
 				return nil, err
 			}
-
-			spotPrice, _ := currencycreator.EstimateCurrentPrice(liveReserveState.SupplyFromBonding).Float64()
-			marketCap := CalculateMarketCap(liveReserveState.SupplyFromBonding, 1.0)
-			cached.LaunchpadMetadata.SupplyFromBonding = liveReserveState.SupplyFromBonding
-			cached.LaunchpadMetadata.Price = spotPrice
-			cached.LaunchpadMetadata.MarketCap = marketCap
 		}
 
 		return cached, nil
@@ -174,96 +293,9 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, currency.ErrNotFound
 		}
 
-		vmConfig, err := common.GetVmConfigForMint(ctx, m.data, mint)
+		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord)
 		if err != nil {
 			return nil, err
-		}
-
-		currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(metadataRecord)
-		if err != nil {
-			return nil, err
-		}
-
-		seed, err := common.NewAccountFromPublicKeyString(metadataRecord.Seed)
-		if err != nil {
-			return nil, err
-		}
-
-		liveReserveState, err := m.GetLiveReserveState(ctx, mint)
-		if err != nil {
-			return nil, err
-		}
-
-		spotPrice, _ := currencycreator.EstimateCurrentPrice(liveReserveState.SupplyFromBonding).Float64()
-		marketCap := CalculateMarketCap(liveReserveState.SupplyFromBonding, 1.0)
-
-		protoMetadata = &currencypb.Mint{
-			Address:     mint.ToProto(),
-			Decimals:    uint32(metadataRecord.Decimals),
-			Name:        metadataRecord.Name,
-			Symbol:      metadataRecord.Symbol,
-			Description: metadataRecord.Description,
-			ImageUrl:    metadataRecord.ImageUrl,
-			VmMetadata: &currencypb.VmMetadata{
-				Vm:                 vmConfig.Vm.ToProto(),
-				Omnibus:            vmConfig.Omnibus.ToProto(),
-				Authority:          vmConfig.Authority.ToProto(),
-				LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
-			},
-			LaunchpadMetadata: &currencypb.LaunchpadMetadata{
-				CurrencyConfig:    currencyAccounts.CurrencyConfig.ToProto(),
-				LiquidityPool:     currencyAccounts.LiquidityPool.ToProto(),
-				Seed:              seed.ToProto(),
-				Authority:         currencyAccounts.Authority.ToProto(),
-				MintVault:         currencyAccounts.VaultMint.ToProto(),
-				CoreMintVault:     currencyAccounts.VaultBase.ToProto(),
-				SupplyFromBonding: liveReserveState.SupplyFromBonding,
-				SellFeeBps:        uint32(metadataRecord.SellFeeBps),
-				Price:             spotPrice,
-				MarketCap:         marketCap,
-			},
-			CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
-		}
-
-		billColors := metadataRecord.BillColors
-		if len(billColors) == 0 {
-			billColors = config.DefaultBillColors
-		}
-		var protoColors []*currencypb.Color
-		for _, hex := range billColors {
-			protoColors = append(protoColors, &currencypb.Color{Hex: hex})
-		}
-		protoMetadata.BillCustomization = &currencypb.BillCustomization{
-			Colors: protoColors,
-		}
-
-		for _, link := range metadataRecord.SocialLinks {
-			switch link.Type {
-			case currency.SocialLinkTypeWebsite:
-				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
-					Type: &currencypb.SocialLink_Website_{
-						Website: &currencypb.SocialLink_Website{Url: link.Value},
-					},
-				})
-			case currency.SocialLinkTypeX:
-				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
-					Type: &currencypb.SocialLink_X_{
-						X: &currencypb.SocialLink_X{Username: link.Value},
-					},
-				})
-			case currency.SocialLinkTypeTelegram:
-				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
-					Type: &currencypb.SocialLink_Telegram_{
-						Telegram: &currencypb.SocialLink_Telegram{Username: link.Value},
-					},
-				})
-			case currency.SocialLinkTypeDiscord:
-				protoMetadata.SocialLinks = append(protoMetadata.SocialLinks, &currencypb.SocialLink{
-					Type: &currencypb.SocialLink_Discord_{
-						Discord: &currencypb.SocialLink_Discord{InviteCode: link.Value},
-					},
-				})
-			}
 		}
 	}
 
