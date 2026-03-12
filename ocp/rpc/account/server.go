@@ -13,6 +13,7 @@ import (
 
 	accountpb "github.com/code-payments/ocp-protobuf-api/generated/go/account/v1"
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/cache"
@@ -20,6 +21,7 @@ import (
 	auth_util "github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	account_worker "github.com/code-payments/ocp-server/ocp/worker/account"
@@ -36,18 +38,20 @@ type balanceMetadata struct {
 }
 
 type server struct {
-	log  *zap.Logger
-	data ocp_data.Provider
-	auth *auth_util.RPCSignatureVerifier
+	log              *zap.Logger
+	data             ocp_data.Provider
+	mintDataProvider *currency_util.MintDataProvider
+	auth             *auth_util.RPCSignatureVerifier
 
 	accountpb.UnimplementedAccountServer
 }
 
-func NewAccountServer(log *zap.Logger, data ocp_data.Provider) accountpb.AccountServer {
+func NewAccountServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider *currency_util.MintDataProvider) accountpb.AccountServer {
 	return &server{
-		log:  log,
-		data: data,
-		auth: auth_util.NewRPCSignatureVerifier(log, data),
+		log:              log,
+		data:             data,
+		mintDataProvider: mintDataProvider,
+		auth:             auth_util.NewRPCSignatureVerifier(log, data),
 	}
 }
 
@@ -478,6 +482,25 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 			usdCostBasis = 0 // Account type not supported
 		}
 	}
+	var mintMetadata *currencypb.Mint
+	var liveReserveState *currencypb.VerifiedLaunchpadCurrencyReserveState
+	switch records.General.AccountType {
+	case commonpb.AccountType_SWAP, commonpb.AccountType_ASSOCIATED_TOKEN_ACCOUNT:
+		// Unused account types, which likely don't have any mint metadata ATM.
+	default:
+		mintMetadata, err = s.mintDataProvider.GetProtoMint(ctx, mintAccount)
+		if err != nil {
+			return nil, err
+		}
+
+		if !common.IsCoreMint(mintAccount) {
+			liveReserveData, err := s.mintDataProvider.GetLiveReserveState(ctx, mintAccount)
+			if err != nil {
+				return nil, err
+			}
+			liveReserveState = liveReserveData.SignedState
+		}
+	}
 
 	return &accountpb.TokenAccountInfo{
 		Address:              tokenAccount.ToProto(),
@@ -493,6 +516,8 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		ClaimState:           claimState,
 		OriginalExchangeData: originalExchangeData,
 		Mint:                 mintAccount.ToProto(),
+		MintMetadata:         mintMetadata,
+		LiveReserveState:     liveReserveState,
 		CreatedAt:            timestamppb.New(records.General.CreatedAt),
 	}, nil
 }

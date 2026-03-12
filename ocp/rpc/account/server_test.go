@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
@@ -51,15 +53,23 @@ func setup(t *testing.T) (env testEnv, cleanup func()) {
 	env.data = ocp_data.NewTestDataProvider()
 	env.subsidizer = testutil.SetupRandomSubsidizer(t, env.data)
 
-	s := NewAccountServer(log, env.data)
+	mintDataProvider := currency_util.NewMintDataProvider(log, env.data, 0, time.Second, time.Second)
+	s := NewAccountServer(log, env.data, mintDataProvider)
 	env.server = s.(*server)
 
 	serv.RegisterService(func(server *grpc.Server) {
 		accountpb.RegisterAccountServer(server, s)
 	})
 
-	cleanup, err = serv.Serve()
+	require.NoError(t, mintDataProvider.Start(env.ctx))
+
+	serverCleanup, err := serv.Serve()
 	require.NoError(t, err)
+
+	cleanup = func() {
+		mintDataProvider.Stop()
+		serverCleanup()
+	}
 	return env, cleanup
 }
 
@@ -143,8 +153,10 @@ func TestGetTokenAccountInfos_UserAccounts_HappyPath(t *testing.T) {
 	defer cleanup()
 
 	coreVmConfig := testutil.NewRandomVmConfig(t, true)
-	jeffyVmConfig := testutil.NewRandomVmConfig(t, false)
 	swapVmConfig := testutil.NewRandomVmConfig(t, false)
+	jeffyMint := testutil.SetupLaunchpadCurrency(t, env.data)
+	jeffyVmConfig, err := common.GetVmConfigForMint(env.ctx, env.data, jeffyMint)
+	require.NoError(t, err)
 
 	ownerAccount := testutil.NewRandomAccount(t)
 
@@ -245,6 +257,25 @@ func TestGetTokenAccountInfos_UserAccounts_HappyPath(t *testing.T) {
 
 			assert.Equal(t, accountpb.TokenAccountInfo_CLAIM_STATE_UNKNOWN, accountInfo.ClaimState)
 			assert.Nil(t, accountInfo.OriginalExchangeData)
+
+			if tc.authority.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58() {
+				require.Nil(t, accountInfo.MintMetadata)
+				require.Nil(t, accountInfo.LiveReserveState)
+			} else {
+				require.NotNil(t, accountInfo.MintMetadata)
+				assert.Equal(t, vmConfig.Mint.PublicKey().ToBytes(), accountInfo.MintMetadata.Address.Value)
+				assert.NotNil(t, accountInfo.MintMetadata.VmMetadata)
+
+				if common.IsCoreMint(vmConfig.Mint) {
+					assert.Nil(t, accountInfo.MintMetadata.LaunchpadMetadata)
+					assert.Nil(t, accountInfo.LiveReserveState)
+				} else {
+					assert.NotNil(t, accountInfo.MintMetadata.LaunchpadMetadata)
+					require.NotNil(t, accountInfo.LiveReserveState)
+					assert.Equal(t, vmConfig.Mint.PublicKey().ToBytes(), accountInfo.LiveReserveState.ReserveState.Mint.Value)
+					assert.NotNil(t, accountInfo.LiveReserveState.Signature)
+				}
+			}
 		}
 	}
 
@@ -258,7 +289,9 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 	env, cleanup := setup(t)
 	defer cleanup()
 
-	vmConfig := testutil.NewRandomVmConfig(t, false)
+	mint := testutil.SetupLaunchpadCurrency(t, env.data)
+	vmConfig, err := common.GetVmConfigForMint(env.ctx, env.data, mint)
+	require.NoError(t, err)
 
 	// Test cases represent main iterations of a gift card account's state throughout
 	// its lifecycle. All states beyond claimed status are not fully tested here and
@@ -393,7 +426,7 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 			IntentId:   testutil.NewRandomAccount(t).PublicKey().ToBase58(),
 			IntentType: intent.SendPublicPayment,
 
-			MintAccount: vmConfig.Mint.PublicKey().ToBase58(),
+			MintAccount: mint.PublicKey().ToBase58(),
 
 			InitiatorOwnerAccount: giftCardIssuerOwnerAccount.PublicKey().ToBase58(),
 
@@ -520,6 +553,15 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 			assert.Equal(t, vmConfig.Mint.PublicKey().ToBytes(), accountInfo.OriginalExchangeData.Mint.Value)
 
 			assert.Equal(t, requestingOwnerAccount != nil && requestingOwnerAccount == giftCardIssuerOwnerAccount, accountInfo.IsGiftCardIssuer)
+
+			require.NotNil(t, accountInfo.MintMetadata)
+			assert.Equal(t, vmConfig.Mint.PublicKey().ToBytes(), accountInfo.MintMetadata.Address.Value)
+			assert.NotNil(t, accountInfo.MintMetadata.VmMetadata)
+			assert.NotNil(t, accountInfo.MintMetadata.LaunchpadMetadata)
+
+			require.NotNil(t, accountInfo.LiveReserveState)
+			assert.Equal(t, vmConfig.Mint.PublicKey().ToBytes(), accountInfo.LiveReserveState.ReserveState.Mint.Value)
+			assert.NotNil(t, accountInfo.LiveReserveState.Signature)
 
 			accountInfoRecordsByMint, err := env.data.GetLatestAccountInfoByOwnerAddressAndType(env.ctx, giftCardOwnerAccount.PublicKey().ToBase58(), commonpb.AccountType_REMOTE_SEND_GIFT_CARD)
 			require.NoError(t, err)
