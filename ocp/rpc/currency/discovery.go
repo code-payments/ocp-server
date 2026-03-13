@@ -10,11 +10,15 @@ import (
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
 const (
 	maxDiscoveredCurrencies = 1024
-	minDiscoverySupply      = 100
+)
+
+var (
+	minDiscoverySupply = currencycreator.ToQuarks(100)
 )
 
 func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream currencypb.Currency_DiscoverServer) error {
