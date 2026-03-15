@@ -18,10 +18,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 	messagingpb "github.com/code-payments/ocp-protobuf-api/generated/go/messaging/v1"
+	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
@@ -75,14 +78,17 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 		},
 	}))
 
-	s1 := NewMessagingClientAndServer(log, data, auth.NewRPCSignatureVerifier(log, data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
+	mintDataProvider := currency_util.NewMintDataProvider(log, data, 0, time.Second, time.Second)
+	require.NoError(t, mintDataProvider.Start(context.Background()))
+
+	s1 := NewMessagingClientAndServer(log, data, mintDataProvider, auth.NewRPCSignatureVerifier(log, data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
 	env.server1 = &serverEnv{
 		ctx:        context.Background(),
 		server:     s1,
 		subsidizer: subsidizer,
 	}
 
-	s2 := NewMessagingClientAndServer(log, data, auth.NewRPCSignatureVerifier(log, data), conn2.Target(), withManualTestOverrides(&testOverrides{}))
+	s2 := NewMessagingClientAndServer(log, data, mintDataProvider, auth.NewRPCSignatureVerifier(log, data), conn2.Target(), withManualTestOverrides(&testOverrides{}))
 	env.server2 = &serverEnv{
 		ctx:        context.Background(),
 		server:     s2,
@@ -103,6 +109,7 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 	require.NoError(t, err)
 
 	return env, func() {
+		mintDataProvider.Stop()
 		cleanup1()
 		cleanup2()
 	}
@@ -178,37 +185,20 @@ type clientConf struct {
 	simulateInvalidAccountType    bool
 	simulateAccountNotCodeAccount bool
 
-	// Simulations for invalid exchange data
-
-	simulateInvalidCurrency        bool
-	simulateInvalidExchangeRate    bool
-	simulateInvalidNativeAmount    bool
-	simulateSmallNativeAmount      bool
-	simulateLargeNativeAmount      bool
-	simulateFractionalNativeAmount bool
-	simulateFractionalQuarkAmount  bool
-
-	// Simulations for invalid relationships
-
-	simulateInvalidRelationship bool
-	simulateInvalidDomain       bool
-	simulateDoesntOwnDomain     bool
-
 	// Simulations for invalid signatures
 
 	simulateInvalidRequestSignature bool
-	simulateInvalidMessageSignature bool
 
-	// Simulations for invalid rendezvous keys
+	// Simulations for exchange data
 
-	simulateInvalidRendezvousKey bool
+	simulateWithExchangeData           bool
+	simulateWithReserveState           bool
+	simulateMismatchedExchangeDataMint bool
 
-	// Simulations for invalid fee structures
-	simulateLargeFeePercentage           bool
-	simulateInvalidFeeCodeAccount        bool
-	simulateInvalidFeeRelationship       bool
-	simulateDuplicatedFeeTaker           bool
-	simulateFeeTakerIsPaymentDestination bool
+	// Simulations for mints
+
+	simulateUnsupportedMint bool
+	simulateLaunchpadMint   bool
 }
 
 type clientEnv struct {
@@ -464,6 +454,69 @@ func (c *clientEnv) sendRequestToGrabBillMessage(t *testing.T, rendezvousKey *co
 				RequestToGrabBill: &messagingpb.RequestToGrabBill{
 					RequestorAccount: destination.ToProto(),
 				},
+			},
+		},
+		RendezvousKey: &messagingpb.RendezvousKey{
+			Value: rendezvousKey.PublicKey().ToBytes(),
+		},
+	}
+
+	return c.sendMessage(t, req, rendezvousKey)
+}
+
+func (c *clientEnv) sendRequestToGiveBillMessage(t *testing.T, rendezvousKey *common.Account) *sendMessageCallMetadata {
+	mintAccount := common.CoreMintAccount
+	if c.conf.simulateUnsupportedMint {
+		mintAccount = testutil.NewRandomAccount(t)
+	} else if c.conf.simulateLaunchpadMint {
+		mintAccount = testutil.SetupLaunchpadCurrency(t, c.directDataAccess)
+	}
+
+	requestToGiveBill := &messagingpb.RequestToGiveBill{
+		Mint: mintAccount.ToProto(),
+	}
+
+	if c.conf.simulateWithExchangeData {
+		exchangeDataMint := mintAccount
+		if c.conf.simulateMismatchedExchangeDataMint {
+			exchangeDataMint = testutil.NewRandomAccount(t)
+		}
+
+		exchangeData := &transactionpb.VerifiedExchangeData{
+			Mint:         exchangeDataMint.ToProto(),
+			Quarks:       1,
+			NativeAmount: 0.01,
+			CoreMintFiatExchangeRate: &currencypb.VerifiedCoreMintFiatExchangeRate{
+				ExchangeRate: &currencypb.CoreMintFiatExchangeRate{
+					CurrencyCode: "usd",
+					ExchangeRate: 0.1,
+					Timestamp:    timestamppb.Now(),
+				},
+				Signature: &commonpb.Signature{
+					Value: make([]byte, 64),
+				},
+			},
+		}
+
+		if c.conf.simulateWithReserveState {
+			exchangeData.LaunchpadCurrencyReserveState = &currencypb.VerifiedLaunchpadCurrencyReserveState{
+				ReserveState: &currencypb.LaunchpadCurrencyReserveState{
+					Mint:      mintAccount.ToProto(),
+					Timestamp: timestamppb.Now(),
+				},
+				Signature: &commonpb.Signature{
+					Value: make([]byte, 64),
+				},
+			}
+		}
+
+		requestToGiveBill.ExchangeData = exchangeData
+	}
+
+	req := &messagingpb.SendMessageRequest{
+		Message: &messagingpb.Message{
+			Kind: &messagingpb.Message_RequestToGiveBill{
+				RequestToGiveBill: requestToGiveBill,
 			},
 		},
 		RendezvousKey: &messagingpb.RendezvousKey{

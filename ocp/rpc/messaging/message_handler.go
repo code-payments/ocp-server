@@ -10,6 +10,7 @@ import (
 	messagingpb "github.com/code-payments/ocp-protobuf-api/generated/go/messaging/v1"
 
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 )
@@ -24,6 +25,11 @@ type MessageHandler interface {
 
 	// OnSuccess is called upon creating the message after validation
 	OnSuccess(ctx context.Context) error
+
+	// GetAdditionalContext returns additional server-provided context to be
+	// injected into the message before delivering to clients. Returns nil
+	// if no additional context is needed.
+	GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error)
 }
 
 type RequestToGrabBillMessageHandler struct {
@@ -65,14 +71,20 @@ func (h *RequestToGrabBillMessageHandler) OnSuccess(ctx context.Context) error {
 	return nil
 }
 
-// todo: This message type needs tests
-type RequestToGiveBillMessageHandler struct {
-	data ocp_data.Provider
+func (h *RequestToGrabBillMessageHandler) GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error) {
+	return nil, nil
 }
 
-func NewRequestToGiveBillMessageHandler(data ocp_data.Provider) MessageHandler {
+// todo: This message type needs tests
+type RequestToGiveBillMessageHandler struct {
+	data             ocp_data.Provider
+	mintDataProvider *currency_util.MintDataProvider
+}
+
+func NewRequestToGiveBillMessageHandler(data ocp_data.Provider, mintDataProvider *currency_util.MintDataProvider) MessageHandler {
 	return &RequestToGiveBillMessageHandler{
-		data: data,
+		data:             data,
+		mintDataProvider: mintDataProvider,
 	}
 }
 
@@ -119,4 +131,29 @@ func (h *RequestToGiveBillMessageHandler) Validate(ctx context.Context, rendezvo
 
 func (h *RequestToGiveBillMessageHandler) OnSuccess(ctx context.Context) error {
 	return nil
+}
+
+func (h *RequestToGiveBillMessageHandler) GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error) {
+	typedMessage := message.GetRequestToGiveBill()
+	if typedMessage == nil {
+		return nil, errors.New("invalid message type")
+	}
+
+	mintAccount, err := common.NewAccountFromProto(typedMessage.Mint)
+	if err != nil {
+		return nil, err
+	}
+
+	mintMetadata, err := h.mintDataProvider.GetProtoMint(ctx, mintAccount)
+	if err != nil {
+		return nil, err
+	}
+
+	return &messagingpb.AdditionalServerContext{
+		Type: &messagingpb.AdditionalServerContext_RequestToGiveBill{
+			RequestToGiveBill: &messagingpb.RequestToGiveBillServerContext{
+				MintMetadata: mintMetadata,
+			},
+		},
+	}, nil
 }

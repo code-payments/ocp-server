@@ -27,6 +27,7 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/messaging"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
@@ -48,6 +49,8 @@ type server struct {
 	log  *zap.Logger
 	conf *conf
 	data ocp_data.Provider
+
+	mintDataProvider *currency_util.MintDataProvider
 
 	streamsMu          sync.RWMutex
 	streams            map[string]*messageStream
@@ -79,6 +82,7 @@ func NewMessagingClient(
 func NewMessagingClientAndServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	mintDataProvider *currency_util.MintDataProvider,
 	rpcSignatureVerifier *auth.RPCSignatureVerifier,
 	broadcastAddress string,
 	configProvider ConfigProvider,
@@ -87,6 +91,7 @@ func NewMessagingClientAndServer(
 		log:                  log,
 		conf:                 configProvider(),
 		data:                 data,
+		mintDataProvider:     mintDataProvider,
 		streams:              make(map[string]*messageStream),
 		individualStreamMu:   make(map[string]*sync.Mutex),
 		rpcSignatureVerifier: rpcSignatureVerifier,
@@ -521,6 +526,11 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 			return nil, status.Error(codes.Internal, "")
 		}
 
+		if err := s.injectAdditionalContext(ctx, &message); err != nil {
+			log.With(zap.Error(err)).Warn("Failed to inject additional context")
+			return nil, status.Error(codes.Internal, "")
+		}
+
 		messages = append(messages, &message)
 
 		// Upper bound messages transmitted. Clients need to ack and cleanup. A
@@ -601,6 +611,11 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 		s.streamsMu.RUnlock()
 
 		if stream != nil {
+			if err := s.injectAdditionalContext(ctx, req.Message); err != nil {
+				log.With(zap.Error(err)).Warn("failure injecting additional context")
+				return nil, status.Error(codes.Internal, "")
+			}
+
 			if err := stream.notify(req.Message, notifyTimeout); err != nil {
 				log.With(zap.Error(err)).Warn(fmt.Sprintf("failed to notify session stream, closing streamer (stream=%p)", stream))
 			}
@@ -636,7 +651,7 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 
 	case *messagingpb.Message_RequestToGiveBill:
 		log = log.With(zap.String("message_type", "request_to_give_bill"))
-		messageHandler = NewRequestToGiveBillMessageHandler(s.data)
+		messageHandler = NewRequestToGiveBillMessageHandler(s.data, s.mintDataProvider)
 
 	default:
 		return nil, status.Error(codes.InvalidArgument, "message.kind must be set")
@@ -765,9 +780,33 @@ func (s *server) flush(ctx context.Context, accountID *messagingpb.RendezvousKey
 			return
 		}
 
+		if err := s.injectAdditionalContext(ctx, &message); err != nil {
+			log.With(zap.Error(err)).Warn("Failed to inject additional context")
+			return
+		}
+
 		if err := stream.notify(&message, notifyTimeout); err != nil {
 			log.With(zap.Error(err)).Warn("Failed to send undelivered message")
 			return
 		}
 	}
+}
+
+func (s *server) injectAdditionalContext(ctx context.Context, message *messagingpb.Message) error {
+	var messageHandler MessageHandler
+	switch message.Kind.(type) {
+	case *messagingpb.Message_RequestToGrabBill:
+		messageHandler = NewRequestToGrabBillMessageHandler(s.data)
+	case *messagingpb.Message_RequestToGiveBill:
+		messageHandler = NewRequestToGiveBillMessageHandler(s.data, s.mintDataProvider)
+	default:
+		return nil
+	}
+
+	additionalContext, err := messageHandler.GetAdditionalContext(ctx, message)
+	if err != nil {
+		return err
+	}
+	message.AdditionalContext = additionalContext
+	return nil
 }
