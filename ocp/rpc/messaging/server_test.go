@@ -10,6 +10,7 @@ import (
 
 	messagingpb "github.com/code-payments/ocp-protobuf-api/generated/go/messaging/v1"
 
+	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/testutil"
 )
 
@@ -171,6 +172,177 @@ func TestSendMessage_RequestToGrabBill_Validation(t *testing.T) {
 	env.client1.conf.simulateInvalidAccountType = true
 	sendMessageCall = env.client1.sendRequestToGrabBillMessage(t, rendezvousKey)
 	sendMessageCall.assertInvalidMessageError(t, "requestor account must be a primary account")
+	env.server1.assertNoMessages(t, rendezvousKey)
+}
+
+func TestSendMessage_RequestToGiveBill_HappyPath(t *testing.T) {
+	env, cleanup := setup(t, false)
+	defer cleanup()
+
+	// Core mint without exchange data
+	rendezvousKey := testutil.NewRandomAccount(t)
+	sendMessageCall := env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.requireSuccess(t)
+
+	records := env.server1.getMessages(t, rendezvousKey)
+	require.Len(t, records, 1)
+	assert.Equal(t, rendezvousKey.PublicKey().ToBase58(), records[0].Account)
+	assert.Equal(t, sendMessageCall.resp.MessageId.Value, records[0].MessageID[:])
+
+	var savedProtoMessage messagingpb.Message
+	require.NoError(t, proto.Unmarshal(records[0].Message, &savedProtoMessage))
+
+	assert.Equal(t, sendMessageCall.resp.MessageId.Value, savedProtoMessage.Id.Value)
+	require.NotNil(t, savedProtoMessage.GetRequestToGiveBill())
+	assert.Equal(t, sendMessageCall.req.Message.GetRequestToGiveBill().Mint.Value, savedProtoMessage.GetRequestToGiveBill().Mint.Value)
+	assert.Equal(t, sendMessageCall.req.Signature.Value, savedProtoMessage.SendMessageRequestSignature.Value)
+
+	polledMessages := env.client2.pollForMessages(t, rendezvousKey)
+	require.Len(t, polledMessages, 1)
+	assert.Equal(t, savedProtoMessage.Id.Value, polledMessages[0].Id.Value)
+	require.NotNil(t, polledMessages[0].GetRequestToGiveBill())
+	assert.Equal(t, savedProtoMessage.GetRequestToGiveBill().Mint.Value, polledMessages[0].GetRequestToGiveBill().Mint.Value)
+
+	require.NotNil(t, polledMessages[0].AdditionalContext)
+	require.NotNil(t, polledMessages[0].AdditionalContext.GetRequestToGiveBill())
+	coreMintMetadata := polledMessages[0].AdditionalContext.GetRequestToGiveBill().MintMetadata
+	require.NotNil(t, coreMintMetadata)
+	assert.Equal(t, sendMessageCall.req.Message.GetRequestToGiveBill().Mint.Value, coreMintMetadata.Address.Value)
+	assert.Equal(t, savedProtoMessage.GetRequestToGiveBill().Mint.Value, coreMintMetadata.Address.Value)
+	assert.Equal(t, common.CoreMintName, coreMintMetadata.Name)
+	assert.Equal(t, common.CoreMintSymbol, coreMintMetadata.Symbol)
+	assert.Equal(t, uint32(common.CoreMintDecimals), coreMintMetadata.Decimals)
+	require.NotNil(t, coreMintMetadata.VmMetadata)
+	require.Nil(t, coreMintMetadata.LaunchpadMetadata)
+
+	// Core mint with exchange data (no reserve state)
+	rendezvousKey = testutil.NewRandomAccount(t)
+	env.client1.resetConf()
+	env.client1.conf.simulateWithExchangeData = true
+	sendMessageCall = env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.requireSuccess(t)
+
+	records = env.server1.getMessages(t, rendezvousKey)
+	require.Len(t, records, 1)
+
+	var savedWithExchangeData messagingpb.Message
+	require.NoError(t, proto.Unmarshal(records[0].Message, &savedWithExchangeData))
+	require.NotNil(t, savedWithExchangeData.GetRequestToGiveBill())
+
+	sentExchangeData := sendMessageCall.req.Message.GetRequestToGiveBill().ExchangeData
+	savedExchangeData := savedWithExchangeData.GetRequestToGiveBill().ExchangeData
+	require.NotNil(t, savedExchangeData)
+	require.True(t, proto.Equal(sentExchangeData, savedExchangeData))
+
+	polledMessages = env.client2.pollForMessages(t, rendezvousKey)
+	require.Len(t, polledMessages, 1)
+	require.NotNil(t, polledMessages[0].AdditionalContext)
+	require.NotNil(t, polledMessages[0].AdditionalContext.GetRequestToGiveBill())
+	coreMintMetadata = polledMessages[0].AdditionalContext.GetRequestToGiveBill().MintMetadata
+	require.NotNil(t, coreMintMetadata)
+	assert.Equal(t, sendMessageCall.req.Message.GetRequestToGiveBill().Mint.Value, coreMintMetadata.Address.Value)
+	assert.Equal(t, savedWithExchangeData.GetRequestToGiveBill().Mint.Value, coreMintMetadata.Address.Value)
+	assert.Equal(t, common.CoreMintName, coreMintMetadata.Name)
+	require.NotNil(t, coreMintMetadata.VmMetadata)
+	require.Nil(t, coreMintMetadata.LaunchpadMetadata)
+
+	// Launchpad currency without exchange data
+	rendezvousKey = testutil.NewRandomAccount(t)
+	env.client1.resetConf()
+	env.client1.conf.simulateLaunchpadMint = true
+	sendMessageCall = env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.requireSuccess(t)
+
+	records = env.server1.getMessages(t, rendezvousKey)
+	require.Len(t, records, 1)
+
+	var savedLaunchpadNoExchange messagingpb.Message
+	require.NoError(t, proto.Unmarshal(records[0].Message, &savedLaunchpadNoExchange))
+	require.NotNil(t, savedLaunchpadNoExchange.GetRequestToGiveBill())
+	assert.Equal(t, sendMessageCall.req.Message.GetRequestToGiveBill().Mint.Value, savedLaunchpadNoExchange.GetRequestToGiveBill().Mint.Value)
+	assert.Nil(t, savedLaunchpadNoExchange.GetRequestToGiveBill().ExchangeData)
+
+	polledMessages = env.client2.pollForMessages(t, rendezvousKey)
+	require.Len(t, polledMessages, 1)
+	require.NotNil(t, polledMessages[0].AdditionalContext)
+	require.NotNil(t, polledMessages[0].AdditionalContext.GetRequestToGiveBill())
+	launchpadMintMetadata := polledMessages[0].AdditionalContext.GetRequestToGiveBill().MintMetadata
+	require.NotNil(t, launchpadMintMetadata)
+	assert.Equal(t, sendMessageCall.req.Message.GetRequestToGiveBill().Mint.Value, launchpadMintMetadata.Address.Value)
+	assert.Equal(t, savedLaunchpadNoExchange.GetRequestToGiveBill().Mint.Value, launchpadMintMetadata.Address.Value)
+	require.NotNil(t, launchpadMintMetadata.VmMetadata)
+	require.NotNil(t, launchpadMintMetadata.LaunchpadMetadata)
+
+	// Launchpad currency with exchange data and matching reserve state
+	rendezvousKey = testutil.NewRandomAccount(t)
+	env.client1.resetConf()
+	env.client1.conf.simulateLaunchpadMint = true
+	env.client1.conf.simulateWithExchangeData = true
+	env.client1.conf.simulateWithReserveState = true
+	sendMessageCall = env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.requireSuccess(t)
+
+	records = env.server1.getMessages(t, rendezvousKey)
+	require.Len(t, records, 1)
+
+	var savedLaunchpadWithExchange messagingpb.Message
+	require.NoError(t, proto.Unmarshal(records[0].Message, &savedLaunchpadWithExchange))
+	require.NotNil(t, savedLaunchpadWithExchange.GetRequestToGiveBill())
+
+	sentExchangeData = sendMessageCall.req.Message.GetRequestToGiveBill().ExchangeData
+	savedExchangeData = savedLaunchpadWithExchange.GetRequestToGiveBill().ExchangeData
+	require.NotNil(t, savedExchangeData)
+	require.True(t, proto.Equal(sentExchangeData, savedExchangeData))
+
+	polledMessages = env.client2.pollForMessages(t, rendezvousKey)
+	require.Len(t, polledMessages, 1)
+	require.NotNil(t, polledMessages[0].AdditionalContext)
+	require.NotNil(t, polledMessages[0].AdditionalContext.GetRequestToGiveBill())
+	launchpadMintMetadata = polledMessages[0].AdditionalContext.GetRequestToGiveBill().MintMetadata
+	require.NotNil(t, launchpadMintMetadata)
+	assert.Equal(t, sendMessageCall.req.Message.GetRequestToGiveBill().Mint.Value, launchpadMintMetadata.Address.Value)
+	assert.Equal(t, savedLaunchpadWithExchange.GetRequestToGiveBill().Mint.Value, launchpadMintMetadata.Address.Value)
+	require.NotNil(t, launchpadMintMetadata.VmMetadata)
+	require.NotNil(t, launchpadMintMetadata.LaunchpadMetadata)
+}
+
+func TestSendMessage_RequestToGiveBill_Validation(t *testing.T) {
+	env, cleanup := setup(t, false)
+	defer cleanup()
+
+	rendezvousKey := testutil.NewRandomAccount(t)
+
+	// Unsupported mint
+	env.client1.resetConf()
+	env.client1.conf.simulateUnsupportedMint = true
+	sendMessageCall := env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.assertInvalidMessageError(t, "mint account must be the core mint or a launchpad currency")
+	env.server1.assertNoMessages(t, rendezvousKey)
+
+	// Core mint with reserve state in exchange data
+	env.client1.resetConf()
+	env.client1.conf.simulateWithExchangeData = true
+	env.client1.conf.simulateWithReserveState = true
+	sendMessageCall = env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.assertInvalidMessageError(t, "reserve state cannot be provided for core mint")
+	env.server1.assertNoMessages(t, rendezvousKey)
+
+	// Launchpad currency with exchange data but no reserve state
+	env.client1.resetConf()
+	env.client1.conf.simulateLaunchpadMint = true
+	env.client1.conf.simulateWithExchangeData = true
+	sendMessageCall = env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.assertInvalidMessageError(t, "reserve state is required for launchpad currency")
+	env.server1.assertNoMessages(t, rendezvousKey)
+
+	// Launchpad currency with mismatched reserve state mint
+	env.client1.resetConf()
+	env.client1.conf.simulateLaunchpadMint = true
+	env.client1.conf.simulateWithExchangeData = true
+	env.client1.conf.simulateWithReserveState = true
+	env.client1.conf.simulateMismatchedExchangeDataMint = true
+	sendMessageCall = env.client1.sendRequestToGiveBillMessage(t, rendezvousKey)
+	sendMessageCall.assertInvalidMessageError(t, "reserve state mint doesn't match top-level mint")
 	env.server1.assertNoMessages(t, rendezvousKey)
 }
 

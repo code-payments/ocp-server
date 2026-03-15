@@ -150,6 +150,11 @@ func (s *server) internallyForwardMessage(ctx context.Context, req *messagingpb.
 			s.streamsMu.RUnlock()
 
 			if stream != nil {
+				if err := s.injectAdditionalContext(ctx, req.Message); err != nil {
+					log.With(zap.Error(err)).Warn("failure injecting additional context")
+					return err
+				}
+
 				if err := stream.notify(req.Message, notifyTimeout); err != nil {
 					log.With(zap.Error(err)).Warn(fmt.Sprintf("failed to notify session stream, closing streamer (stream=%p)", stream))
 				}
