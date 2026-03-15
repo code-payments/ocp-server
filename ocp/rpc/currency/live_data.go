@@ -71,7 +71,7 @@ func (s *currencyServer) StreamLiveMintData(
 	// Wait for and flush initial exchange rates if the stream wants them
 	if stream.WantsExchangeRates() {
 		exchangeRates, err := s.mintDataProvider.GetLiveExchangeRates(ctx)
-		if err == nil {
+		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to get exchange rates for initial flush")
 			return status.Error(codes.Internal, "")
 		}
