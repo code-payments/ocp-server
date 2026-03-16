@@ -367,6 +367,24 @@ func (s *store) GetLatestByOwnerAddressAndType(ctx context.Context, address stri
 	return res, nil
 }
 
+// GetByMintAndType implements account.Store.GetByMintAndType
+func (s *store) GetByMintAndType(_ context.Context, mint string, accountType commonpb.AccountType) ([]*account.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	items := s.filterByMint(s.records, mint)
+	items = s.filterByType(items, accountType)
+
+	if len(items) == 0 {
+		return nil, account.ErrAccountInfoNotFound
+	}
+
+	sorted := ByIndex(items)
+	sort.Sort(sorted)
+
+	return cloneRecords(sorted), nil
+}
+
 // GetPrioritizedRequiringDepositSync implements account.Store.GetPrioritizedRequiringDepositSync
 func (s *store) GetPrioritizedRequiringDepositSync(_ context.Context, limit uint64) ([]*account.Record, error) {
 	s.mu.Lock()

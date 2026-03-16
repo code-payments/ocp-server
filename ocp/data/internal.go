@@ -101,6 +101,7 @@ type DatabaseData interface {
 	GetAccountInfoByAuthorityAddress(ctx context.Context, address string) (map[string]*account.Record, error)
 	GetLatestAccountInfosByOwnerAddress(ctx context.Context, address string) (map[string]map[commonpb.AccountType][]*account.Record, error)
 	GetLatestAccountInfoByOwnerAddressAndType(ctx context.Context, address string, accountType commonpb.AccountType) (map[string]*account.Record, error)
+	GetAccountInfosByMintAndType(ctx context.Context, mint string, accountType commonpb.AccountType) ([]*account.Record, error)
 	GetPrioritizedAccountInfosRequiringDepositSync(ctx context.Context, limit uint64) ([]*account.Record, error)
 	GetPrioritizedAccountInfosRequiringAutoReturnCheck(ctx context.Context, maxAge time.Duration, limit uint64) ([]*account.Record, error)
 	GetAccountInfoCountRequiringDepositSync(ctx context.Context) (uint64, error)
@@ -184,6 +185,7 @@ type DatabaseData interface {
 	GetGiftCardClaimedIntent(ctx context.Context, giftCardVault string) (*intent.Record, error)
 	GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, owner string, since time.Time) (uint64, float64, error)
 	GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error)
+	GetUsdCostBasisBatch(ctx context.Context, mint string, owners ...string) (map[string]float64, error)
 
 	// Messaging
 	// --------------------------------------------------------------------------------
@@ -398,6 +400,9 @@ func (dp *DatabaseProvider) GetLatestAccountInfosByOwnerAddress(ctx context.Cont
 }
 func (dp *DatabaseProvider) GetLatestAccountInfoByOwnerAddressAndType(ctx context.Context, address string, accountType commonpb.AccountType) (map[string]*account.Record, error) {
 	return dp.accounts.GetLatestByOwnerAddressAndType(ctx, address, accountType)
+}
+func (dp *DatabaseProvider) GetAccountInfosByMintAndType(ctx context.Context, mint string, accountType commonpb.AccountType) ([]*account.Record, error) {
+	return dp.accounts.GetByMintAndType(ctx, mint, accountType)
 }
 func (dp *DatabaseProvider) GetPrioritizedAccountInfosRequiringDepositSync(ctx context.Context, limit uint64) ([]*account.Record, error) {
 	return dp.accounts.GetPrioritizedRequiringDepositSync(ctx, limit)
@@ -687,6 +692,9 @@ func (dp *DatabaseProvider) GetTransactedAmountForAntiMoneyLaundering(ctx contex
 }
 func (dp *DatabaseProvider) GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error) {
 	return dp.intents.GetUsdCostBasis(ctx, owner, mint)
+}
+func (dp *DatabaseProvider) GetUsdCostBasisBatch(ctx context.Context, mint string, owners ...string) (map[string]float64, error) {
+	return dp.intents.GetUsdCostBasisBatch(ctx, mint, owners...)
 }
 
 // Messaging

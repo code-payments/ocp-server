@@ -369,6 +369,21 @@ func (s *store) GetUsdCostBasis(ctx context.Context, owner string, mint string) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.getUsdCostBasis(owner, mint), nil
+}
+
+func (s *store) GetUsdCostBasisBatch(ctx context.Context, mint string, owners ...string) (map[string]float64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res := make(map[string]float64)
+	for _, owner := range owners {
+		res[owner] = s.getUsdCostBasis(owner, mint)
+	}
+	return res, nil
+}
+
+func (s *store) getUsdCostBasis(owner string, mint string) float64 {
 	var costBasis float64
 
 	for _, item := range s.records {
@@ -403,5 +418,5 @@ func (s *store) GetUsdCostBasis(ctx context.Context, owner string, mint string) 
 		}
 	}
 
-	return costBasis, nil
+	return costBasis
 }

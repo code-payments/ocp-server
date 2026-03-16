@@ -127,6 +127,20 @@ func (s *store) GetLatestByOwnerAddressAndType(ctx context.Context, address stri
 	return res, nil
 }
 
+// GetByMintAndType implements account.Store.GetByMintAndType
+func (s *store) GetByMintAndType(ctx context.Context, mint string, accountType commonpb.AccountType) ([]*account.Record, error) {
+	models, err := dbGetByMintAndType(ctx, s.db, mint, accountType)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]*account.Record, len(models))
+	for i, model := range models {
+		res[i] = fromModel(model)
+	}
+	return res, nil
+}
+
 // GetPrioritizedRequiringDepositSync implements account.Store.GetPrioritizedRequiringDepositSync
 func (s *store) GetPrioritizedRequiringDepositSync(ctx context.Context, limit uint64) ([]*account.Record, error) {
 	models, err := dbGetPrioritizedRequiringDepositSync(ctx, s.db, limit)

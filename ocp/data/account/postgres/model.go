@@ -288,6 +288,30 @@ func dbGetLatestByOwnerAddressAndType(ctx context.Context, db *sqlx.DB, address 
 	return res, nil
 }
 
+func dbGetByMintAndType(ctx context.Context, db *sqlx.DB, mint string, accountType commonpb.AccountType) ([]*model, error) {
+	var res []*model
+
+	query := `SELECT id, owner_account, authority_account, token_account, mint_account, account_type, index, requires_deposit_sync, deposits_last_synced_at, requires_auto_return_check, created_at FROM ` + tableName + `
+		WHERE mint_account = $1 AND account_type = $2
+		ORDER BY index ASC
+	`
+
+	err := db.SelectContext(
+		ctx,
+		&res,
+		query,
+		mint,
+		accountType,
+	)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, account.ErrAccountInfoNotFound)
+	}
+	if len(res) == 0 {
+		return nil, account.ErrAccountInfoNotFound
+	}
+	return res, nil
+}
+
 func dbGetPrioritizedRequiringDepositSync(ctx context.Context, db *sqlx.DB, limit uint64) ([]*model, error) {
 	var res []*model
 

@@ -619,3 +619,60 @@ func dbGetUsdCostBasis(ctx context.Context, db *sqlx.DB, owner string, mint stri
 	}
 	return res.Float64, nil
 }
+
+func dbGetUsdCostBasisBatch(ctx context.Context, db *sqlx.DB, mint string, owners ...string) (map[string]float64, error) {
+	if len(owners) == 0 {
+		return make(map[string]float64), nil
+	}
+
+	type Row struct {
+		Owner      string  `db:"owner"`
+		CostBasis  float64 `db:"cost_basis"`
+	}
+	rows := []*Row{}
+
+	individualFilters := make([]string, len(owners))
+	for i, owner := range owners {
+		individualFilters[i] = fmt.Sprintf("'%s'", owner)
+	}
+	ownerFilter := strings.Join(individualFilters, ",")
+
+	// For backwards compatibility, the mint column is NULL for core mint
+	var mintFilter string
+	var params []any
+	if mint == config.CoreMintPublicKeyString {
+		mintFilter = "mint IS NULL"
+		params = []any{intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment}
+	} else {
+		mintFilter = "mint = $5"
+		params = []any{intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, mint}
+	}
+
+	// USD received as destination (owner is initiator for ExternalDeposit, ReceivePaymentsPublicly):
+	// USD received as destination (owner is destination_owner for SendPublicPayment):
+	// USD sent as source (owner is initiator for SendPublicPayment):
+	query := fmt.Sprintf(
+		`(SELECT owner AS owner, COALESCE(SUM(usd_market_value), 0) AS cost_basis FROM %s WHERE owner IN (%s) AND %s AND intent_type IN ($2, $3) AND state != $1 GROUP BY owner)
+		UNION ALL
+		(SELECT destination_owner AS owner, COALESCE(SUM(usd_market_value), 0) AS cost_basis FROM %s WHERE destination_owner IN (%s) AND %s AND intent_type = $4 AND state != $1 GROUP BY destination_owner)
+		UNION ALL
+		(SELECT owner AS owner, -COALESCE(SUM(usd_market_value), 0) AS cost_basis FROM %s WHERE owner IN (%s) AND %s AND intent_type = $4 AND state != $1 GROUP BY owner);`,
+		intentTableName, ownerFilter, mintFilter,
+		intentTableName, ownerFilter, mintFilter,
+		intentTableName, ownerFilter, mintFilter,
+	)
+
+	err := db.SelectContext(ctx, &rows, query, params...)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]float64)
+	for _, owner := range owners {
+		res[owner] = 0
+	}
+	for _, row := range rows {
+		res[row.Owner] += row.CostBasis
+	}
+	return res, nil
+}

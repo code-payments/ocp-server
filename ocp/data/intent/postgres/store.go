@@ -99,3 +99,8 @@ func (s *store) GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, o
 func (s *store) GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error) {
 	return dbGetUsdCostBasis(ctx, s.db, owner, mint)
 }
+
+// GetUsdCostBasisBatch implements intent.Store.GetUsdCostBasisBatch
+func (s *store) GetUsdCostBasisBatch(ctx context.Context, mint string, owners ...string) (map[string]float64, error) {
+	return dbGetUsdCostBasisBatch(ctx, s.db, mint, owners...)
+}
