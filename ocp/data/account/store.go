@@ -47,6 +47,10 @@ type Store interface {
 	// the largest index is returned
 	GetLatestByOwnerAddressAndType(ctx context.Context, address string, accountType commonpb.AccountType) (map[string]*Record, error)
 
+	// GetByMintAndType returns all account info objects for a given mint and
+	// account type
+	GetByMintAndType(ctx context.Context, mint string, accountType commonpb.AccountType) ([]*Record, error)
+
 	// GetPrioritizedRequiringDepositSync gets a set of account info objects where
 	// RequiresDepositSync is true that's prioritized by DepositsLastSyncedAt
 	GetPrioritizedRequiringDepositSync(ctx context.Context, limit uint64) ([]*Record, error)

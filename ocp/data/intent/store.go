@@ -44,4 +44,7 @@ type Store interface {
 	// The USD market value is subtracted if the owner is the source, and it is added
 	// if the owner is the destination.
 	GetUsdCostBasis(ctx context.Context, owner string, mint string) (float64, error)
+
+	// GetUsdCostBasisBatch is like GetUsdCostBasis, but for multiple owner accounts.
+	GetUsdCostBasisBatch(ctx context.Context, mint string, owners ...string) (map[string]float64, error)
 }

@@ -23,6 +23,7 @@ func RunTests(t *testing.T, s account.Store, teardown func()) {
 		testBatchedMethods,
 		testRemoteSendEdgeCases,
 		testSwapAccountEdgeCases,
+		testGetByMintAndType,
 		testDepositSyncMethods,
 		testAutoReturnCheckMethods,
 	} {
@@ -515,6 +516,80 @@ func testSwapAccountEdgeCases(t *testing.T, s account.Store) {
 		require.Len(t, actualByMintAndType[actual.MintAccount][commonpb.AccountType_SWAP], 1)
 		actual = actualByMintAndType[actual.MintAccount][commonpb.AccountType_SWAP][0]
 		assertEquivalentRecords(t, &cloned, actual)
+	})
+}
+
+func testGetByMintAndType(t *testing.T, s account.Store) {
+	t.Run("testGetByMintAndType", func(t *testing.T) {
+		ctx := context.Background()
+
+		_, err := s.GetByMintAndType(ctx, "mint", commonpb.AccountType_POOL)
+		assert.Equal(t, account.ErrAccountInfoNotFound, err)
+
+		// Create multiple POOL accounts for mint1
+		for i := 0; i < 3; i++ {
+			record := &account.Record{
+				OwnerAccount:     fmt.Sprintf("owner_pool_%d", i),
+				AuthorityAccount: fmt.Sprintf("authority_pool_%d", i),
+				TokenAccount:     fmt.Sprintf("token_pool_mint1_%d", i),
+				MintAccount:      "mint1",
+				AccountType:      commonpb.AccountType_POOL,
+				Index:            uint64(i),
+			}
+			require.NoError(t, s.Put(ctx, record))
+		}
+
+		// Create a PRIMARY account for mint1
+		primaryRecord := &account.Record{
+			OwnerAccount:     "owner_primary",
+			AuthorityAccount: "owner_primary",
+			TokenAccount:     "token_primary_mint1",
+			MintAccount:      "mint1",
+			AccountType:      commonpb.AccountType_PRIMARY,
+			Index:            0,
+		}
+		require.NoError(t, s.Put(ctx, primaryRecord))
+
+		// Create a POOL account for mint2
+		mint2Record := &account.Record{
+			OwnerAccount:     "owner_pool_mint2",
+			AuthorityAccount: "authority_pool_mint2",
+			TokenAccount:     "token_pool_mint2",
+			MintAccount:      "mint2",
+			AccountType:      commonpb.AccountType_POOL,
+			Index:            0,
+		}
+		require.NoError(t, s.Put(ctx, mint2Record))
+
+		// Query POOL accounts for mint1
+		results, err := s.GetByMintAndType(ctx, "mint1", commonpb.AccountType_POOL)
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+		for i, actual := range results {
+			assert.Equal(t, "mint1", actual.MintAccount)
+			assert.Equal(t, commonpb.AccountType_POOL, actual.AccountType)
+			assert.Equal(t, uint64(i), actual.Index)
+		}
+
+		// Query PRIMARY accounts for mint1
+		results, err = s.GetByMintAndType(ctx, "mint1", commonpb.AccountType_PRIMARY)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assertEquivalentRecords(t, primaryRecord, results[0])
+
+		// Query POOL accounts for mint2
+		results, err = s.GetByMintAndType(ctx, "mint2", commonpb.AccountType_POOL)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assertEquivalentRecords(t, mint2Record, results[0])
+
+		// Query for a type with no results
+		_, err = s.GetByMintAndType(ctx, "mint1", commonpb.AccountType_SWAP)
+		assert.Equal(t, account.ErrAccountInfoNotFound, err)
+
+		// Query for a mint with no results
+		_, err = s.GetByMintAndType(ctx, "mint3", commonpb.AccountType_POOL)
+		assert.Equal(t, account.ErrAccountInfoNotFound, err)
 	})
 }
 
