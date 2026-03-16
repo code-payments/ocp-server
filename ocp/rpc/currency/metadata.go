@@ -19,6 +19,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 	log = client.InjectLoggingMetadata(ctx, log)
 
 	resp := &currencypb.GetMintsResponse{
+		Result:            currencypb.GetMintsResponse_OK,
 		MetadataByAddress: make(map[string]*currencypb.Mint),
 	}
 
@@ -32,7 +33,9 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 		log := log.With(zap.String("mint", mintAccount.PublicKey().ToBase58()))
 
 		protoMetadata, err := s.mintDataProvider.GetProtoMint(ctx, mintAccount)
-		if err != nil {
+		if err == currency.ErrNotFound {
+			return &currencypb.GetMintsResponse{Result: currencypb.GetMintsResponse_NOT_FOUND}, nil
+		} else if err != nil {
 			log.With(zap.Error(err)).Warn("failiure getting proto mint metadata")
 			return nil, status.Error(codes.Internal, "")
 		}

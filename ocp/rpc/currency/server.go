@@ -1,8 +1,6 @@
 package currency
 
 import (
-	"time"
-
 	"go.uber.org/zap"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -15,11 +13,6 @@ import (
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 )
-
-type cachedProtoMint struct {
-	mint          *currencypb.Mint
-	lastUpdatedAt time.Time
-}
 
 type currencyServer struct {
 	log *zap.Logger
