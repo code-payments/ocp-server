@@ -29,6 +29,8 @@ func CalculateUsdMarketValueFromFiatAmount(fiatAmount, fiatToUsdRate float64) (f
 // CalculateUsdMarketValueFromTokenAmount calculates the current USD market value
 // of a crypto amount in quarks.
 func CalculateUsdMarketValueFromTokenAmount(ctx context.Context, data ocp_data.Provider, mint *common.Account, quarks uint64, at time.Time) (float64, error) {
+	isLive := time.Since(at) < 5*time.Second
+
 	isSupportedMint, err := common.IsSupportedMint(ctx, data, mint)
 	if err != nil {
 		return 0, err
@@ -60,9 +62,17 @@ func CalculateUsdMarketValueFromTokenAmount(ctx context.Context, data ocp_data.P
 		return marketValue, nil
 	}
 
-	reserveRecord, err := data.GetCurrencyReserveAtTime(ctx, mint.PublicKey().ToBase58(), at)
-	if err != nil {
-		return 0, err
+	var reserveRecord *currency.ReserveRecord
+	if isLive {
+		reserveRecord, err = data.GetLiveCurrencyReserve(ctx, mint.PublicKey().ToBase58())
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		reserveRecord, err = data.GetCurrencyReserveAtTime(ctx, mint.PublicKey().ToBase58(), at)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	coreMintSellValueInQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
