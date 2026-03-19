@@ -44,7 +44,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 					res = append(res, mint)
 				}
 			}
-			return mints
+			return res
 		}
 	default:
 		return status.Error(codes.InvalidArgument, "invalid category")
