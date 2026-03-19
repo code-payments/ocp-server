@@ -2,6 +2,7 @@ package currency
 
 import (
 	"sort"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -14,7 +15,8 @@ import (
 )
 
 const (
-	maxDiscoveredCurrencies = 1024
+	maxDiscoveredCurrencies         = 100
+	newDiscoveredCurrenciesAgeLimit = 7 * 24 * time.Hour // 1 week
 )
 
 var (
@@ -22,8 +24,31 @@ var (
 )
 
 func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream currencypb.Currency_DiscoverServer) error {
-	log := s.log.With(zap.String("method", "Discover"))
+	log := s.log.With(
+		zap.String("method", "Discover"),
+		zap.String("category", req.Category.String()),
+	)
 	ctx := stream.Context()
+
+	var categoryFilterFunc func(mints []*currencypb.Mint) []*currencypb.Mint
+	switch req.Category {
+	case currencypb.DiscoverRequest_POPULAR:
+		categoryFilterFunc = func(mints []*currencypb.Mint) []*currencypb.Mint {
+			return mints
+		}
+	case currencypb.DiscoverRequest_NEW:
+		categoryFilterFunc = func(mints []*currencypb.Mint) []*currencypb.Mint {
+			var res []*currencypb.Mint
+			for _, mint := range mints {
+				if time.Since(mint.CreatedAt.AsTime()) < newDiscoveredCurrenciesAgeLimit {
+					res = append(res, mint)
+				}
+			}
+			return mints
+		}
+	default:
+		return status.Error(codes.InvalidArgument, "invalid category")
+	}
 
 	metadataRecords, err := s.data.GetAllCurrencyMetadataByState(ctx, currency.MetadataStateAvailable)
 	if err == currency.ErrNotFound {
@@ -52,6 +77,8 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 		protoMints = append(protoMints, protoMint)
 	}
 
+	protoMints = categoryFilterFunc(protoMints)
+
 	if len(protoMints) == 0 {
 		return stream.Send(&currencypb.DiscoverResponse{
 			Result: currencypb.DiscoverResponse_NOT_FOUND,
@@ -68,6 +95,6 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 
 	return stream.Send(&currencypb.DiscoverResponse{
 		Result: currencypb.DiscoverResponse_OK,
-		Mint:   protoMints,
+		Mints:  protoMints,
 	})
 }
