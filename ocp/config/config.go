@@ -16,7 +16,7 @@ const (
 	CoreMintDecimals        = usdf.Decimals
 	CoreMintName            = "USDF"
 	CoreMintSymbol          = "USDF"
-	CoreMintDescription     = "Your USD Reserves are held in USDF, a fully backed digital dollar created in partnership with Coinbase. Your USD Reserves can be used to buy currencies on Flipcash, or can be withdrawn to any other crypto wallet that supports the Solana blockchain. USDF can also be sold, allowing you to move your funds into a traditional bank account."
+	CoreMintDescription     = "USDF is a fully backed digital dollar created in partnership with Coinbase. Your USD Reserves can be used to buy currencies on Flipcash, or can be withdrawn to any other crypto wallet that supports the Solana blockchain. USDF can also be sold, allowing you to move your funds into a traditional bank account."
 
 	SubsidizerPublicKey = "cash11ndAmdKFEnG2wrQQ5Zqvr1kN9htxxLyoPLYFUV"
 
