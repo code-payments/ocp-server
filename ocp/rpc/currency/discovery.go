@@ -74,6 +74,16 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 			continue
 		}
 
+		protoMint.HolderMetrics = &currencypb.HolderMetrics{
+			CurrentHolders: 0,
+			HolderDeltas: []*currencypb.HolderMetrics_DeltaHolders{
+				{
+					Range: currencypb.PredefinedRange_LAST_WEEK,
+					Delta: 0,
+				},
+			},
+		}
+
 		protoMints = append(protoMints, protoMint)
 	}
 

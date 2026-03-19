@@ -130,7 +130,7 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	var data []*currencypb.HistoricalMintData
 
 	if startTime.Before(metadataRecord.CreatedAt) {
-		if req.GetPredefinedRange() != currencypb.GetHistoricalMintDataRequest_ALL_TIME {
+		if req.GetPredefinedRange() != currencypb.PredefinedRange_ALL_TIME {
 			data = append(
 				data,
 				// 0 market cap value at the range start time
@@ -202,7 +202,7 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 func (s *currencyServer) getCachedReserveHistory(
 	ctx context.Context,
 	mint string,
-	predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange,
+	predefinedRange currencypb.PredefinedRange,
 	startTime, endTime time.Time,
 	interval query.Interval,
 ) ([]*currency.ReserveRecord, error) {
@@ -231,7 +231,7 @@ func (s *currencyServer) getCachedReserveHistory(
 func (s *currencyServer) getCachedExchangeRateHistory(
 	ctx context.Context,
 	currencyCode currency_lib.Code,
-	predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange,
+	predefinedRange currencypb.PredefinedRange,
 	startTime, endTime time.Time,
 	interval query.Interval,
 ) ([]*currency.ExchangeRateRecord, error) {
@@ -276,26 +276,26 @@ func findClosestExchangeRate(t time.Time, history []*currency.ExchangeRateRecord
 // getTimeRangeForPredefinedRange returns the start time and appropriate interval
 // for the given predefined range. The interval is adjusted based on the
 // currency's age so that younger currencies get finer-grained data points.
-func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMintDataRequest_PredefinedRange, createdAt time.Time) (time.Time, time.Time, query.Interval) {
+func getTimeRangeForPredefinedRange(predefinedRange currencypb.PredefinedRange, createdAt time.Time) (time.Time, time.Time, query.Interval) {
 	now := getLatestHistoricalTime()
 	currencyAge := now.Sub(createdAt)
 
 	switch predefinedRange {
-	case currencypb.GetHistoricalMintDataRequest_LAST_DAY:
+	case currencypb.PredefinedRange_LAST_DAY:
 		return now.Add(-24 * time.Hour), now, query.IntervalMinute
-	case currencypb.GetHistoricalMintDataRequest_LAST_WEEK:
+	case currencypb.PredefinedRange_LAST_WEEK:
 		interval := query.IntervalHour
 		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
 		}
 		return now.Add(-7 * 24 * time.Hour), now, interval
-	case currencypb.GetHistoricalMintDataRequest_LAST_MONTH:
+	case currencypb.PredefinedRange_LAST_MONTH:
 		interval := query.IntervalHour
 		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
 		}
 		return now.Add(-30 * 24 * time.Hour), now, interval
-	case currencypb.GetHistoricalMintDataRequest_LAST_YEAR:
+	case currencypb.PredefinedRange_LAST_YEAR:
 		interval := query.IntervalDay
 		if currencyAge < 2*24*time.Hour {
 			interval = query.IntervalMinute
@@ -303,7 +303,7 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.GetHistoricalMint
 			interval = query.IntervalHour
 		}
 		return now.Add(-365 * 24 * time.Hour), now, interval
-	case currencypb.GetHistoricalMintDataRequest_ALL_TIME:
+	case currencypb.PredefinedRange_ALL_TIME:
 		fallthrough
 	default:
 		interval := query.IntervalDay
