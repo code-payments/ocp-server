@@ -89,6 +89,9 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	}
 
 	sort.Slice(protoMints, func(i, j int) bool {
+		if protoMints[i].HolderMetrics.CurrentHolders == protoMints[j].HolderMetrics.CurrentHolders {
+			return protoMints[i].LaunchpadMetadata.SupplyFromBonding > protoMints[j].LaunchpadMetadata.SupplyFromBonding
+		}
 		return protoMints[i].HolderMetrics.CurrentHolders > protoMints[j].HolderMetrics.CurrentHolders
 	})
 
