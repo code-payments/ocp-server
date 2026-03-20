@@ -28,6 +28,9 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testGetReservesInRange,
 		testLiveReserveRoundTrip,
 		testGetAllLiveReserves,
+		testHolderCountRoundTrip,
+		testLiveHolderCountRoundTrip,
+		testGetAllLiveHolderCounts,
 	} {
 		tf(t, s)
 		teardown()
@@ -963,6 +966,161 @@ func testGetAllLiveReserves(t *testing.T, s currency.Store) {
 	assert.EqualValues(t, 150, reserves["mint-all-live-1"].Slot)
 	assert.EqualValues(t, 2000, reserves["mint-all-live-2"].SupplyFromBonding)
 	assert.EqualValues(t, 200, reserves["mint-all-live-2"].Slot)
+}
+
+func testHolderCountRoundTrip(t *testing.T, s currency.Store) {
+	now := time.Date(2021, 01, 29, 13, 0, 5, 0, time.UTC)
+
+	record, err := s.GetHolderCountAtTime(context.Background(), "mint", now)
+	assert.Nil(t, record)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	expected := &currency.HolderCountRecord{
+		Mint:        "mint",
+		HolderCount: 42,
+		Time:        now,
+	}
+	require.NoError(t, s.PutHistoricalHolderCountRecord(context.Background(), expected))
+
+	assert.Equal(t, currency.ErrExists, s.PutHistoricalHolderCountRecord(context.Background(), expected))
+
+	actual, err := s.GetHolderCountAtTime(context.Background(), "mint", now)
+	require.NoError(t, err)
+	assert.Equal(t, now.Unix(), actual.Time.Unix())
+	assert.EqualValues(t, expected.HolderCount, actual.HolderCount)
+
+	actual, err = s.GetHolderCountAtTime(context.Background(), "mint", time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
+	require.NoError(t, err)
+
+	assert.Equal(t, now.Unix(), actual.Time.Unix())
+	assert.EqualValues(t, expected.HolderCount, actual.HolderCount)
+
+	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
+	actual, err = s.GetHolderCountAtTime(context.Background(), "mint", tomorrow)
+	assert.Nil(t, actual)
+	assert.Equal(t, currency.ErrNotFound, err)
+}
+
+func testLiveHolderCountRoundTrip(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+	mint := "live-holder-mint"
+
+	// No record should exist initially
+	_, err := s.GetLiveHolderCount(ctx, mint)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	// Insert the first live holder count record
+	now := time.Now().UTC().Truncate(time.Second)
+	record := &currency.HolderCountRecord{
+		Mint:        mint,
+		HolderCount: 10,
+		Time:        now,
+	}
+	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record))
+
+	// Verify the record was stored
+	actual, err := s.GetLiveHolderCount(ctx, mint)
+	require.NoError(t, err)
+	assert.Equal(t, mint, actual.Mint)
+	assert.EqualValues(t, 10, actual.HolderCount)
+
+	// Update with a later timestamp should succeed
+	record = &currency.HolderCountRecord{
+		Mint:        mint,
+		HolderCount: 20,
+		Time:        now.Add(time.Second),
+	}
+	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record))
+
+	actual, err = s.GetLiveHolderCount(ctx, mint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 20, actual.HolderCount)
+
+	// Update with same timestamp should return stale error
+	record = &currency.HolderCountRecord{
+		Mint:        mint,
+		HolderCount: 30,
+		Time:        now.Add(time.Second),
+	}
+	assert.Equal(t, currency.ErrStaleHolderState, s.PutLiveHolderCountRecord(ctx, record))
+
+	// Update with earlier timestamp should return stale error
+	record = &currency.HolderCountRecord{
+		Mint:        mint,
+		HolderCount: 30,
+		Time:        now,
+	}
+	assert.Equal(t, currency.ErrStaleHolderState, s.PutLiveHolderCountRecord(ctx, record))
+
+	// Verify original record unchanged after stale attempts
+	actual, err = s.GetLiveHolderCount(ctx, mint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 20, actual.HolderCount)
+
+	// Different mint should work independently
+	otherMint := "other-live-holder-mint"
+	record = &currency.HolderCountRecord{
+		Mint:        otherMint,
+		HolderCount: 50,
+		Time:        now,
+	}
+	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record))
+
+	actual, err = s.GetLiveHolderCount(ctx, otherMint)
+	require.NoError(t, err)
+	assert.EqualValues(t, 50, actual.HolderCount)
+}
+
+func testGetAllLiveHolderCounts(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+
+	// No records should exist initially
+	_, err := s.GetAllLiveHolderCounts(ctx)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Insert holder counts for two mints
+	record1 := &currency.HolderCountRecord{
+		Mint:        "mint-all-live-holder-1",
+		HolderCount: 10,
+		Time:        now,
+	}
+	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record1))
+
+	// Should return one record
+	counts, err := s.GetAllLiveHolderCounts(ctx)
+	require.NoError(t, err)
+	assert.Len(t, counts, 1)
+	assert.EqualValues(t, 10, counts["mint-all-live-holder-1"].HolderCount)
+
+	record2 := &currency.HolderCountRecord{
+		Mint:        "mint-all-live-holder-2",
+		HolderCount: 20,
+		Time:        now,
+	}
+	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record2))
+
+	// Should return both records
+	counts, err = s.GetAllLiveHolderCounts(ctx)
+	require.NoError(t, err)
+	assert.Len(t, counts, 2)
+	assert.EqualValues(t, 10, counts["mint-all-live-holder-1"].HolderCount)
+	assert.EqualValues(t, 20, counts["mint-all-live-holder-2"].HolderCount)
+
+	// Update one mint and verify the change is reflected
+	record1Updated := &currency.HolderCountRecord{
+		Mint:        "mint-all-live-holder-1",
+		HolderCount: 15,
+		Time:        now.Add(time.Second),
+	}
+	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record1Updated))
+
+	counts, err = s.GetAllLiveHolderCounts(ctx)
+	require.NoError(t, err)
+	assert.Len(t, counts, 2)
+	assert.EqualValues(t, 15, counts["mint-all-live-holder-1"].HolderCount)
+	assert.EqualValues(t, 20, counts["mint-all-live-holder-2"].HolderCount)
 }
 
 func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {

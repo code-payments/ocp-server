@@ -238,3 +238,62 @@ func (s *store) GetAllLiveReserves(ctx context.Context) (map[string]*currency.Re
 	}
 	return res, nil
 }
+
+func (s *store) PutHistoricalHolderCountRecord(ctx context.Context, record *currency.HolderCountRecord) error {
+	model, err := toHistoricalHolderCountModel(record)
+	if err != nil {
+		return err
+	}
+
+	err = model.dbSave(ctx, s.db)
+	if err != nil {
+		return err
+	}
+
+	fromHistoricalHolderCountModel(model).CopyTo(record)
+
+	return nil
+}
+
+func (s *store) GetHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error) {
+	model, err := dbGetHolderCountByMintAndTime(ctx, s.db, mint, t, query.Descending)
+	if err != nil {
+		return nil, err
+	}
+	return fromHistoricalHolderCountModel(model), nil
+}
+
+func (s *store) PutLiveHolderCountRecord(ctx context.Context, record *currency.HolderCountRecord) error {
+	model := toLiveHolderCountModel(record)
+
+	err := model.dbSave(ctx, s.db)
+	if err != nil {
+		return err
+	}
+
+	fromLiveHolderCountModel(model).CopyTo(record)
+
+	return nil
+}
+
+func (s *store) GetLiveHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error) {
+	model, err := dbGetLiveHolderCountByMint(ctx, s.db, mint)
+	if err != nil {
+		return nil, err
+	}
+	return fromLiveHolderCountModel(model), nil
+}
+
+func (s *store) GetAllLiveHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error) {
+	models, err := dbGetAllLiveHolderCounts(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*currency.HolderCountRecord, len(models))
+	for _, model := range models {
+		record := fromLiveHolderCountModel(model)
+		res[record.Mint] = record
+	}
+	return res, nil
+}

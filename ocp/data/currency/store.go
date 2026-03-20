@@ -15,6 +15,7 @@ var (
 	ErrExists               = errors.New("record exists")
 	ErrStaleMetadataVersion = errors.New("metadata version is stale")
 	ErrStaleReserveState    = errors.New("reserve state is stale")
+	ErrStaleHolderState     = errors.New("holder count state is stale")
 	ErrDuplicateCurrency    = errors.New("duplicate currency detected")
 )
 
@@ -108,4 +109,38 @@ type Store interface {
 	//
 	// ErrNotFound is returned if no live reserve records exist.
 	GetAllLiveReserves(ctx context.Context) (map[string]*ReserveRecord, error)
+
+	// PutHistoricalHolderCountRecord puts a currency creator mint holder count
+	// record into the store.
+	PutHistoricalHolderCountRecord(ctx context.Context, record *HolderCountRecord) error
+
+	// GetHolderCountAtTime gets the holder count for a given currency creator
+	// mint at a point in time. If the exact time is not available, the most
+	// recent data prior to the requested date within the same day will get
+	// returned, if available.
+	//
+	// ErrNotFound is returned if no holder count data was found for the
+	// provided Timestamp.
+	GetHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*HolderCountRecord, error)
+
+	// PutLiveHolderCountRecord upserts the latest holder count record for a
+	// currency creator mint. An upsert is only performed if the provided
+	// timestamp is greater than the timestamp currently stored.
+	//
+	// ErrStaleHolderState is returned if the provided timestamp is not greater
+	// than the stored timestamp.
+	PutLiveHolderCountRecord(ctx context.Context, record *HolderCountRecord) error
+
+	// GetLiveHolderCount gets the latest live holder count record for a
+	// currency creator mint.
+	//
+	// ErrNotFound is returned if no live holder count record exists for the
+	// provided mint.
+	GetLiveHolderCount(ctx context.Context, mint string) (*HolderCountRecord, error)
+
+	// GetAllLiveHolderCounts gets the latest live holder count records for all
+	// currency creator mints.
+	//
+	// ErrNotFound is returned if no live holder count records exist.
+	GetAllLiveHolderCounts(ctx context.Context) (map[string]*HolderCountRecord, error)
 }

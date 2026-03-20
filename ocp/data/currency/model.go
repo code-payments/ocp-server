@@ -86,6 +86,21 @@ type MetadataRecord struct {
 	CreatedAt time.Time
 }
 
+type ReserveRecord struct {
+	Id                uint64
+	Mint              string
+	SupplyFromBonding uint64
+	Slot              uint64 // Not available for historical records
+	Time              time.Time
+}
+
+type HolderCountRecord struct {
+	Id          uint64
+	Mint        string
+	HolderCount uint64
+	Time        time.Time
+}
+
 func (m *MetadataRecord) Validate() error {
 	if len(m.Name) == 0 {
 		return errors.New("name is required")
@@ -262,14 +277,6 @@ func (m *MetadataRecord) CopyTo(dst *MetadataRecord) {
 	dst.CreatedAt = m.CreatedAt
 }
 
-type ReserveRecord struct {
-	Id                uint64
-	Mint              string
-	SupplyFromBonding uint64
-	Slot              uint64 // Not available for historical records
-	Time              time.Time
-}
-
 func (m *ReserveRecord) Validate() error {
 	if len(m.Mint) == 0 {
 		return errors.New("mint is required")
@@ -297,6 +304,34 @@ func (m *ReserveRecord) CopyTo(dst *ReserveRecord) {
 	dst.Mint = m.Mint
 	dst.SupplyFromBonding = m.SupplyFromBonding
 	dst.Slot = m.Slot
+	dst.Time = m.Time
+}
+
+func (m *HolderCountRecord) Validate() error {
+	if len(m.Mint) == 0 {
+		return errors.New("mint is required")
+	}
+
+	if m.Time.IsZero() {
+		return errors.New("timestamp is required")
+	}
+
+	return nil
+}
+
+func (m *HolderCountRecord) Clone() *HolderCountRecord {
+	return &HolderCountRecord{
+		Id:          m.Id,
+		Mint:        m.Mint,
+		HolderCount: m.HolderCount,
+		Time:        m.Time,
+	}
+}
+
+func (m *HolderCountRecord) CopyTo(dst *HolderCountRecord) {
+	dst.Id = m.Id
+	dst.Mint = m.Mint
+	dst.HolderCount = m.HolderCount
 	dst.Time = m.Time
 }
 

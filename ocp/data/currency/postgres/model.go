@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	exchangeRateTableName = "ocp__core_exchangerate"
-	metadataTableName     = "ocp__core_currencymetadata"
-	reserveTableName      = "ocp__core_currencyreserve"
-	liveReserveTableName  = "ocp__core_currencyreserve2"
+	exchangeRateTableName    = "ocp__core_exchangerate"
+	metadataTableName        = "ocp__core_currencymetadata"
+	reserveTableName         = "ocp__core_currencyreserve"
+	liveReserveTableName     = "ocp__core_currencyreserve2"
+	holderCountTableName     = "ocp__core_currencyholdercount"
+	liveHolderCountTableName = "ocp__core_currencyholdercount2"
 
 	dateFormat = "2006-01-02"
 )
@@ -243,6 +245,62 @@ func fromLiveReserveModel(obj *liveReserveModel) *currency.ReserveRecord {
 		SupplyFromBonding: obj.SupplyFromBonding,
 		Slot:              obj.Slot,
 		Time:              obj.LastUpdatedAt.UTC(),
+	}
+}
+
+type historicalHolderCountModel struct {
+	Id           sql.NullInt64 `db:"id"`
+	ForDate      string        `db:"for_date"`
+	ForTimestamp time.Time     `db:"for_timestamp"`
+	Mint         string        `db:"mint"`
+	HolderCount  uint64        `db:"holder_count"`
+}
+
+func toHistoricalHolderCountModel(obj *currency.HolderCountRecord) (*historicalHolderCountModel, error) {
+	if err := obj.Validate(); err != nil {
+		return nil, err
+	}
+
+	return &historicalHolderCountModel{
+		Id:           sql.NullInt64{Int64: int64(obj.Id), Valid: obj.Id > 0},
+		ForDate:      obj.Time.UTC().Format(dateFormat),
+		ForTimestamp: obj.Time.UTC(),
+		Mint:         obj.Mint,
+		HolderCount:  obj.HolderCount,
+	}, nil
+}
+
+func fromHistoricalHolderCountModel(obj *historicalHolderCountModel) *currency.HolderCountRecord {
+	return &currency.HolderCountRecord{
+		Id:          uint64(obj.Id.Int64),
+		Time:        obj.ForTimestamp.UTC(),
+		Mint:        obj.Mint,
+		HolderCount: obj.HolderCount,
+	}
+}
+
+type liveHolderCountModel struct {
+	Id            sql.NullInt64 `db:"id"`
+	Mint          string        `db:"mint"`
+	HolderCount   uint64        `db:"holder_count"`
+	LastUpdatedAt time.Time     `db:"last_updated_at"`
+}
+
+func toLiveHolderCountModel(obj *currency.HolderCountRecord) *liveHolderCountModel {
+	return &liveHolderCountModel{
+		Id:            sql.NullInt64{Int64: int64(obj.Id), Valid: obj.Id > 0},
+		Mint:          obj.Mint,
+		HolderCount:   obj.HolderCount,
+		LastUpdatedAt: obj.Time.UTC(),
+	}
+}
+
+func fromLiveHolderCountModel(obj *liveHolderCountModel) *currency.HolderCountRecord {
+	return &currency.HolderCountRecord{
+		Id:          uint64(obj.Id.Int64),
+		Mint:        obj.Mint,
+		HolderCount: obj.HolderCount,
+		Time:        obj.LastUpdatedAt.UTC(),
 	}
 }
 
@@ -557,6 +615,81 @@ func dbGetAllLiveReserves(ctx context.Context, db *sqlx.DB) ([]*liveReserveModel
 	err := db.SelectContext(ctx, &res,
 		`SELECT id, mint, supply_from_bonding, slot, last_updated_at
 		FROM `+liveReserveTableName,
+	)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)
+	}
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
+	return res, nil
+}
+
+func (m *historicalHolderCountModel) dbSave(ctx context.Context, db *sqlx.DB) error {
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		err := tx.QueryRowxContext(ctx,
+			`INSERT INTO `+holderCountTableName+`
+			(for_date, for_timestamp, mint, holder_count)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id, for_date, for_timestamp, mint, holder_count`,
+			m.ForDate,
+			m.ForTimestamp,
+			m.Mint,
+			m.HolderCount,
+		).StructScan(m)
+
+		return pgutil.CheckUniqueViolation(err, currency.ErrExists)
+	})
+}
+
+func dbGetHolderCountByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t time.Time, ordering q.Ordering) (*historicalHolderCountModel, error) {
+	res := &historicalHolderCountModel{}
+	err := db.GetContext(ctx, res,
+		makeTimeBasedGetQuery(holderCountTableName, "mint = $1 AND for_date = $2 AND for_timestamp <= $3", ordering),
+		mint,
+		t.UTC().Format(dateFormat),
+		t.UTC(),
+	)
+	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
+}
+
+func (m *liveHolderCountModel) dbSave(ctx context.Context, db *sqlx.DB) error {
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		err := tx.QueryRowxContext(ctx,
+			`INSERT INTO `+liveHolderCountTableName+`
+			(mint, holder_count, last_updated_at)
+			VALUES ($1, $2, $3)
+
+			ON CONFLICT (mint)
+			DO UPDATE SET holder_count = $2, last_updated_at = $3
+				WHERE `+liveHolderCountTableName+`.last_updated_at < $3
+
+			RETURNING id, mint, holder_count, last_updated_at`,
+			m.Mint,
+			m.HolderCount,
+			m.LastUpdatedAt,
+		).StructScan(m)
+
+		return pgutil.CheckNoRows(err, currency.ErrStaleHolderState)
+	})
+}
+
+func dbGetLiveHolderCountByMint(ctx context.Context, db *sqlx.DB, mint string) (*liveHolderCountModel, error) {
+	res := &liveHolderCountModel{}
+	err := db.GetContext(ctx, res,
+		`SELECT id, mint, holder_count, last_updated_at
+		FROM `+liveHolderCountTableName+`
+		WHERE mint = $1`,
+		mint,
+	)
+	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
+}
+
+func dbGetAllLiveHolderCounts(ctx context.Context, db *sqlx.DB) ([]*liveHolderCountModel, error) {
+	var res []*liveHolderCountModel
+	err := db.SelectContext(ctx, &res,
+		`SELECT id, mint, holder_count, last_updated_at
+		FROM `+liveHolderCountTableName,
 	)
 	if err != nil {
 		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)

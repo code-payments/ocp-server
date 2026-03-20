@@ -16,15 +16,19 @@ const (
 )
 
 type store struct {
-	mu                         sync.Mutex
-	exchangeRateRecords        []*currency.ExchangeRateRecord
-	lastExchangeRateIndex      uint64
-	metadataRecords            []*currency.MetadataRecord
-	lastMetadataIndex          uint64
-	historicalReserveRecords   []*currency.ReserveRecord
-	lastHistoricalReserveIndex uint64
-	liveReserveRecords         map[string]*currency.ReserveRecord
-	lastLiveReserveIndex       uint64
+	mu                              sync.Mutex
+	exchangeRateRecords             []*currency.ExchangeRateRecord
+	lastExchangeRateIndex           uint64
+	metadataRecords                 []*currency.MetadataRecord
+	lastMetadataIndex               uint64
+	historicalReserveRecords        []*currency.ReserveRecord
+	lastHistoricalReserveIndex      uint64
+	liveReserveRecords              map[string]*currency.ReserveRecord
+	lastLiveReserveIndex            uint64
+	historicalHolderCountRecords    []*currency.HolderCountRecord
+	lastHistoricalHolderCountIndex  uint64
+	liveHolderCountRecords          map[string]*currency.HolderCountRecord
+	lastLiveHolderCountIndex        uint64
 }
 
 type RateByTime []*currency.ExchangeRateRecord
@@ -45,12 +49,23 @@ func (a ReserveByTime) Less(i, j int) bool {
 	return a[i].Time.Unix() > a[j].Time.Unix()
 }
 
+type HolderCountByTime []*currency.HolderCountRecord
+
+func (a HolderCountByTime) Len() int      { return len(a) }
+func (a HolderCountByTime) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a HolderCountByTime) Less(i, j int) bool {
+	// DESC order (most recent first)
+	return a[i].Time.Unix() > a[j].Time.Unix()
+}
+
 func New() currency.Store {
 	return &store{
-		exchangeRateRecords:   make([]*currency.ExchangeRateRecord, 0),
-		lastExchangeRateIndex: 1,
-		liveReserveRecords:    make(map[string]*currency.ReserveRecord),
-		lastLiveReserveIndex:  1,
+		exchangeRateRecords:    make([]*currency.ExchangeRateRecord, 0),
+		lastExchangeRateIndex:  1,
+		liveReserveRecords:     make(map[string]*currency.ReserveRecord),
+		lastLiveReserveIndex:   1,
+		liveHolderCountRecords: make(map[string]*currency.HolderCountRecord),
+		lastLiveHolderCountIndex: 1,
 	}
 }
 
@@ -64,6 +79,10 @@ func (s *store) reset() {
 	s.lastHistoricalReserveIndex = 1
 	s.liveReserveRecords = make(map[string]*currency.ReserveRecord)
 	s.lastLiveReserveIndex = 1
+	s.historicalHolderCountRecords = make([]*currency.HolderCountRecord, 0)
+	s.lastHistoricalHolderCountIndex = 1
+	s.liveHolderCountRecords = make(map[string]*currency.HolderCountRecord)
+	s.lastLiveHolderCountIndex = 1
 	s.mu.Unlock()
 }
 
@@ -433,6 +452,101 @@ func (s *store) GetAllLiveReserves(ctx context.Context) (map[string]*currency.Re
 
 	res := make(map[string]*currency.ReserveRecord, len(s.liveReserveRecords))
 	for mint, record := range s.liveReserveRecords {
+		res[mint] = record.Clone()
+	}
+	return res, nil
+}
+
+func (s *store) PutHistoricalHolderCountRecord(ctx context.Context, data *currency.HolderCountRecord) error {
+	if err := data.Validate(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, item := range s.historicalHolderCountRecords {
+		if item.Mint == data.Mint && item.Time.Unix() == data.Time.Unix() {
+			return currency.ErrExists
+		}
+	}
+
+	data.Id = s.lastHistoricalHolderCountIndex
+	s.historicalHolderCountRecords = append(s.historicalHolderCountRecords, data.Clone())
+	s.lastHistoricalHolderCountIndex = s.lastHistoricalHolderCountIndex + 1
+
+	return nil
+}
+
+func (s *store) GetHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var results []*currency.HolderCountRecord
+	for _, item := range s.historicalHolderCountRecords {
+		if item.Mint == mint && item.Time.Unix() <= t.Unix() && item.Time.Format(dateFormat) == t.Format(dateFormat) {
+			results = append(results, item)
+		}
+	}
+
+	if len(results) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	sort.Sort(HolderCountByTime(results))
+
+	return results[0].Clone(), nil
+}
+
+func (s *store) PutLiveHolderCountRecord(ctx context.Context, data *currency.HolderCountRecord) error {
+	if err := data.Validate(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing, ok := s.liveHolderCountRecords[data.Mint]; ok {
+		if !data.Time.After(existing.Time) {
+			return currency.ErrStaleHolderState
+		}
+
+		cloned := data.Clone()
+		cloned.Id = existing.Id
+		s.liveHolderCountRecords[data.Mint] = cloned
+		cloned.CopyTo(data)
+		return nil
+	}
+
+	data.Id = s.lastLiveHolderCountIndex
+	s.liveHolderCountRecords[data.Mint] = data.Clone()
+	s.lastLiveHolderCountIndex++
+
+	return nil
+}
+
+func (s *store) GetLiveHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.liveHolderCountRecords[mint]
+	if !ok {
+		return nil, currency.ErrNotFound
+	}
+
+	return record.Clone(), nil
+}
+
+func (s *store) GetAllLiveHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.liveHolderCountRecords) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	res := make(map[string]*currency.HolderCountRecord, len(s.liveHolderCountRecords))
+	for mint, record := range s.liveHolderCountRecords {
 		res[mint] = record.Clone()
 	}
 	return res, nil
