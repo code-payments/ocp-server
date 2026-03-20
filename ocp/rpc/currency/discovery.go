@@ -64,7 +64,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	for _, record := range metadataRecords {
 		log := log.With(zap.String("mint", record.Mint))
 
-		protoMint, err := s.mintDataProvider.ToProtoMint(ctx, record)
+		protoMint, err := s.mintDataProvider.ToProtoMint(ctx, record, true, true)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure converting metadata to proto mint")
 			continue

@@ -140,7 +140,11 @@ func (m *MintDataProvider) Stop() {
 // ToProtoMint converts a currency MetadataRecord into a proto Mint object with
 // live launchpad data (supply, price, market cap) injected from the provider's
 // cached reserve state.
-func (m *MintDataProvider) ToProtoMint(ctx context.Context, metadataRecord *currency.MetadataRecord) (*currencypb.Mint, error) {
+func (m *MintDataProvider) ToProtoMint(
+	ctx context.Context,
+	metadataRecord *currency.MetadataRecord,
+	includeLiveReserveState, includeLiveHolderMetrics bool,
+) (*currencypb.Mint, error) {
 	mint, err := common.NewAccountFromPublicKeyString(metadataRecord.Mint)
 	if err != nil {
 		return nil, err
@@ -227,14 +231,18 @@ func (m *MintDataProvider) ToProtoMint(ctx context.Context, metadataRecord *curr
 		}
 	}
 
-	err = m.InjectLiveLaunchpadData(ctx, protoMint)
-	if err != nil {
-		return nil, err
+	if includeLiveReserveState {
+		err = m.InjectLiveLaunchpadData(ctx, protoMint)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	err = m.InjectLiveHolderMetrics(ctx, protoMint)
-	if err != nil {
-		return nil, err
+	if includeLiveHolderMetrics {
+		err = m.InjectLiveHolderMetrics(ctx, protoMint)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return protoMint, nil
@@ -342,7 +350,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, currency.ErrNotFound
 		}
 
-		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord)
+		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord, true, false)
 		if err != nil {
 			return nil, err
 		}
