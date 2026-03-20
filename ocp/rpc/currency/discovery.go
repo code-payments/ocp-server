@@ -73,15 +73,8 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 		if protoMint.LaunchpadMetadata.SupplyFromBonding < minDiscoverySupply {
 			continue
 		}
-
-		protoMint.HolderMetrics = &currencypb.HolderMetrics{
-			CurrentHolders: 0,
-			HolderDeltas: []*currencypb.HolderMetrics_DeltaHolders{
-				{
-					Range: currencypb.PredefinedRange_LAST_WEEK,
-					Delta: 0,
-				},
-			},
+		if protoMint.HolderMetrics.CurrentHolders == 0 {
+			continue
 		}
 
 		protoMints = append(protoMints, protoMint)
@@ -96,7 +89,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	}
 
 	sort.Slice(protoMints, func(i, j int) bool {
-		return protoMints[i].LaunchpadMetadata.SupplyFromBonding > protoMints[j].LaunchpadMetadata.SupplyFromBonding
+		return protoMints[i].HolderMetrics.CurrentHolders > protoMints[j].HolderMetrics.CurrentHolders
 	})
 
 	if len(protoMints) > maxDiscoveredCurrencies {
