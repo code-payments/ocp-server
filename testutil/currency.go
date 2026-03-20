@@ -85,5 +85,12 @@ func SetupLaunchpadCurrency(t *testing.T, data ocp_data.Provider) *common.Accoun
 	}
 	require.NoError(t, data.PutLiveCurrencyReserve(t.Context(), reserveRecord))
 
+	holderCountRecord := &currency.HolderCountRecord{
+		Mint:        vmConfig.Mint.PublicKey().ToBase58(),
+		HolderCount: 32,
+		Time:        time.Now(),
+	}
+	require.NoError(t, data.PutLiveCurrencyHolderCount(t.Context(), holderCountRecord))
+
 	return vmConfig.Mint
 }

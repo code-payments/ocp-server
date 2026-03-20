@@ -37,6 +37,13 @@ type LiveReserveStateData struct {
 	SignedState       *currencypb.VerifiedLaunchpadCurrencyReserveState
 }
 
+// LiveHolderCountData represents live holder count data for a currency
+type LiveHolderCountData struct {
+	Mint           *common.Account
+	CurrentHolders uint64
+	LastWeekDelta  int64
+}
+
 type cachedProtoMint struct {
 	mint          *currencypb.Mint
 	lastUpdatedAt time.Time
@@ -56,6 +63,7 @@ type MintDataProvider struct {
 	stateMu           sync.RWMutex
 	exchangeRates     *LiveExchangeRateData
 	launchpadReserves map[string]*LiveReserveStateData
+	holderCounts      map[string]*LiveHolderCountData
 
 	streamsMu sync.RWMutex
 	streams   map[string]*LiveMintDataStream
@@ -64,10 +72,20 @@ type MintDataProvider struct {
 	exchangeRatesReady     chan struct{}
 	exchangeRatesReadyOnce sync.Once
 
+	reserveStatesReady     chan struct{}
+	reserveStatesReadyOnce sync.Once
+
+	holderCountsReady     chan struct{}
+	holderCountsReadyOnce sync.Once
+
 	reserveReadyMu    sync.Mutex
 	reserveReadyChans map[string]chan struct{}
 
-	reservePollTrigger chan struct{}
+	holderCountReadyMu    sync.Mutex
+	holderCountReadyChans map[string]chan struct{}
+
+	reservePollTrigger     chan struct{}
+	holderCountPollTrigger chan struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -89,10 +107,15 @@ func NewMintDataProvider(
 		reserveStatePollInterval: reserveStatePollInterval,
 		protoMintsCache:          make(map[string]*cachedProtoMint),
 		launchpadReserves:        make(map[string]*LiveReserveStateData),
+		holderCounts:             make(map[string]*LiveHolderCountData),
 		streams:                  make(map[string]*LiveMintDataStream),
 		exchangeRatesReady:       make(chan struct{}),
+		reserveStatesReady:       make(chan struct{}),
+		holderCountsReady:        make(chan struct{}),
 		reserveReadyChans:        make(map[string]chan struct{}),
+		holderCountReadyChans:    make(map[string]chan struct{}),
 		reservePollTrigger:       make(chan struct{}, 1),
+		holderCountPollTrigger:   make(chan struct{}, 1),
 		ctx:                      ctx,
 		cancel:                   cancel,
 	}
@@ -102,6 +125,7 @@ func NewMintDataProvider(
 func (m *MintDataProvider) Start(ctx context.Context) error {
 	go m.pollExchangeRates(ctx)
 	go m.pollReserveState(ctx)
+	go m.pollHolderCounts(ctx)
 	return nil
 }
 
@@ -124,7 +148,11 @@ func (m *MintDataProvider) Stop() {
 // ToProtoMint converts a currency MetadataRecord into a proto Mint object with
 // live launchpad data (supply, price, market cap) injected from the provider's
 // cached reserve state.
-func (m *MintDataProvider) ToProtoMint(ctx context.Context, metadataRecord *currency.MetadataRecord) (*currencypb.Mint, error) {
+func (m *MintDataProvider) ToProtoMint(
+	ctx context.Context,
+	metadataRecord *currency.MetadataRecord,
+	includeLiveReserveState, includeLiveHolderMetrics bool,
+) (*currencypb.Mint, error) {
 	mint, err := common.NewAccountFromPublicKeyString(metadataRecord.Mint)
 	if err != nil {
 		return nil, err
@@ -170,11 +198,6 @@ func (m *MintDataProvider) ToProtoMint(ctx context.Context, metadataRecord *curr
 		CreatedAt: timestamppb.New(metadataRecord.CreatedAt),
 	}
 
-	err = m.InjectLiveLaunchpadData(ctx, protoMint)
-	if err != nil {
-		return nil, err
-	}
-
 	billColors := metadataRecord.BillColors
 	if len(billColors) == 0 {
 		billColors = config.DefaultBillColors
@@ -216,6 +239,20 @@ func (m *MintDataProvider) ToProtoMint(ctx context.Context, metadataRecord *curr
 		}
 	}
 
+	if includeLiveReserveState {
+		err = m.InjectLiveLaunchpadData(ctx, protoMint)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if includeLiveHolderMetrics {
+		err = m.InjectLiveHolderMetrics(ctx, protoMint)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return protoMint, nil
 }
 
@@ -235,15 +272,53 @@ func (m *MintDataProvider) InjectLiveLaunchpadData(ctx context.Context, protoMin
 	if err != nil {
 		return err
 	}
-	supplyFromBonding := liveReserveState.SupplyFromBonding
 
+	SetLaunchpadReserveData(protoMint, liveReserveState)
+	return nil
+}
+
+// SetLaunchpadReserveData applies reserve state data to a proto Mint's
+// LaunchpadMetadata without fetching from the provider.
+func SetLaunchpadReserveData(protoMint *currencypb.Mint, reserveState *LiveReserveStateData) {
+	supplyFromBonding := reserveState.SupplyFromBonding
 	spotPrice, _ := currencycreator.EstimateCurrentPrice(supplyFromBonding).Float64()
 
 	protoMint.LaunchpadMetadata.SupplyFromBonding = supplyFromBonding
 	protoMint.LaunchpadMetadata.Price = spotPrice
 	protoMint.LaunchpadMetadata.MarketCap = CalculateMarketCap(supplyFromBonding, 1.0)
+}
 
+func (m *MintDataProvider) InjectLiveHolderMetrics(ctx context.Context, protoMint *currencypb.Mint) error {
+	if protoMint.LaunchpadMetadata == nil {
+		return errors.New("only launchpad currencies supported for holder count")
+	}
+
+	mint, err := common.NewAccountFromProto(protoMint.Address)
+	if err != nil {
+		return errors.New("invalid proto mint")
+	}
+
+	holderData, err := m.GetLiveHolderCount(ctx, mint)
+	if err != nil {
+		return err
+	}
+
+	SetHolderMetrics(protoMint, holderData)
 	return nil
+}
+
+// SetHolderMetrics applies holder count data to a proto Mint without fetching
+// from the provider.
+func SetHolderMetrics(protoMint *currencypb.Mint, holderData *LiveHolderCountData) {
+	protoMint.HolderMetrics = &currencypb.HolderMetrics{
+		CurrentHolders: holderData.CurrentHolders,
+		HolderDeltas: []*currencypb.HolderMetrics_DeltaHolders{
+			{
+				Range: currencypb.PredefinedRange_LAST_WEEK,
+				Delta: holderData.LastWeekDelta,
+			},
+		},
+	}
 }
 
 // GetProtoMint gets a proto Mint object. Static and infrequently updated metadata is
@@ -293,7 +368,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, currency.ErrNotFound
 		}
 
-		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord)
+		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord, true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -372,17 +447,61 @@ func (m *MintDataProvider) GetLiveExchangeRates(ctx context.Context) (*LiveExcha
 	return m.exchangeRates, nil
 }
 
-// GetLiveReserveState returns a current pre-signed live launchpad currency reserve state for a mint
-func (m *MintDataProvider) GetLiveReserveState(ctx context.Context, mint *common.Account) (*LiveReserveStateData, error) {
-	isSupported, err := common.IsSupportedMint(ctx, m.data, mint)
-	if err != nil {
+// GetAllCachedReserveStates returns a snapshot of all currently cached reserve
+// states keyed by mint address. It blocks until the first successful poll has
+// completed.
+func (m *MintDataProvider) GetAllCachedReserveStates(ctx context.Context) (map[string]*LiveReserveStateData, error) {
+	if err := m.waitForReserveStates(ctx); err != nil {
 		return nil, err
 	}
-	if !isSupported {
-		return nil, common.ErrUnsupportedMint
+
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	out := make(map[string]*LiveReserveStateData, len(m.launchpadReserves))
+	for k, v := range m.launchpadReserves {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// GetAllCachedHolderCounts returns a snapshot of all currently cached holder
+// counts keyed by mint address. It blocks until the first successful poll has
+// completed.
+func (m *MintDataProvider) GetAllCachedHolderCounts(ctx context.Context) (map[string]*LiveHolderCountData, error) {
+	if err := m.waitForHolderCounts(ctx); err != nil {
+		return nil, err
 	}
 
-	err = m.waitForReserveState(ctx, mint)
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	out := make(map[string]*LiveHolderCountData, len(m.holderCounts))
+	for k, v := range m.holderCounts {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// GetLiveReserveState returns a current pre-signed live launchpad currency reserve state for a mint
+func (m *MintDataProvider) GetLiveReserveState(ctx context.Context, mint *common.Account) (*LiveReserveStateData, error) {
+	m.stateMu.RLock()
+	data, ok := m.launchpadReserves[mint.PublicKey().ToBase58()]
+	m.stateMu.RUnlock()
+
+	if !ok {
+		isSupported, err := common.IsSupportedMint(ctx, m.data, mint)
+		if err != nil {
+			return nil, err
+		}
+		if !isSupported {
+			return nil, common.ErrUnsupportedMint
+		}
+	} else {
+		return data, nil
+	}
+
+	err := m.waitForReserveState(ctx, mint)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +509,7 @@ func (m *MintDataProvider) GetLiveReserveState(ctx context.Context, mint *common
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 
-	data, ok := m.launchpadReserves[mint.PublicKey().ToBase58()]
+	data, ok = m.launchpadReserves[mint.PublicKey().ToBase58()]
 	if !ok {
 		return nil, errors.New("not found")
 	}
@@ -458,6 +577,36 @@ func (m *MintDataProvider) markExchangeRatesReady() {
 	})
 }
 
+func (m *MintDataProvider) waitForReserveStates(ctx context.Context) error {
+	select {
+	case <-m.reserveStatesReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *MintDataProvider) markReserveStatesReady() {
+	m.reserveStatesReadyOnce.Do(func() {
+		close(m.reserveStatesReady)
+	})
+}
+
+func (m *MintDataProvider) waitForHolderCounts(ctx context.Context) error {
+	select {
+	case <-m.holderCountsReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *MintDataProvider) markHolderCountsReady() {
+	m.holderCountsReadyOnce.Do(func() {
+		close(m.holderCountsReady)
+	})
+}
+
 func (m *MintDataProvider) markReserveStateReady(mint *common.Account) {
 	m.reserveReadyMu.Lock()
 	defer m.reserveReadyMu.Unlock()
@@ -466,6 +615,103 @@ func (m *MintDataProvider) markReserveStateReady(mint *common.Account) {
 	if !ok {
 		ch = make(chan struct{})
 		m.reserveReadyChans[mint.PublicKey().ToBase58()] = ch
+	}
+
+	select {
+	case <-ch:
+		// Already closed
+	default:
+		close(ch)
+	}
+}
+
+// GetLiveHolderCount returns live holder count data for a mint, blocking until
+// the poller has retrieved it.
+func (m *MintDataProvider) GetLiveHolderCount(ctx context.Context, mint *common.Account) (*LiveHolderCountData, error) {
+	m.stateMu.RLock()
+	data, ok := m.holderCounts[mint.PublicKey().ToBase58()]
+	m.stateMu.RUnlock()
+
+	if !ok {
+		isSupported, err := common.IsSupportedMint(ctx, m.data, mint)
+		if err != nil {
+			return nil, err
+		}
+		if !isSupported {
+			return nil, common.ErrUnsupportedMint
+		}
+	} else {
+		return data, nil
+	}
+
+	err := m.waitForHolderCount(ctx, mint)
+	if err != nil {
+		return nil, err
+	}
+
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	data, ok = m.holderCounts[mint.PublicKey().ToBase58()]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return data, nil
+}
+
+// waitForHolderCount blocks until holder count data for a specific mint is
+// available, the context is cancelled, or the timeout is exceeded. Triggers
+// an immediate poll if the mint isn't cached yet.
+func (m *MintDataProvider) waitForHolderCount(ctx context.Context, mint *common.Account) error {
+	ch := m.getOrCreateHolderCountReadyChan(mint)
+
+	select {
+	case <-ch:
+		return nil
+	default:
+		m.triggerHolderCountPoll()
+	}
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(2 * m.reserveStatePollInterval):
+		return errors.New("timed out waiting for holder count")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// triggerHolderCountPoll sends a non-blocking signal to the holder count poll
+// loop to run immediately.
+func (m *MintDataProvider) triggerHolderCountPoll() {
+	select {
+	case m.holderCountPollTrigger <- struct{}{}:
+	default:
+		// Already triggered, no need to queue another
+	}
+}
+
+func (m *MintDataProvider) getOrCreateHolderCountReadyChan(mint *common.Account) chan struct{} {
+	m.holderCountReadyMu.Lock()
+	defer m.holderCountReadyMu.Unlock()
+
+	ch, ok := m.holderCountReadyChans[mint.PublicKey().ToBase58()]
+	if !ok {
+		ch = make(chan struct{})
+		m.holderCountReadyChans[mint.PublicKey().ToBase58()] = ch
+	}
+	return ch
+}
+
+func (m *MintDataProvider) markHolderCountReady(mint *common.Account) {
+	m.holderCountReadyMu.Lock()
+	defer m.holderCountReadyMu.Unlock()
+
+	ch, ok := m.holderCountReadyChans[mint.PublicKey().ToBase58()]
+	if !ok {
+		ch = make(chan struct{})
+		m.holderCountReadyChans[mint.PublicKey().ToBase58()] = ch
 	}
 
 	select {
@@ -587,9 +833,86 @@ func (m *MintDataProvider) fetchAndUpdateReserveStates(ctx context.Context) {
 		updatedStates = append(updatedStates, stateData)
 	}
 
+	m.markReserveStatesReady()
+
 	if len(updatedStates) > 0 {
 		m.notifyReserveStates(updatedStates)
 	}
+}
+
+func (m *MintDataProvider) pollHolderCounts(ctx context.Context) {
+	// Initial poll immediately
+	m.fetchAndUpdateHolderCounts(ctx)
+
+	ticker := time.NewTicker(m.reserveStatePollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.fetchAndUpdateHolderCounts(ctx)
+		case <-m.holderCountPollTrigger:
+			m.fetchAndUpdateHolderCounts(ctx)
+		}
+	}
+}
+
+func (m *MintDataProvider) fetchAndUpdateHolderCounts(ctx context.Context) {
+	liveCounts, err := m.data.GetAllLiveCurrencyHolderCounts(ctx)
+	if err == currency.ErrNotFound {
+		return
+	}
+	if err != nil {
+		m.log.With(zap.Error(err)).Warn("failed to fetch all live currency holder counts")
+		return
+	}
+
+	var includeWeeklyDeltas bool
+	oneWeekAgo := time.Now().Add(-7 * 24 * time.Hour)
+	historicalCounts, err := m.data.GetAllCurrencyHolderCountsAtTime(ctx, oneWeekAgo)
+	if err != nil && err != currency.ErrNotFound {
+		m.log.With(zap.Error(err)).Warn("failed to fetch historical holder counts for weekly delta")
+	} else {
+		includeWeeklyDeltas = true
+	}
+
+	for mintAddr, record := range liveCounts {
+		mint, err := common.NewAccountFromPublicKeyString(mintAddr)
+		if err != nil {
+			m.log.With(
+				zap.Error(err),
+				zap.String("mint", mintAddr),
+			).Warn("failed to parse mint address")
+			continue
+		}
+
+		var pastHolderCount uint64
+		if historicalCounts != nil {
+			if pastRecord, ok := historicalCounts[mintAddr]; ok {
+				pastHolderCount = pastRecord.HolderCount
+			}
+		}
+
+		holderData := &LiveHolderCountData{
+			Mint:           mint,
+			CurrentHolders: record.HolderCount,
+		}
+		if includeWeeklyDeltas {
+			holderData.LastWeekDelta = int64(record.HolderCount) - int64(pastHolderCount)
+		}
+
+		m.stateMu.Lock()
+		m.holderCounts[mintAddr] = holderData
+		m.stateMu.Unlock()
+
+		m.markHolderCountReady(mint)
+	}
+
+	m.markHolderCountsReady()
 }
 
 func (m *MintDataProvider) notifyExchangeRates() {

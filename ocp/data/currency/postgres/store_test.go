@@ -89,6 +89,23 @@ const (
 		slot BIGINT NOT NULL,
 		last_updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 	);
+	CREATE TABLE ocp__core_currencyholdercount (
+		id serial NOT NULL PRIMARY KEY,
+
+		for_date VARCHAR(10) NOT NULL,
+		for_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+		mint TEXT NOT NULL,
+		holder_count BIGINT NOT NULL,
+
+		CONSTRAINT ocp__core_currencyholdercount__uniq__timestamp__and__mint UNIQUE (for_timestamp, mint)
+	);
+	CREATE TABLE ocp__core_currencyholdercount2 (
+		id serial NOT NULL PRIMARY KEY,
+
+		mint TEXT UNIQUE NOT NULL,
+		holder_count BIGINT NOT NULL,
+		last_updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+	);
 	`
 
 	// Used for testing ONLY, the table and migrations are external to this repository
@@ -97,6 +114,8 @@ const (
 		DROP TABLE ocp__core_currencymetadata;
 		DROP TABLE ocp__core_currencyreserve;
 		DROP TABLE ocp__core_currencyreserve2;
+		DROP TABLE ocp__core_currencyholdercount;
+		DROP TABLE ocp__core_currencyholdercount2;
 	`
 )
 

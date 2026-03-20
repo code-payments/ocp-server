@@ -1,0 +1,148 @@
+package holder
+
+import (
+	"context"
+	"time"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
+	"github.com/code-payments/ocp-server/metrics"
+	"github.com/code-payments/ocp-server/ocp/balance"
+	"github.com/code-payments/ocp-server/ocp/common"
+	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/account"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/worker"
+)
+
+const (
+	historicalUpdateTimeInterval = time.Hour
+)
+
+type holderRuntime struct {
+	log  *zap.Logger
+	data ocp_data.Provider
+}
+
+func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+	return &holderRuntime{
+		log:  log,
+		data: data,
+	}
+}
+
+func (p *holderRuntime) Start(runtimeCtx context.Context, interval time.Duration) error {
+	for {
+		start := time.Now()
+
+		func() {
+			p.log.Debug("updating holder counts")
+
+			provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
+			trace := provider.StartTrace("currency_holder_runtime")
+			defer trace.End()
+			tracedCtx := metrics.NewContext(runtimeCtx, trace)
+
+			p.UpdateAllLaunchpadCurrencyHolderCounts(tracedCtx)
+		}()
+
+		delay := max(interval-time.Since(start), 0)
+		select {
+		case <-runtimeCtx.Done():
+			return runtimeCtx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Context) {
+	currencyRecords, err := p.data.GetAllCurrencyMetadataByState(ctx, currency.MetadataStateAvailable)
+	if err != nil {
+		p.log.With(zap.Error(err)).Warn("failed getting all available currencies")
+		return
+	}
+
+	for _, currencyRecord := range currencyRecords {
+		log := p.log.With(zap.String("mint", currencyRecord.Mint))
+
+		holderCount, err := p.countHoldersForMint(ctx, currencyRecord.Mint)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed counting holders for mint")
+			continue
+		}
+
+		now := time.Now()
+
+		err = p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+			Mint:        currencyRecord.Mint,
+			HolderCount: holderCount,
+			Time:        now,
+		})
+		if err != nil && err != currency.ErrStaleHolderState {
+			log.With(zap.Error(err)).Warn("failed updating live holder count")
+			continue
+		}
+
+		var shouldCreateHistoricalRecord bool
+		historicalRecord, err := p.data.GetCurrencyHolderCountAtTime(ctx, currencyRecord.Mint, now)
+		switch err {
+		case nil:
+			shouldCreateHistoricalRecord = time.Since(historicalRecord.Time) >= historicalUpdateTimeInterval
+		case currency.ErrNotFound:
+			shouldCreateHistoricalRecord = true
+		default:
+			log.With(zap.Error(err)).Warn("failed getting historical record")
+			continue
+		}
+
+		if shouldCreateHistoricalRecord {
+			err = p.data.PutHistoricalCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+				Mint:        currencyRecord.Mint,
+				HolderCount: holderCount,
+				Time:        now,
+			})
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed creating historical holder count")
+				continue
+			}
+		}
+	}
+}
+
+func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string) (uint64, error) {
+	accountRecords, err := p.data.GetAccountInfosByMintAndType(ctx, mint, commonpb.AccountType_PRIMARY)
+	if err == account.ErrAccountInfoNotFound {
+		return 0, nil
+	} else if err != nil {
+		return 0, errors.Wrap(err, "error getting primary accounts")
+	}
+
+	if len(accountRecords) == 0 {
+		return 0, nil
+	}
+
+	tokenAccounts := make([]*common.Account, len(accountRecords))
+	for i, record := range accountRecords {
+		tokenAccounts[i], err = common.NewAccountFromPublicKeyString(record.TokenAccount)
+		if err != nil {
+			return 0, errors.Wrap(err, "invalid token account public key")
+		}
+	}
+
+	balances, err := balance.BatchCalculateFromCacheWithTokenAccounts(ctx, p.data, tokenAccounts...)
+	if err != nil {
+		return 0, errors.Wrap(err, "error calculating balances batch")
+	}
+
+	var count uint64
+	for _, bal := range balances {
+		if bal > 0 {
+			count++
+		}
+	}
+
+	return count, nil
+}

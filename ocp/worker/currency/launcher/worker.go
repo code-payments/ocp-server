@@ -351,6 +351,11 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 			return err
 		}
 
-		return p.putInitialReserveState(ctx, currencyMetadataRecord)
+		err = p.putInitialReserveState(ctx, currencyMetadataRecord)
+		if err != nil {
+			return err
+		}
+
+		return p.putInitialHolderCount(ctx, currencyMetadataRecord)
 	})
 }

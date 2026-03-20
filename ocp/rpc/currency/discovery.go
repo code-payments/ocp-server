@@ -10,6 +10,7 @@ import (
 
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 
+	ocp_currency "github.com/code-payments/ocp-server/ocp/currency"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
@@ -30,21 +31,15 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	)
 	ctx := stream.Context()
 
-	var categoryFilterFunc func(mints []*currencypb.Mint) []*currencypb.Mint
+	var categoryFilterFunc func(record *currency.MetadataRecord) bool
 	switch req.Category {
 	case currencypb.DiscoverRequest_POPULAR:
-		categoryFilterFunc = func(mints []*currencypb.Mint) []*currencypb.Mint {
-			return mints
+		categoryFilterFunc = func(record *currency.MetadataRecord) bool {
+			return true
 		}
 	case currencypb.DiscoverRequest_NEW:
-		categoryFilterFunc = func(mints []*currencypb.Mint) []*currencypb.Mint {
-			var res []*currencypb.Mint
-			for _, mint := range mints {
-				if time.Since(mint.CreatedAt.AsTime()) < newDiscoveredCurrenciesAgeLimit {
-					res = append(res, mint)
-				}
-			}
-			return res
+		categoryFilterFunc = func(record *currency.MetadataRecord) bool {
+			return time.Since(record.CreatedAt) < newDiscoveredCurrenciesAgeLimit
 		}
 	default:
 		return status.Error(codes.InvalidArgument, "invalid category")
@@ -60,47 +55,83 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 		return status.Error(codes.Internal, "")
 	}
 
-	var protoMints []*currencypb.Mint
-	for _, record := range metadataRecords {
-		log := log.With(zap.String("mint", record.Mint))
-
-		protoMint, err := s.mintDataProvider.ToProtoMint(ctx, record)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failure converting metadata to proto mint")
-			continue
-		}
-
-		if protoMint.LaunchpadMetadata.SupplyFromBonding < minDiscoverySupply {
-			continue
-		}
-
-		protoMint.HolderMetrics = &currencypb.HolderMetrics{
-			CurrentHolders: 0,
-			HolderDeltas: []*currencypb.HolderMetrics_DeltaHolders{
-				{
-					Range: currencypb.PredefinedRange_LAST_WEEK,
-					Delta: 0,
-				},
-			},
-		}
-
-		protoMints = append(protoMints, protoMint)
+	cachedReserves, err := s.mintDataProvider.GetAllCachedReserveStates(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting cached reserve states")
+		return status.Error(codes.Internal, "")
+	}
+	cachedHolders, err := s.mintDataProvider.GetAllCachedHolderCounts(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting cached holder counts")
+		return status.Error(codes.Internal, "")
 	}
 
-	protoMints = categoryFilterFunc(protoMints)
+	type discoveredMint struct {
+		record       *currency.MetadataRecord
+		reserveState *ocp_currency.LiveReserveStateData
+		holderData   *ocp_currency.LiveHolderCountData
+	}
 
-	if len(protoMints) == 0 {
+	var candidates []*discoveredMint
+	for _, record := range metadataRecords {
+		reserveState, ok := cachedReserves[record.Mint]
+		if !ok || reserveState.SupplyFromBonding < minDiscoverySupply {
+			continue
+		}
+
+		holderData, ok := cachedHolders[record.Mint]
+		if !ok || holderData.CurrentHolders == 0 {
+			continue
+		}
+
+		if !categoryFilterFunc(record) {
+			continue
+		}
+
+		candidates = append(candidates, &discoveredMint{
+			record:       record,
+			reserveState: reserveState,
+			holderData:   holderData,
+		})
+	}
+
+	if len(candidates) == 0 {
 		return stream.Send(&currencypb.DiscoverResponse{
 			Result: currencypb.DiscoverResponse_NOT_FOUND,
 		})
 	}
 
-	sort.Slice(protoMints, func(i, j int) bool {
-		return protoMints[i].LaunchpadMetadata.SupplyFromBonding > protoMints[j].LaunchpadMetadata.SupplyFromBonding
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].holderData.CurrentHolders == candidates[j].holderData.CurrentHolders {
+			return candidates[i].reserveState.SupplyFromBonding > candidates[j].reserveState.SupplyFromBonding
+		}
+		return candidates[i].holderData.CurrentHolders > candidates[j].holderData.CurrentHolders
 	})
 
-	if len(protoMints) > maxDiscoveredCurrencies {
-		protoMints = protoMints[:maxDiscoveredCurrencies]
+	if len(candidates) > maxDiscoveredCurrencies {
+		candidates = candidates[:maxDiscoveredCurrencies]
+	}
+
+	var protoMints []*currencypb.Mint
+	for _, candidate := range candidates {
+		log := log.With(zap.String("mint", candidate.record.Mint))
+
+		protoMint, err := s.mintDataProvider.ToProtoMint(ctx, candidate.record, false, false)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure converting metadata to proto mint")
+			continue
+		}
+
+		ocp_currency.SetLaunchpadReserveData(protoMint, candidate.reserveState)
+		ocp_currency.SetHolderMetrics(protoMint, candidate.holderData)
+
+		protoMints = append(protoMints, protoMint)
+	}
+
+	if len(protoMints) == 0 {
+		return stream.Send(&currencypb.DiscoverResponse{
+			Result: currencypb.DiscoverResponse_NOT_FOUND,
+		})
 	}
 
 	return stream.Send(&currencypb.DiscoverResponse{

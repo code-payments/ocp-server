@@ -148,6 +148,12 @@ type DatabaseData interface {
 	PutLiveCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
 	GetLiveCurrencyReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error)
 	GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error)
+	PutHistoricalCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error
+	GetCurrencyHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error)
+	GetAllCurrencyHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error)
+	PutLiveCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error
+	GetLiveCurrencyHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error)
+	GetAllLiveCurrencyHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error)
 
 	// Deposits
 	// --------------------------------------------------------------------------------
@@ -584,6 +590,24 @@ func (dp *DatabaseProvider) GetLiveCurrencyReserve(ctx context.Context, mint str
 }
 func (dp *DatabaseProvider) GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error) {
 	return dp.currencies.GetAllLiveReserves(ctx)
+}
+func (dp *DatabaseProvider) PutHistoricalCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error {
+	return dp.currencies.PutHistoricalHolderCountRecord(ctx, record)
+}
+func (dp *DatabaseProvider) GetCurrencyHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error) {
+	return dp.currencies.GetHolderCountAtTime(ctx, mint, t)
+}
+func (dp *DatabaseProvider) GetAllCurrencyHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error) {
+	return dp.currencies.GetAllHolderCountsAtTime(ctx, t)
+}
+func (dp *DatabaseProvider) PutLiveCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error {
+	return dp.currencies.PutLiveHolderCountRecord(ctx, record)
+}
+func (dp *DatabaseProvider) GetLiveCurrencyHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error) {
+	return dp.currencies.GetLiveHolderCount(ctx, mint)
+}
+func (dp *DatabaseProvider) GetAllLiveCurrencyHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error) {
+	return dp.currencies.GetAllLiveHolderCounts(ctx)
 }
 
 // Deposits
