@@ -777,6 +777,15 @@ func (m *MintDataProvider) fetchAndUpdateHolderCounts(ctx context.Context) {
 		return
 	}
 
+	var includeWeeklyDeltas bool
+	oneWeekAgo := time.Now().Add(-7 * 24 * time.Hour)
+	historicalCounts, err := m.data.GetAllCurrencyHolderCountsAtTime(ctx, oneWeekAgo)
+	if err != nil && err != currency.ErrNotFound {
+		m.log.With(zap.Error(err)).Warn("failed to fetch historical holder counts for weekly delta")
+	} else {
+		includeWeeklyDeltas = true
+	}
+
 	for mintAddr, record := range liveCounts {
 		mint, err := common.NewAccountFromPublicKeyString(mintAddr)
 		if err != nil {
@@ -787,10 +796,19 @@ func (m *MintDataProvider) fetchAndUpdateHolderCounts(ctx context.Context) {
 			continue
 		}
 
+		var pastHolderCount uint64
+		if historicalCounts != nil {
+			if pastRecord, ok := historicalCounts[mintAddr]; ok {
+				pastHolderCount = pastRecord.HolderCount
+			}
+		}
+
 		holderData := &LiveHolderCountData{
 			Mint:           mint,
 			CurrentHolders: record.HolderCount,
-			LastWeekDelta:  0,
+		}
+		if includeWeeklyDeltas {
+			holderData.LastWeekDelta = int64(record.HolderCount) - int64(pastHolderCount)
 		}
 
 		m.stateMu.Lock()

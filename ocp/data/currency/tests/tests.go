@@ -29,6 +29,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testLiveReserveRoundTrip,
 		testGetAllLiveReserves,
 		testHolderCountRoundTrip,
+		testGetAllHolderCountsAtTime,
 		testLiveHolderCountRoundTrip,
 		testGetAllLiveHolderCounts,
 	} {
@@ -998,6 +999,48 @@ func testHolderCountRoundTrip(t *testing.T, s currency.Store) {
 	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
 	actual, err = s.GetHolderCountAtTime(context.Background(), "mint", tomorrow)
 	assert.Nil(t, actual)
+	assert.Equal(t, currency.ErrNotFound, err)
+}
+
+func testGetAllHolderCountsAtTime(t *testing.T, s currency.Store) {
+	now := time.Date(2021, 01, 29, 13, 0, 5, 0, time.UTC)
+
+	// No records should exist initially
+	_, err := s.GetAllHolderCountsAtTime(context.Background(), now)
+	assert.Equal(t, currency.ErrNotFound, err)
+
+	// Insert holder counts for two mints
+	record1 := &currency.HolderCountRecord{
+		Mint:        "mint1",
+		HolderCount: 42,
+		Time:        now,
+	}
+	require.NoError(t, s.PutHistoricalHolderCountRecord(context.Background(), record1))
+
+	record2 := &currency.HolderCountRecord{
+		Mint:        "mint2",
+		HolderCount: 100,
+		Time:        now,
+	}
+	require.NoError(t, s.PutHistoricalHolderCountRecord(context.Background(), record2))
+
+	// Should return both records at exact time
+	result, err := s.GetAllHolderCountsAtTime(context.Background(), now)
+	require.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.EqualValues(t, 42, result["mint1"].HolderCount)
+	assert.EqualValues(t, 100, result["mint2"].HolderCount)
+
+	// Should return both records within same day
+	result, err = s.GetAllHolderCountsAtTime(context.Background(), time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
+	require.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.EqualValues(t, 42, result["mint1"].HolderCount)
+	assert.EqualValues(t, 100, result["mint2"].HolderCount)
+
+	// Day after should be empty
+	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
+	_, err = s.GetAllHolderCountsAtTime(context.Background(), tomorrow)
 	assert.Equal(t, currency.ErrNotFound, err)
 }
 

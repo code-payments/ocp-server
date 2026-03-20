@@ -263,6 +263,21 @@ func (s *store) GetHolderCountAtTime(ctx context.Context, mint string, t time.Ti
 	return fromHistoricalHolderCountModel(model), nil
 }
 
+func (s *store) GetAllHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error) {
+	list, err := dbGetAllHolderCountsByTime(ctx, s.db, t, query.Descending)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*currency.HolderCountRecord, len(list))
+	for _, item := range list {
+		record := fromHistoricalHolderCountModel(item)
+		res[record.Mint] = record
+	}
+
+	return res, nil
+}
+
 func (s *store) PutLiveHolderCountRecord(ctx context.Context, record *currency.HolderCountRecord) error {
 	model := toLiveHolderCountModel(record)
 

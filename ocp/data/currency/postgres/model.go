@@ -653,6 +653,28 @@ func dbGetHolderCountByMintAndTime(ctx context.Context, db *sqlx.DB, mint string
 	return res, pgutil.CheckNoRows(err, currency.ErrNotFound)
 }
 
+func dbGetAllHolderCountsByTime(ctx context.Context, db *sqlx.DB, t time.Time, ordering q.Ordering) ([]*historicalHolderCountModel, error) {
+	query := `SELECT DISTINCT ON (mint) *
+		FROM ` + holderCountTableName + `
+		WHERE for_date = $1 AND for_timestamp <= $2
+		ORDER BY mint, for_timestamp ` + q.FromOrderingWithFallback(ordering, "asc")
+
+	res := []*historicalHolderCountModel{}
+	err := db.SelectContext(ctx, &res, query, t.UTC().Format(dateFormat), t.UTC())
+
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, currency.ErrNotFound)
+	}
+	if res == nil {
+		return nil, currency.ErrNotFound
+	}
+	if len(res) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	return res, nil
+}
+
 func (m *liveHolderCountModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,

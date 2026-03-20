@@ -150,6 +150,7 @@ type DatabaseData interface {
 	GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error)
 	PutHistoricalCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error
 	GetCurrencyHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error)
+	GetAllCurrencyHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error)
 	PutLiveCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error
 	GetLiveCurrencyHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error)
 	GetAllLiveCurrencyHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error)
@@ -595,6 +596,9 @@ func (dp *DatabaseProvider) PutHistoricalCurrencyHolderCount(ctx context.Context
 }
 func (dp *DatabaseProvider) GetCurrencyHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error) {
 	return dp.currencies.GetHolderCountAtTime(ctx, mint, t)
+}
+func (dp *DatabaseProvider) GetAllCurrencyHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error) {
+	return dp.currencies.GetAllHolderCountsAtTime(ctx, t)
 }
 func (dp *DatabaseProvider) PutLiveCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error {
 	return dp.currencies.PutLiveHolderCountRecord(ctx, record)

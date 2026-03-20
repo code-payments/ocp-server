@@ -498,6 +498,28 @@ func (s *store) GetHolderCountAtTime(ctx context.Context, mint string, t time.Ti
 	return results[0].Clone(), nil
 }
 
+func (s *store) GetAllHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sort.Sort(HolderCountByTime(s.historicalHolderCountRecords))
+
+	result := make(map[string]*currency.HolderCountRecord)
+	for _, item := range s.historicalHolderCountRecords {
+		if item.Time.Unix() <= t.Unix() && item.Time.Format(dateFormat) == t.Format(dateFormat) {
+			if _, exists := result[item.Mint]; !exists {
+				result[item.Mint] = item.Clone()
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil, currency.ErrNotFound
+	}
+
+	return result, nil
+}
+
 func (s *store) PutLiveHolderCountRecord(ctx context.Context, data *currency.HolderCountRecord) error {
 	if err := data.Validate(); err != nil {
 		return err

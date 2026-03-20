@@ -123,6 +123,14 @@ type Store interface {
 	// provided Timestamp.
 	GetHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*HolderCountRecord, error)
 
+	// GetAllHolderCountsAtTime gets all holder counts at a specific point in
+	// time. For each mint, the most recent record prior to the requested time
+	// within the same day is returned.
+	//
+	// ErrNotFound is returned if no holder count data was found for the
+	// provided Timestamp.
+	GetAllHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*HolderCountRecord, error)
+
 	// PutLiveHolderCountRecord upserts the latest holder count record for a
 	// currency creator mint. An upsert is only performed if the provided
 	// timestamp is greater than the timestamp currently stored.
