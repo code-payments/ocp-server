@@ -131,6 +131,28 @@ func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.M
 	return nil
 }
 
+func (p *runtime) putInitialHolderCount(ctx context.Context, record *currency.MetadataRecord) error {
+	err := p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+		Mint:        record.Mint,
+		HolderCount: 0,
+		Time:        record.CreatedAt,
+	})
+	if err != nil {
+		return errors.Wrap(err, "error putting initial live holder count")
+	}
+
+	err = p.data.PutHistoricalCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+		Mint:        record.Mint,
+		HolderCount: 0,
+		Time:        record.CreatedAt,
+	})
+	if err != nil {
+		return errors.Wrap(err, "error putting initial historical holder count")
+	}
+
+	return nil
+}
+
 func (p *runtime) validateVmMetadataState(record *vm_metadata.Record, states ...vm_metadata.State) error {
 	if slices.Contains(states, record.State) {
 		return nil
