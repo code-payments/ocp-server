@@ -6,11 +6,11 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
-	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/solana"
 )
 
@@ -112,8 +112,8 @@ func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccoun
 	// todo: Come up with a heurisitc that enables some form of checkpointing, so
 	//       we're not iterating over all records every time.
 	strategies := []Strategy{
-		FundingFromExternalDeposits(ctx, data),
 		NetBalanceFromIntentActions(ctx, data),
+		FundingFromExternalDeposits(ctx, data),
 	}
 
 	balance, err := Calculate(
@@ -338,8 +338,8 @@ func defaultBatchCalculationFromCache(ctx context.Context, data ocp_data.Provide
 	return CalculateBatch(
 		ctx,
 		tokenAccounts,
-		FundingFromExternalDepositsBatch(ctx, data),
 		NetBalanceFromIntentActionsBatch(ctx, data),
+		FundingFromExternalDepositsBatch(ctx, data),
 	)
 }
 
