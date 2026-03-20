@@ -18,6 +18,10 @@ import (
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
 
+const (
+	historicalUpdateTimeInterval = time.Hour
+)
+
 type holderRuntime struct {
 	log  *zap.Logger
 	data ocp_data.Provider
@@ -57,7 +61,7 @@ func (p *holderRuntime) Start(runtimeCtx context.Context, interval time.Duration
 func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Context) {
 	currencyRecords, err := p.data.GetAllCurrencyMetadataByState(ctx, currency.MetadataStateAvailable)
 	if err != nil {
-		p.log.With(zap.Error(err)).Warn("failed getting all mints")
+		p.log.With(zap.Error(err)).Warn("failed getting all available currencies")
 		return
 	}
 
@@ -70,14 +74,40 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 			continue
 		}
 
+		now := time.Now()
+
 		err = p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
 			Mint:        currencyRecord.Mint,
 			HolderCount: holderCount,
-			Time:        time.Now(),
+			Time:        now,
 		})
 		if err != nil && err != currency.ErrStaleHolderState {
 			log.With(zap.Error(err)).Warn("failed updating live holder count")
 			continue
+		}
+
+		var shouldCreateHistoricalRecord bool
+		historicalRecord, err := p.data.GetCurrencyHolderCountAtTime(ctx, currencyRecord.Mint, now)
+		switch err {
+		case nil:
+			shouldCreateHistoricalRecord = time.Since(historicalRecord.Time) >= historicalUpdateTimeInterval
+		case currency.ErrNotFound:
+			shouldCreateHistoricalRecord = true
+		default:
+			log.With(zap.Error(err)).Warn("failed getting historical record")
+			continue
+		}
+
+		if shouldCreateHistoricalRecord {
+			err = p.data.PutHistoricalCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+				Mint:        currencyRecord.Mint,
+				HolderCount: holderCount,
+				Time:        now,
+			})
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed creating historical holder count")
+				continue
+			}
 		}
 	}
 }
