@@ -45,7 +45,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 		return status.Error(codes.InvalidArgument, "invalid category")
 	}
 
-	metadataRecords, err := s.data.GetAllCurrencyMetadataByState(ctx, currency.MetadataStateAvailable)
+	metadataRecords, err := s.mintDataProvider.GetAllCachedCurrencyMetadata(ctx)
 	if err == currency.ErrNotFound {
 		return stream.Send(&currencypb.DiscoverResponse{
 			Result: currencypb.DiscoverResponse_NOT_FOUND,
@@ -53,6 +53,11 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting currency metadata records")
 		return status.Error(codes.Internal, "")
+	}
+	if len(metadataRecords) == 0 {
+		return stream.Send(&currencypb.DiscoverResponse{
+			Result: currencypb.DiscoverResponse_NOT_FOUND,
+		})
 	}
 
 	cachedReserves, err := s.mintDataProvider.GetAllCachedReserveStates(ctx)
@@ -74,6 +79,10 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 
 	var candidates []*discoveredMint
 	for _, record := range metadataRecords {
+		if record.State != currency.MetadataStateAvailable {
+			continue
+		}
+
 		reserveState, ok := cachedReserves[record.Mint]
 		if !ok || reserveState.SupplyFromBonding < minDiscoverySupply {
 			continue
