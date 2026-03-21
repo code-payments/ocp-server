@@ -53,12 +53,15 @@ type MintDataProvider struct {
 	log  *zap.Logger
 	data ocp_data.Provider
 
-	protoMintCacheTTL        time.Duration
-	exchangeRatePollInterval time.Duration
-	reserveStatePollInterval time.Duration
+	protoMintCacheTTL             time.Duration
+	exchangeRatePollInterval      time.Duration
+	launchpadCurrencyPollInterval time.Duration
 
 	protoMintsCacheMu sync.RWMutex
 	protoMintsCache   map[string]*cachedProtoMint
+
+	currencyMetadataMu sync.RWMutex
+	currencyMetadata   map[string]*currency.MetadataRecord
 
 	stateMu           sync.RWMutex
 	exchangeRates     *LiveExchangeRateData
@@ -78,6 +81,9 @@ type MintDataProvider struct {
 	holderCountsReady     chan struct{}
 	holderCountsReadyOnce sync.Once
 
+	currencyMetadataReady     chan struct{}
+	currencyMetadataReadyOnce sync.Once
+
 	reserveReadyMu    sync.Mutex
 	reserveReadyChans map[string]chan struct{}
 
@@ -96,33 +102,36 @@ func NewMintDataProvider(
 	data ocp_data.Provider,
 	protoMintCacheTTL,
 	exchangeRatePollInterval,
-	reserveStatePollInterval time.Duration,
+	launchpadCurrencyPollInterval time.Duration,
 ) *MintDataProvider {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &MintDataProvider{
-		log:                      log,
-		data:                     data,
-		protoMintCacheTTL:        protoMintCacheTTL,
-		exchangeRatePollInterval: exchangeRatePollInterval,
-		reserveStatePollInterval: reserveStatePollInterval,
-		protoMintsCache:          make(map[string]*cachedProtoMint),
-		launchpadReserves:        make(map[string]*LiveReserveStateData),
-		holderCounts:             make(map[string]*LiveHolderCountData),
-		streams:                  make(map[string]*LiveMintDataStream),
-		exchangeRatesReady:       make(chan struct{}),
-		reserveStatesReady:       make(chan struct{}),
-		holderCountsReady:        make(chan struct{}),
-		reserveReadyChans:        make(map[string]chan struct{}),
-		holderCountReadyChans:    make(map[string]chan struct{}),
-		reservePollTrigger:       make(chan struct{}, 1),
-		holderCountPollTrigger:   make(chan struct{}, 1),
-		ctx:                      ctx,
-		cancel:                   cancel,
+		log:                           log,
+		data:                          data,
+		protoMintCacheTTL:             protoMintCacheTTL,
+		exchangeRatePollInterval:      exchangeRatePollInterval,
+		launchpadCurrencyPollInterval: launchpadCurrencyPollInterval,
+		protoMintsCache:               make(map[string]*cachedProtoMint),
+		currencyMetadata:              make(map[string]*currency.MetadataRecord),
+		launchpadReserves:             make(map[string]*LiveReserveStateData),
+		holderCounts:                  make(map[string]*LiveHolderCountData),
+		streams:                       make(map[string]*LiveMintDataStream),
+		exchangeRatesReady:            make(chan struct{}),
+		reserveStatesReady:            make(chan struct{}),
+		holderCountsReady:             make(chan struct{}),
+		currencyMetadataReady:         make(chan struct{}),
+		reserveReadyChans:             make(map[string]chan struct{}),
+		holderCountReadyChans:         make(map[string]chan struct{}),
+		reservePollTrigger:            make(chan struct{}, 1),
+		holderCountPollTrigger:        make(chan struct{}, 1),
+		ctx:                           ctx,
+		cancel:                        cancel,
 	}
 }
 
 // Start begins the polling goroutines for exchange rates and reserve state
 func (m *MintDataProvider) Start(ctx context.Context) error {
+	go m.pollCurrencyMetadata(ctx)
 	go m.pollExchangeRates(ctx)
 	go m.pollReserveState(ctx)
 	go m.pollHolderCounts(ctx)
@@ -360,10 +369,18 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			CreatedAt: timestamppb.New(time.Time{}),
 		}
 	default:
-		metadataRecord, err := m.data.GetCurrencyMetadata(ctx, mint.PublicKey().ToBase58())
-		if err == currency.ErrNotFound {
-			return nil, err
+		var err error
+		metadataRecord, ok := m.getCachedCurrencyMetadata(mint)
+		if !ok {
+			metadataRecord, err = m.data.GetCurrencyMetadata(ctx, mint.PublicKey().ToBase58())
+			if err == currency.ErrNotFound {
+				return nil, err
+			}
+			if err != nil {
+				return nil, err
+			}
 		}
+
 		if metadataRecord.State != currency.MetadataStateAvailable {
 			return nil, currency.ErrNotFound
 		}
@@ -542,7 +559,7 @@ func (m *MintDataProvider) waitForReserveState(ctx context.Context, mint *common
 	select {
 	case <-ch:
 		return nil
-	case <-time.After(2 * m.reserveStatePollInterval):
+	case <-time.After(2 * m.launchpadCurrencyPollInterval):
 		return errors.New("timed out waiting for reserve state")
 	case <-ctx.Done():
 		return ctx.Err()
@@ -675,7 +692,7 @@ func (m *MintDataProvider) waitForHolderCount(ctx context.Context, mint *common.
 	select {
 	case <-ch:
 		return nil
-	case <-time.After(2 * m.reserveStatePollInterval):
+	case <-time.After(2 * m.launchpadCurrencyPollInterval):
 		return errors.New("timed out waiting for holder count")
 	case <-ctx.Done():
 		return ctx.Err()
@@ -720,6 +737,89 @@ func (m *MintDataProvider) markHolderCountReady(mint *common.Account) {
 	default:
 		close(ch)
 	}
+}
+
+func (m *MintDataProvider) getCachedCurrencyMetadata(mint *common.Account) (*currency.MetadataRecord, bool) {
+	m.currencyMetadataMu.RLock()
+	defer m.currencyMetadataMu.RUnlock()
+
+	record, ok := m.currencyMetadata[mint.PublicKey().ToBase58()]
+	return record, ok
+}
+
+// GetAllCachedCurrencyMetadata returns a snapshot of all currently cached
+// currency metadata records keyed by mint address. It blocks until the first
+// successful poll has completed.
+func (m *MintDataProvider) GetAllCachedCurrencyMetadata(ctx context.Context) (map[string]*currency.MetadataRecord, error) {
+	if err := m.waitForCurrencyMetadata(ctx); err != nil {
+		return nil, err
+	}
+
+	m.currencyMetadataMu.RLock()
+	defer m.currencyMetadataMu.RUnlock()
+
+	out := make(map[string]*currency.MetadataRecord, len(m.currencyMetadata))
+	for k, v := range m.currencyMetadata {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (m *MintDataProvider) waitForCurrencyMetadata(ctx context.Context) error {
+	select {
+	case <-m.currencyMetadataReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *MintDataProvider) markCurrencyMetadataReady() {
+	m.currencyMetadataReadyOnce.Do(func() {
+		close(m.currencyMetadataReady)
+	})
+}
+
+func (m *MintDataProvider) pollCurrencyMetadata(ctx context.Context) {
+	// Initial poll immediately
+	m.fetchAndUpdateCurrencyMetadata(ctx)
+
+	ticker := time.NewTicker(m.launchpadCurrencyPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.fetchAndUpdateCurrencyMetadata(ctx)
+		}
+	}
+}
+
+func (m *MintDataProvider) fetchAndUpdateCurrencyMetadata(ctx context.Context) {
+	records, err := m.data.GetAllCurrencyMetadataByState(ctx, currency.MetadataStateAvailable)
+	if err == currency.ErrNotFound {
+		m.markCurrencyMetadataReady()
+		return
+	}
+	if err != nil {
+		m.log.With(zap.Error(err)).Warn("failed to fetch all currency metadata")
+		return
+	}
+
+	updated := make(map[string]*currency.MetadataRecord, len(records))
+	for _, record := range records {
+		updated[record.Mint] = record
+	}
+
+	m.currencyMetadataMu.Lock()
+	m.currencyMetadata = updated
+	m.currencyMetadataMu.Unlock()
+
+	m.markCurrencyMetadataReady()
 }
 
 func (m *MintDataProvider) pollExchangeRates(ctx context.Context) {
@@ -772,7 +872,7 @@ func (m *MintDataProvider) pollReserveState(ctx context.Context) {
 	// Initial poll immediately
 	m.fetchAndUpdateReserveStates(ctx)
 
-	ticker := time.NewTicker(m.reserveStatePollInterval)
+	ticker := time.NewTicker(m.launchpadCurrencyPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -844,7 +944,7 @@ func (m *MintDataProvider) pollHolderCounts(ctx context.Context) {
 	// Initial poll immediately
 	m.fetchAndUpdateHolderCounts(ctx)
 
-	ticker := time.NewTicker(m.reserveStatePollInterval)
+	ticker := time.NewTicker(m.launchpadCurrencyPollInterval)
 	defer ticker.Stop()
 
 	for {
