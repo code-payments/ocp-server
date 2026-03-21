@@ -59,16 +59,16 @@ func (p *holderRuntime) Start(runtimeCtx context.Context, interval time.Duration
 }
 
 func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Context) {
-	currencyRecords, err := p.data.GetAllCurrencyMetadataByState(ctx, currency.MetadataStateAvailable)
+	liveHolderRecordsByMint, err := p.data.GetAllLiveCurrencyHolderCounts(ctx)
 	if err != nil {
 		p.log.With(zap.Error(err)).Warn("failed getting all available currencies")
 		return
 	}
 
-	for _, currencyRecord := range currencyRecords {
-		log := p.log.With(zap.String("mint", currencyRecord.Mint))
+	for mint := range liveHolderRecordsByMint {
+		log := p.log.With(zap.String("mint", mint))
 
-		holderCount, err := p.countHoldersForMint(ctx, currencyRecord.Mint)
+		holderCount, err := p.countHoldersForMint(ctx, mint)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed counting holders for mint")
 			continue
@@ -77,7 +77,7 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 		now := time.Now()
 
 		err = p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
-			Mint:        currencyRecord.Mint,
+			Mint:        mint,
 			HolderCount: holderCount,
 			Time:        now,
 		})
@@ -87,7 +87,7 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 		}
 
 		var shouldCreateHistoricalRecord bool
-		historicalRecord, err := p.data.GetCurrencyHolderCountAtTime(ctx, currencyRecord.Mint, now)
+		historicalRecord, err := p.data.GetCurrencyHolderCountAtTime(ctx, mint, now)
 		switch err {
 		case nil:
 			shouldCreateHistoricalRecord = time.Since(historicalRecord.Time) >= historicalUpdateTimeInterval
@@ -100,7 +100,7 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 
 		if shouldCreateHistoricalRecord {
 			err = p.data.PutHistoricalCurrencyHolderCount(ctx, &currency.HolderCountRecord{
-				Mint:        currencyRecord.Mint,
+				Mint:        mint,
 				HolderCount: holderCount,
 				Time:        now,
 			})
