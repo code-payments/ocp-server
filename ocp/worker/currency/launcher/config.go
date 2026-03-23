@@ -8,12 +8,16 @@ import (
 const (
 	envConfigPrefix = "CURRENCY_LAUNCHER_RUNTIME_"
 
+	SubsidizerConfigEnvName = envConfigPrefix + "SUBSIDIZER"
+	defaultSubsidizer       = "invalid"
+
 	BatchSizeConfigEnvName = envConfigPrefix + "WORKER_BATCH_SIZE"
 	defaultBatchSize       = 100
 )
 
 type conf struct {
-	batchSize config.Uint64
+	subsidizer config.String
+	batchSize  config.Uint64
 }
 
 // ConfigProvider defines how config values are pulled
@@ -23,7 +27,8 @@ type ConfigProvider func() *conf
 func WithEnvConfigs() ConfigProvider {
 	return func() *conf {
 		return &conf{
-			batchSize: env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
+			subsidizer: env.NewStringConfig(SubsidizerConfigEnvName, defaultSubsidizer),
+			batchSize:  env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
 		}
 	}
 }
