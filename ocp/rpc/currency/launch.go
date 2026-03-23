@@ -44,9 +44,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	}
 
 	// Restrict currency launch internally for now
-	if ownerAccount.PublicKey().ToBase58() != s.conf.adminPublicKey.Get(ctx) {
-		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
-	}
+	isDryRun := ownerAccount.PublicKey().ToBase58() != s.conf.adminPublicKey.Get(ctx)
 
 	count, err := s.data.CountCurrencyMints(ctx)
 	if err != nil {
@@ -219,24 +217,26 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		CreatedAt:   creationTs,
 	}
 
-	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := s.data.SaveKey(ctx, &authorityVaultRecord)
-		if err != nil {
-			return err
-		}
+	if !isDryRun {
+		err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+			err := s.data.SaveKey(ctx, &authorityVaultRecord)
+			if err != nil {
+				return err
+			}
 
-		err = s.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
-		if err != nil {
-			return err
-		}
+			err = s.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
+			if err != nil {
+				return err
+			}
 
-		return s.data.SaveVmMetadata(ctx, vmMetadataRecord)
-	})
-	if err == currency.ErrDuplicateCurrency {
-		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_EXISTS}, nil
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failed to save currency and vm metadata")
-		return nil, status.Error(codes.Internal, "")
+			return s.data.SaveVmMetadata(ctx, vmMetadataRecord)
+		})
+		if err == currency.ErrDuplicateCurrency {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_EXISTS}, nil
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("failed to save currency and vm metadata")
+			return nil, status.Error(codes.Internal, "")
+		}
 	}
 
 	return &currencypb.LaunchResponse{
