@@ -4,18 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/code-payments/ocp-server/ocp/data/balance"
 	pgutil "github.com/code-payments/ocp-server/database/postgres"
+	"github.com/code-payments/ocp-server/ocp/data/balance"
 )
 
 const (
 	cachedBalanceVersionTableName = "ocp__core_cachedbalanceversion"
 	openCloseLocksTableName       = "ocp__core_opencloselocks"
 	externalCheckpointTableName   = "ocp__core_externalbalancecheckpoint"
+	accountBalanceTableName       = "ocp__core_accountbalance"
 )
 
 type externalCheckpointModel struct {
@@ -196,4 +199,96 @@ func dbGetExternalCheckpoint(ctx context.Context, db *sqlx.DB, account string) (
 		return nil, pgutil.CheckNoRows(err, balance.ErrCheckpointNotFound)
 	}
 	return res, nil
+}
+
+func dbGetBalance(ctx context.Context, db *sqlx.DB, account string) (*balance.AccountBalanceRecord, error) {
+	var res struct {
+		Quarks       int64   `db:"quarks"`
+		UsdCostBasis float64 `db:"usd_cost_basis"`
+		Version      int64   `db:"version"`
+	}
+
+	query := `SELECT quarks, usd_cost_basis, version FROM ` + accountBalanceTableName + `
+		WHERE token_account = $1`
+
+	err := db.GetContext(ctx, &res, query, account)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, balance.ErrBalanceNotFound)
+	}
+	return &balance.AccountBalanceRecord{
+		Quarks:       uint64(res.Quarks),
+		UsdCostBasis: res.UsdCostBasis,
+		Version:      uint64(res.Version),
+	}, nil
+}
+
+func dbGetBalanceBatch(ctx context.Context, db *sqlx.DB, accounts ...string) (map[string]*balance.AccountBalanceRecord, error) {
+	if len(accounts) == 0 {
+		return make(map[string]*balance.AccountBalanceRecord), nil
+	}
+
+	type row struct {
+		TokenAccount string  `db:"token_account"`
+		Quarks       int64   `db:"quarks"`
+		UsdCostBasis float64 `db:"usd_cost_basis"`
+		Version      int64   `db:"version"`
+	}
+	var rows []row
+
+	individualFilters := make([]string, len(accounts))
+	for i, account := range accounts {
+		individualFilters[i] = fmt.Sprintf("'%s'", account)
+	}
+	accountFilter := strings.Join(individualFilters, ",")
+
+	query := fmt.Sprintf(
+		`SELECT token_account, quarks, usd_cost_basis, version FROM `+accountBalanceTableName+`
+		WHERE token_account IN (%s)`,
+		accountFilter,
+	)
+
+	err := db.SelectContext(ctx, &rows, query)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*balance.AccountBalanceRecord)
+	for _, account := range accounts {
+		res[account] = &balance.AccountBalanceRecord{}
+	}
+	for _, r := range rows {
+		res[r.TokenAccount] = &balance.AccountBalanceRecord{
+			Quarks:       uint64(r.Quarks),
+			UsdCostBasis: r.UsdCostBasis,
+			Version:      uint64(r.Version),
+		}
+	}
+	return res, nil
+}
+
+func dbAdjustBalance(ctx context.Context, db *sqlx.DB, account string, quarks int64, usdCostBasis float64, owner string, mint string, accountType int) error {
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		// Ensure the row exists with a zero balance. DO NOTHING if it already exists.
+		// This is separated from the UPDATE because PostgreSQL evaluates CHECK
+		// constraints on INSERT values before conflict detection, which would
+		// reject negative deltas even when the UPDATE path is valid.
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO `+accountBalanceTableName+` (token_account, owner_account, mint_account, account_type, quarks, usd_cost_basis, updated_at)
+			VALUES ($1, $2, $3, $4, 0, 0, NOW())
+			ON CONFLICT (token_account) DO NOTHING`,
+			account, owner, mint, accountType,
+		)
+		if err != nil {
+			return err
+		}
+
+		// Apply the delta. The CHECK constraint enforces quarks >= 0.
+		_, err = tx.ExecContext(ctx, `
+			UPDATE `+accountBalanceTableName+`
+			SET quarks = quarks + $1, usd_cost_basis = usd_cost_basis + $2, version = version + 1, updated_at = NOW()
+			WHERE token_account = $3`,
+			quarks, usdCostBasis, account,
+		)
+		return pgutil.CheckCheckViolation(err, balance.ErrNegativeBalance)
+	})
 }

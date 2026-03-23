@@ -6,6 +6,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 )
 
@@ -64,4 +66,19 @@ func (s *store) GetExternalCheckpoint(ctx context.Context, account string) (*bal
 		return nil, err
 	}
 	return fromExternalCheckpoingModel(model), nil
+}
+
+// GetBalance implements balance.Store.GetBalance
+func (s *store) GetBalance(ctx context.Context, account string) (*balance.AccountBalanceRecord, error) {
+	return dbGetBalance(ctx, s.db, account)
+}
+
+// GetBalanceBatch implements balance.Store.GetBalanceBatch
+func (s *store) GetBalanceBatch(ctx context.Context, accounts ...string) (map[string]*balance.AccountBalanceRecord, error) {
+	return dbGetBalanceBatch(ctx, s.db, accounts...)
+}
+
+// AdjustBalance implements balance.Store.AdjustBalance
+func (s *store) AdjustBalance(ctx context.Context, account string, quarks int64, usdCostBasis float64, owner string, mint string, accountType commonpb.AccountType) error {
+	return dbAdjustBalance(ctx, s.db, account, quarks, usdCostBasis, owner, mint, int(accountType))
 }

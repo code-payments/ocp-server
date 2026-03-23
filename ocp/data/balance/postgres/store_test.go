@@ -53,6 +53,19 @@ const (
 
 		CONSTRAINT ocp__core_balanceexternalcheckpoint__uniq__token_account UNIQUE (token_account)
 	);
+
+	CREATE TABLE ocp__core_accountbalance (
+		token_account TEXT NOT NULL PRIMARY KEY,
+		owner_account TEXT NOT NULL,
+		mint_account TEXT NOT NULL,
+		account_type SMALLINT NOT NULL,
+		quarks BIGINT NOT NULL DEFAULT 0,
+		usd_cost_basis DOUBLE PRECISION NOT NULL DEFAULT 0,
+		version BIGINT NOT NULL DEFAULT 0,
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+		CONSTRAINT ocp__core_accountbalance__non_negative CHECK (quarks >= 0)
+	);
 	`
 
 	// Used for testing ONLY, the table and migrations are external to this repository
@@ -60,6 +73,7 @@ const (
 		DROP TABLE ocp__core_cachedbalanceversion;
 		DROP TABLE ocp__core_opencloselocks;
 		DROP TABLE ocp__core_externalbalancecheckpoint;
+		DROP TABLE ocp__core_accountbalance;
 	`
 )
 

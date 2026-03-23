@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 )
 
@@ -13,6 +15,7 @@ type store struct {
 	cachedBalanceVersionsByAccount map[string]uint64
 	closedAccounts                 map[string]any
 	externalCheckpointRecords      []*balance.ExternalCheckpointRecord
+	balances                       map[string]balance.AccountBalanceRecord
 	last                           uint64
 }
 
@@ -21,6 +24,7 @@ func New() balance.Store {
 	return &store{
 		cachedBalanceVersionsByAccount: make(map[string]uint64),
 		closedAccounts:                 make(map[string]any),
+		balances:                       make(map[string]balance.AccountBalanceRecord),
 	}
 }
 
@@ -147,6 +151,53 @@ func (s *store) findExternalCheckpointByTokenAccount(account string) *balance.Ex
 	return nil
 }
 
+// GetBalance implements balance.Store.GetBalance
+func (s *store) GetBalance(_ context.Context, account string) (*balance.AccountBalanceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.balances[account]
+	if !ok {
+		return nil, balance.ErrBalanceNotFound
+	}
+	cloned := record.Clone()
+	return &cloned, nil
+}
+
+// GetBalanceBatch implements balance.Store.GetBalanceBatch
+func (s *store) GetBalanceBatch(_ context.Context, accounts ...string) (map[string]*balance.AccountBalanceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res := make(map[string]*balance.AccountBalanceRecord)
+	for _, account := range accounts {
+		if record, ok := s.balances[account]; ok {
+			cloned := record.Clone()
+			res[account] = &cloned
+		} else {
+			res[account] = &balance.AccountBalanceRecord{}
+		}
+	}
+	return res, nil
+}
+
+// AdjustBalance implements balance.Store.AdjustBalance
+func (s *store) AdjustBalance(_ context.Context, account string, quarks int64, usdCostBasis float64, _ string, _ string, _ commonpb.AccountType) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record := s.balances[account]
+	newQuarks := int64(record.Quarks) + quarks
+	if newQuarks < 0 {
+		return balance.ErrNegativeBalance
+	}
+	record.Quarks = uint64(newQuarks)
+	record.UsdCostBasis += usdCostBasis
+	record.Version++
+	s.balances[account] = record
+	return nil
+}
+
 func (s *store) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -154,5 +205,6 @@ func (s *store) reset() {
 	s.cachedBalanceVersionsByAccount = make(map[string]uint64)
 	s.closedAccounts = make(map[string]any)
 	s.externalCheckpointRecords = nil
+	s.balances = make(map[string]balance.AccountBalanceRecord)
 	s.last = 0
 }

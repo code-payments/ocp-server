@@ -3,6 +3,8 @@ package balance
 import (
 	"context"
 	"errors"
+
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 )
 
 var (
@@ -12,6 +14,9 @@ var (
 
 	ErrCheckpointNotFound = errors.New("checkpoint not found")
 	ErrStaleCheckpoint    = errors.New("checkpoint is stale")
+
+	ErrBalanceNotFound = errors.New("balance not found")
+	ErrNegativeBalance = errors.New("balance would go negative")
 )
 
 type Store interface {
@@ -45,4 +50,19 @@ type Store interface {
 	//
 	// ErrCheckpointNotFound is returend if no DB record exists.
 	GetExternalCheckpoint(ctx context.Context, account string) (*ExternalCheckpointRecord, error)
+
+	// GetBalance gets the current balance for a token account from the
+	// materialized balance table.
+	//
+	// ErrBalanceNotFound is returned if no balance record exists.
+	GetBalance(ctx context.Context, account string) (*AccountBalanceRecord, error)
+
+	// GetBalanceBatch gets balances for a batch of token accounts. Accounts
+	// without a balance record are returned with a zero-valued record.
+	GetBalanceBatch(ctx context.Context, accounts ...string) (map[string]*AccountBalanceRecord, error)
+
+	// AdjustBalance adjusts a token account's balance by a relative delta.
+	// The row is created if it doesn't exist. The CHECK constraint on the
+	// underlying table prevents the balance from going negative.
+	AdjustBalance(ctx context.Context, account string, quarks int64, usdCostBasis float64, owner string, mint string, accountType commonpb.AccountType) error
 }
