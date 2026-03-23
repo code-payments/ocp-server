@@ -72,6 +72,10 @@ type Store interface {
 	// CountMints returns the total number of currency creator mints
 	CountMints(ctx context.Context) (uint64, error)
 
+	// IsNameAvailable checks whether a currency name is available for use.
+	// The check is case-insensitive.
+	IsNameAvailable(ctx context.Context, name string) (bool, error)
+
 	// PutHistoricalReserveRecord puts a currency creator mint reserve records into the store.
 	PutHistoricalReserveRecord(ctx context.Context, record *ReserveRecord) error
 

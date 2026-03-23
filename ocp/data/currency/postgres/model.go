@@ -549,6 +549,18 @@ func dbCountMetadataByState(ctx context.Context, db *sqlx.DB, state currency.Met
 	return res, nil
 }
 
+func dbIsNameAvailable(ctx context.Context, db *sqlx.DB, name string) (bool, error) {
+	var count uint64
+	err := db.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM `+metadataTableName+` WHERE LOWER(name) = LOWER($1)`,
+		name,
+	)
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
 func dbGetReserveByMintAndTime(ctx context.Context, db *sqlx.DB, mint string, t time.Time, ordering q.Ordering) (*historicalReserveModel, error) {
 	res := &historicalReserveModel{}
 	err := db.GetContext(ctx, res,

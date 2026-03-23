@@ -331,6 +331,18 @@ func (s *store) CountMints(ctx context.Context) (uint64, error) {
 	return uint64(len(s.metadataRecords)), nil
 }
 
+func (s *store) IsNameAvailable(_ context.Context, name string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, item := range s.metadataRecords {
+		if strings.EqualFold(item.Name, name) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (s *store) PutHistoricalReserveRecord(ctx context.Context, data *currency.ReserveRecord) error {
 	if err := data.Validate(); err != nil {
 		return err
