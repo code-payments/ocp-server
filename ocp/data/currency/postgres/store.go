@@ -149,6 +149,10 @@ func (s *store) CountMetadataByState(ctx context.Context, state currency.Metadat
 	return dbCountMetadataByState(ctx, s.db, state)
 }
 
+func (s *store) IsNameAvailable(ctx context.Context, name string) (bool, error) {
+	return dbIsNameAvailable(ctx, s.db, name)
+}
+
 func (s *store) PutHistoricalReserveRecord(ctx context.Context, record *currency.ReserveRecord) error {
 	model, err := toHistoricalReserveModel(record)
 	if err != nil {

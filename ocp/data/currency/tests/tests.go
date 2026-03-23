@@ -20,6 +20,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testMetadataRoundTrip,
 		testMetadataSaveWithVersioning,
 		testMetadataUniqueNameConstraint,
+		testIsNameAvailable,
 		testGetAllMetadataByState,
 		testGetAllMints,
 		testCountMints,
@@ -280,6 +281,72 @@ func testMetadataUniqueNameConstraint(t *testing.T, s currency.Store) {
 	}
 
 	assert.Equal(t, currency.ErrDuplicateCurrency, s.SaveMetadata(context.Background(), record2))
+}
+
+func testIsNameAvailable(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+
+	// Name should be available when no records exist
+	available, err := s.IsNameAvailable(ctx, "TestCurrency")
+	require.NoError(t, err)
+	assert.True(t, available)
+
+	// Save a metadata record
+	record := &currency.MetadataRecord{
+		Name:        "TestCurrency",
+		Symbol:      "TC",
+		Description: "A test currency",
+		ImageUrl:    "https://example.com/tc.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "nameseed1",
+		Authority: "nameauth1",
+
+		Mint:     "namemint11111111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "nameconfig111111111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "namepool11111111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "namevmint1111111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "namevcore1111111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "namealt111111111111111111111111111111111111111",
+
+		CreatedBy: "namecreator1",
+		CreatedAt: time.Now(),
+	}
+
+	require.NoError(t, s.SaveMetadata(ctx, record))
+
+	// Exact name should not be available
+	available, err = s.IsNameAvailable(ctx, "TestCurrency")
+	require.NoError(t, err)
+	assert.False(t, available)
+
+	// Case-insensitive match should not be available
+	available, err = s.IsNameAvailable(ctx, "testcurrency")
+	require.NoError(t, err)
+	assert.False(t, available)
+
+	available, err = s.IsNameAvailable(ctx, "TESTCURRENCY")
+	require.NoError(t, err)
+	assert.False(t, available)
+
+	// Different name should be available
+	available, err = s.IsNameAvailable(ctx, "OtherCurrency")
+	require.NoError(t, err)
+	assert.True(t, available)
 }
 
 func testGetAllMetadataByState(t *testing.T, s currency.Store) {

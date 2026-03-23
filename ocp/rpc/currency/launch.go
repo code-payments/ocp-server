@@ -57,8 +57,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	}
 
 	name := strings.TrimSpace(req.Name)
-	switch strings.ToLower(name) {
-	case strings.ToLower(common.CoreMintName):
+	if isReservedCurrencyName(name) {
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
@@ -232,7 +231,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			return s.data.SaveVmMetadata(ctx, vmMetadataRecord)
 		})
 		if err == currency.ErrDuplicateCurrency {
-			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_EXISTS}, nil
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_NAME_EXISTS}, nil
 		} else if err != nil {
 			log.With(zap.Error(err)).Warn("failed to save currency and vm metadata")
 			return nil, status.Error(codes.Internal, "")
