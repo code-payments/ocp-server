@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
 	"google.golang.org/grpc/codes"
@@ -28,6 +29,8 @@ const iconSize = 64
 var (
 	jpegMagic = []byte{0xFF, 0xD8, 0xFF}
 	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47}
+
+	errInvalidIcon = errors.New("invalid icon")
 )
 
 func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateIconRequest) (*currencypb.UpdateIconResponse, error) {
@@ -69,23 +72,52 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_DENIED}, nil
 	}
 
+	processed, ext, contentType, err := processIcon(req.Icon)
+	if err == errInvalidIcon {
+		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_INVALID_ICON}, nil
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failed to process icon")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	imageUrl, err := uploadIcon(ctx, s.s3Client, mintAccount, processed, ext, contentType)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to upload icon to s3")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	metadataRecord.ImageUrl = imageUrl
+
+	err = s.data.SaveCurrencyMetadata(ctx, metadataRecord)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to save currency metadata")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_OK}, nil
+}
+
+// processIcon validates, decodes, resizes, and re-encodes raw icon data.
+// It returns the processed image bytes, the file extension ("jpg" or "png"),
+// and the content type. Returns errInvalidIcon if the data is not a valid
+// JPEG or PNG image.
+func processIcon(data []byte) ([]byte, string, string, error) {
 	var contentType string
 	var ext string
-	iconData := req.Icon
 	switch {
-	case len(iconData) >= len(jpegMagic) && bytes.Equal(iconData[:len(jpegMagic)], jpegMagic):
+	case len(data) >= len(jpegMagic) && bytes.Equal(data[:len(jpegMagic)], jpegMagic):
 		contentType = "image/jpeg"
 		ext = "jpg"
-	case len(iconData) >= len(pngMagic) && bytes.Equal(iconData[:len(pngMagic)], pngMagic):
+	case len(data) >= len(pngMagic) && bytes.Equal(data[:len(pngMagic)], pngMagic):
 		contentType = "image/png"
 		ext = "png"
 	default:
-		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_INVALID_ICON}, nil
+		return nil, "", "", errInvalidIcon
 	}
 
-	src, _, err := image.Decode(bytes.NewReader(iconData))
+	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_INVALID_ICON}, nil
+		return nil, "", "", errInvalidIcon
 	}
 
 	if bounds := src.Bounds(); bounds.Dx() != iconSize || bounds.Dy() != iconSize {
@@ -102,33 +134,45 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		err = png.Encode(&encoded, src)
 	}
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failed to encode resized icon")
-		return nil, status.Error(codes.Internal, "")
+		return nil, "", "", errors.Wrap(err, "failed to encode icon")
 	}
 
-	mint := mintAccount.PublicKey().ToBase58()
-	key := fmt.Sprintf("%s/icon.%s", mint, ext)
-	bucket := config.CurrencyAssetsS3BucketName
+	return encoded.Bytes(), ext, contentType, nil
+}
 
-	putReq := s.s3Client.PutObjectRequest(&s3.PutObjectInput{
-		Bucket:      aws.String(bucket),
+// uploadIcon uploads processed icon data to S3 and returns the public URL.
+func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte, ext string, contentType string) (string, error) {
+	key := iconKey(mint, ext)
+
+	putReq := s3Client.PutObjectRequest(&s3.PutObjectInput{
+		Bucket:      aws.String(config.CurrencyAssetsS3BucketName),
 		Key:         aws.String(key),
-		Body:        bytes.NewReader(encoded.Bytes()),
+		Body:        bytes.NewReader(data),
 		ContentType: aws.String(contentType),
 	})
-	_, err = putReq.Send(ctx)
+	_, err := putReq.Send(ctx)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failed to upload icon to s3")
-		return nil, status.Error(codes.Internal, "")
+		return "", errors.Wrap(err, "failed to upload icon to s3")
 	}
 
-	metadataRecord.ImageUrl = fmt.Sprintf("%s/%s", config.CurrencyAssetsBaseUrl, key)
+	return fmt.Sprintf("%s/%s", config.CurrencyAssetsBaseUrl, key), nil
+}
 
-	err = s.data.SaveCurrencyMetadata(ctx, metadataRecord)
+// deleteIcon removes a previously uploaded icon from S3.
+func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, ext string) error {
+	key := iconKey(mint, ext)
+
+	deleteReq := s3Client.DeleteObjectRequest(&s3.DeleteObjectInput{
+		Bucket: aws.String(config.CurrencyAssetsS3BucketName),
+		Key:    aws.String(key),
+	})
+	_, err := deleteReq.Send(ctx)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failed to save currency metadata")
-		return nil, status.Error(codes.Internal, "")
+		return errors.Wrap(err, "failed to delete icon from s3")
 	}
+	return nil
+}
 
-	return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_OK}, nil
+func iconKey(mint *common.Account, ext string) string {
+	return fmt.Sprintf("%s/icon.%s", mint.PublicKey().ToBase58(), ext)
 }
