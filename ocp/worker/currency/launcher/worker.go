@@ -143,7 +143,7 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 	if err != nil {
 		return errors.Wrap(err, "error validating minimum authority funding")
 	} else if !ok {
-		err = fundAuthority(ctx, p.data, authorityAccount, remainingLamports)
+		err = fundAuthority(ctx, p.data, p.subsidizer, authorityAccount, remainingLamports)
 		if err != nil {
 			return errors.Wrap(err, "error funding authority")
 		}

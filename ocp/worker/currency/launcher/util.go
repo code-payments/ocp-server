@@ -212,17 +212,17 @@ func validateMinimumAuthorityFunding(ctx context.Context, data ocp_data.Provider
 	}
 }
 
-func fundAuthority(ctx context.Context, data ocp_data.Provider, account *common.Account, amount uint64) error {
+func fundAuthority(ctx context.Context, data ocp_data.Provider, subsidizer, account *common.Account, amount uint64) error {
 	bh, err := data.GetBlockchainLatestBlockhash(ctx)
 	if err != nil {
 		return errors.Wrap(err, "error getting latest blockhash")
 	}
-	txn, err := transaction_util.MakeSolanaTransferTransaction(common.GetSubsidizer(), account, amount, bh)
+	txn, err := transaction_util.MakeSolanaTransferTransaction(subsidizer, account, amount, bh)
 	if err != nil {
 		return errors.Wrap(err, "error making solana transfer transaction")
 	}
 
-	err = txn.Sign(common.GetSubsidizer().PrivateKey().ToBytes())
+	err = txn.Sign(subsidizer.PrivateKey().ToBytes())
 	if err != nil {
 		return errors.Wrap(err, "error signing transaction")
 	}
