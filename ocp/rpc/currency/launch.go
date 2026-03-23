@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 	"github.com/mr-tron/base58"
 
@@ -77,6 +76,20 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		}
 	}
 
+	description := strings.TrimSpace(req.Description)
+
+	var processedIcon []byte
+	var iconExt, iconContentType string
+	if len(req.Icon) > 0 {
+		processedIcon, iconExt, iconContentType, err = processIcon(req.Icon)
+		if err == errInvalidIcon {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_INVALID_ICON}, nil
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("falied to process icon")
+			return nil, status.Error(codes.Internal, "")
+		}
+	}
+
 	allow, err := s.antispamGuard.AllowCurrencyLaunch(ctx, ownerAccount, name, symbol)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to perform antispam checks")
@@ -104,6 +117,11 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	})
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to derive mint address")
+		return nil, status.Error(codes.Internal, "")
+	}
+	targetMintAccount, err := common.NewAccountFromPublicKeyBytes(targetMintAddress)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid target mint addres")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -204,6 +222,17 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		CreatedAt: creationTs,
 	}
 
+	if len(description) > 0 {
+		currencyMetadataRecord.Description = description
+	}
+	if req.BillCustomization != nil {
+		var billColors []string
+		for _, billColor := range req.BillCustomization.Colors {
+			billColors = append(billColors, billColor.Hex)
+		}
+		currencyMetadataRecord.BillColors = billColors
+	}
+
 	vmMetadataRecord := &vm_metadata.Record{
 		Mint:        base58.Encode(targetMintAddress),
 		Authority:   authority.PublicKey().ToBase58(),
@@ -217,6 +246,17 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	}
 
 	if !isDryRun {
+		var iconUploaded bool
+		if len(processedIcon) > 0 {
+			imageUrl, err := uploadIcon(ctx, s.s3Client, targetMintAccount, processedIcon, iconExt, iconContentType)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failed to upload icon to s3")
+				return nil, status.Error(codes.Internal, "")
+			}
+			currencyMetadataRecord.ImageUrl = imageUrl
+			iconUploaded = true
+		}
+
 		err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 			err := s.data.SaveKey(ctx, &authorityVaultRecord)
 			if err != nil {
@@ -230,9 +270,16 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 			return s.data.SaveVmMetadata(ctx, vmMetadataRecord)
 		})
-		if err == currency.ErrDuplicateCurrency {
-			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_NAME_EXISTS}, nil
-		} else if err != nil {
+		if err != nil {
+			if iconUploaded {
+				if err := deleteIcon(context.Background(), s.s3Client, targetMintAccount, iconExt); err != nil {
+					log.With(zap.Error(err)).Warn("best-effort icon cleanup failed")
+				}
+			}
+
+			if err == currency.ErrDuplicateCurrency {
+				return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_NAME_EXISTS}, nil
+			}
 			log.With(zap.Error(err)).Warn("failed to save currency and vm metadata")
 			return nil, status.Error(codes.Internal, "")
 		}
@@ -240,6 +287,6 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 	return &currencypb.LaunchResponse{
 		Result: currencypb.LaunchResponse_OK,
-		Mint:   &commonpb.SolanaAccountId{Value: targetMintAddress},
+		Mint:   targetMintAccount.ToProto(),
 	}, nil
 }
