@@ -104,13 +104,18 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	// Section: Antispam
 	//
 
-	ownerManagemntState, err := common.GetOwnerManagementState(ctx, s.data, owner)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner management state")
+	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
+	if err == common.ErrOwnerNotFound {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting owner metadata")
 		return handleStatefulSwapError(streamer, err)
 	}
-	if ownerManagemntState != common.OwnerManagementStateOcpAccount {
+	if ownerMetadata.State != common.OwnerManagementStateOcpAccount {
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
+	}
+	if ownerMetadata.Type != common.OwnerTypeUser12Words {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
 	}
 
 	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateCurrencyCreatorSwapReq.FundingSource), owner, fromMint, toMint)

@@ -90,12 +90,14 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		}
 	}
 
-	ownerManagementState, err := common.GetOwnerManagementState(ctx, s.data, ownerAccount)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner management state")
+	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, ownerAccount)
+	if err == common.ErrOwnerNotFound {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting owner metadata")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
-	if ownerManagementState != common.OwnerManagementStateOcpAccount {
+	if ownerMetadata.Type != common.OwnerTypeUser12Words || ownerMetadata.State != common.OwnerManagementStateOcpAccount {
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
