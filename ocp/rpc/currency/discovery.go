@@ -42,7 +42,9 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 			return time.Since(record.CreatedAt) < newDiscoveredCurrenciesAgeLimit
 		}
 	default:
-		return status.Error(codes.InvalidArgument, "invalid category")
+		return stream.Send(&currencypb.DiscoverResponse{
+			Result: currencypb.DiscoverResponse_NOT_FOUND,
+		})
 	}
 
 	metadataRecords, err := s.mintDataProvider.GetAllCachedCurrencyMetadata(ctx)
