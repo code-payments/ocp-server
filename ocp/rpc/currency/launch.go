@@ -90,6 +90,15 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		}
 	}
 
+	ownerManagementState, err := common.GetOwnerManagementState(ctx, s.data, ownerAccount)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting owner management state")
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+	if ownerManagementState != common.OwnerManagementStateOcpAccount {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
 	allow, err := s.antispamGuard.AllowCurrencyLaunch(ctx, ownerAccount, name, symbol)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to perform antispam checks")
