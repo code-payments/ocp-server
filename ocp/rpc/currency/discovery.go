@@ -48,7 +48,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	metadataRecords, err := s.mintDataProvider.GetAllCachedCurrencyMetadata(ctx)
 	if err == currency.ErrNotFound {
 		return stream.Send(&currencypb.DiscoverResponse{
-			Result: currencypb.DiscoverResponse_NOT_FOUND,
+			Result: currencypb.DiscoverResponse_OK,
 		})
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting currency metadata records")
@@ -56,7 +56,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	}
 	if len(metadataRecords) == 0 {
 		return stream.Send(&currencypb.DiscoverResponse{
-			Result: currencypb.DiscoverResponse_NOT_FOUND,
+			Result: currencypb.DiscoverResponse_OK,
 		})
 	}
 
@@ -106,7 +106,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 
 	if len(candidates) == 0 {
 		return stream.Send(&currencypb.DiscoverResponse{
-			Result: currencypb.DiscoverResponse_NOT_FOUND,
+			Result: currencypb.DiscoverResponse_OK,
 		})
 	}
 
@@ -135,12 +135,6 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 		ocp_currency.SetHolderMetrics(protoMint, candidate.holderData)
 
 		protoMints = append(protoMints, protoMint)
-	}
-
-	if len(protoMints) == 0 {
-		return stream.Send(&currencypb.DiscoverResponse{
-			Result: currencypb.DiscoverResponse_NOT_FOUND,
-		})
 	}
 
 	return stream.Send(&currencypb.DiscoverResponse{
