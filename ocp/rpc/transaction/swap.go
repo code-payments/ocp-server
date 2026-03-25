@@ -72,22 +72,22 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	initiateCurrencyCreatorSwapReq := initiateReq.GetCurrencyCreator()
-	if initiateCurrencyCreatorSwapReq == nil {
-		return handleStatefulSwapError(streamer, status.Error(codes.InvalidArgument, "StatefulSwapRequest.Initiate.CurrencyCreator is nil"))
+	initiateReserveSwapReq := initiateReq.GetReserve()
+	if initiateReserveSwapReq == nil {
+		return handleStatefulSwapError(streamer, status.Error(codes.InvalidArgument, "StatefulSwapRequest.Initiate.Reserve is nil"))
 	}
 
-	swapId := base58.Encode(initiateCurrencyCreatorSwapReq.Id.Value)
+	swapId := base58.Encode(initiateReserveSwapReq.Id.Value)
 	log = log.With(zap.String("swap_id", swapId))
 
-	fromMint, err := common.NewAccountFromProto(initiateCurrencyCreatorSwapReq.FromMint)
+	fromMint, err := common.NewAccountFromProto(initiateReserveSwapReq.FromMint)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("invalid source mint account")
 		return handleStatefulSwapError(streamer, err)
 	}
 	log = log.With(zap.String("from_mint", fromMint.PublicKey().ToBase58()))
 
-	toMint, err := common.NewAccountFromProto(initiateCurrencyCreatorSwapReq.ToMint)
+	toMint, err := common.NewAccountFromProto(initiateReserveSwapReq.ToMint)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("invalid destination mint account")
 		return handleStatefulSwapError(streamer, err)
@@ -95,9 +95,9 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	log = log.With(zap.String("to_mint", toMint.PublicKey().ToBase58()))
 
 	log = log.With(
-		zap.Uint64("amount", initiateCurrencyCreatorSwapReq.Amount),
-		zap.String("funding_source", initiateCurrencyCreatorSwapReq.FundingSource.String()),
-		zap.String("funding_id", initiateCurrencyCreatorSwapReq.FundingId),
+		zap.Uint64("amount", initiateReserveSwapReq.Amount),
+		zap.String("funding_source", initiateReserveSwapReq.FundingSource.String()),
+		zap.String("funding_id", initiateReserveSwapReq.FundingId),
 	)
 
 	//
@@ -118,7 +118,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
 	}
 
-	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateCurrencyCreatorSwapReq.FundingSource), owner, fromMint, toMint)
+	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint)
 	if err != nil {
 		return handleStatefulSwapError(streamer, err)
 	} else if !allow {
@@ -137,7 +137,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	_, err = s.data.GetSwapByFundingId(ctx, initiateCurrencyCreatorSwapReq.FundingId)
+	_, err = s.data.GetSwapByFundingId(ctx, initiateReserveSwapReq.FundingId)
 	if err == nil {
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("attempt to reuse swap funding id"))
 	} else if err != swap.ErrNotFound {
@@ -157,7 +157,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapValidationError("must swap between two different mints"))
 	}
 
-	if initiateCurrencyCreatorSwapReq.Amount == 0 {
+	if initiateReserveSwapReq.Amount == 0 {
 		return handleStatefulSwapError(streamer, NewSwapValidationError("amount must be positive"))
 	}
 
@@ -205,15 +205,15 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	switch initiateCurrencyCreatorSwapReq.FundingSource {
+	switch initiateReserveSwapReq.FundingSource {
 	case transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT:
-		decodedFundingId, err := base58.Decode(initiateCurrencyCreatorSwapReq.FundingId)
+		decodedFundingId, err := base58.Decode(initiateReserveSwapReq.FundingId)
 		if err != nil || len(decodedFundingId) != ed25519.PublicKeySize {
 			log.With(zap.Error(err)).Warn("invalid funding id")
 			return handleStatefulSwapError(streamer, NewSwapValidationError("funding id is not a public key"))
 		}
 
-		_, err = s.data.GetIntent(ctx, initiateCurrencyCreatorSwapReq.FundingId)
+		_, err = s.data.GetIntent(ctx, initiateReserveSwapReq.FundingId)
 		if err == nil {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("funding intent already exists"))
 		} else if err != intent.ErrIntentNotFound {
@@ -226,11 +226,11 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			log.With(zap.Error(err)).Warn("failure getting owner source timelock vault balance")
 			return handleStatefulSwapError(streamer, err)
 		}
-		if balance < initiateCurrencyCreatorSwapReq.Amount {
+		if balance < initiateReserveSwapReq.Amount {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("insufficient balance"))
 		}
 	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
-		decodedFundingId, err := base58.Decode(initiateCurrencyCreatorSwapReq.FundingId)
+		decodedFundingId, err := base58.Decode(initiateReserveSwapReq.FundingId)
 		if err != nil || len(decodedFundingId) != ed25519.SignatureSize {
 			log.With(zap.Error(err)).Warn("invalid funding id")
 			return handleStatefulSwapError(streamer, NewSwapValidationError("funding id is not a signature"))
@@ -240,7 +240,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("source mint must be core mint"))
 		}
 	default:
-		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateCurrencyCreatorSwapReq.FundingSource))
+		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateReserveSwapReq.FundingSource))
 	}
 
 	//
@@ -248,9 +248,9 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	//
 
 	verifiedMetadata := &transactionpb.VerifiedSwapMetadata{
-		Kind: &transactionpb.VerifiedSwapMetadata_CurrencyCreator{
-			CurrencyCreator: &transactionpb.VerifiedCurrencyCreatorSwapMetadata{
-				ClientParameters: initiateCurrencyCreatorSwapReq,
+		Kind: &transactionpb.VerifiedSwapMetadata_Reserve{
+			Reserve: &transactionpb.VerifiedReserveSwapMetadata{
+				ClientParameters: initiateReserveSwapReq,
 			},
 		},
 	}
@@ -295,31 +295,31 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 
 	var swapHandler SwapHandler
 	if common.IsCoreMint(fromMint) {
-		swapHandler = NewCurrencyCreatorBuySwapHandler(
+		swapHandler = NewReserveBuySwapHandler(
 			s.data,
 			owner,
 			swapAuthority,
 			toMint,
-			initiateCurrencyCreatorSwapReq.Amount,
+			initiateReserveSwapReq.Amount,
 			selectedNonce.Account,
 		)
 	} else if common.IsCoreMint(toMint) {
-		swapHandler = NewCurrencyCreatorSellSwapHandler(
+		swapHandler = NewReserveSellSwapHandler(
 			s.data,
 			owner,
 			swapAuthority,
 			fromMint,
-			initiateCurrencyCreatorSwapReq.Amount,
+			initiateReserveSwapReq.Amount,
 			selectedNonce.Account,
 		)
 	} else {
-		swapHandler = NewCurrencyCreatorBuySellSwapHandler(
+		swapHandler = NewReserveBuySellSwapHandler(
 			s.data,
 			owner,
 			swapAuthority,
 			fromMint,
 			toMint,
-			initiateCurrencyCreatorSwapReq.Amount,
+			initiateReserveSwapReq.Amount,
 			selectedNonce.Account,
 		)
 	}
@@ -365,7 +365,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		protoAlts[i] = transaction_util.ToProtoAlt(alt)
 	}
 
-	protoServerParameters := &transactionpb.StatefulSwapResponse_ServerParameters_CurrencyCreator{
+	protoServerParameters := &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
 		Payer:            common.GetSubsidizer().ToProto(),
 		Nonce:            selectedNonce.Account.ToProto(),
 		Blockhash:        &commonpb.Blockhash{Value: selectedNonce.Blockhash[:]},
@@ -379,8 +379,8 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	if err := streamer.Send(&transactionpb.StatefulSwapResponse{
 		Response: &transactionpb.StatefulSwapResponse_ServerParameters_{
 			ServerParameters: &transactionpb.StatefulSwapResponse_ServerParameters{
-				Kind: &transactionpb.StatefulSwapResponse_ServerParameters_CurrencyCreator_{
-					CurrencyCreator: protoServerParameters,
+				Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
+					ReserveExistingCurrency: protoServerParameters,
 				},
 			},
 		},
@@ -455,13 +455,13 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	//
 
 	var initialState swap.State
-	switch initiateCurrencyCreatorSwapReq.FundingSource {
+	switch initiateReserveSwapReq.FundingSource {
 	case transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT:
 		initialState = swap.StateCreated
 	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
 		initialState = swap.StateFunding
 	default:
-		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateCurrencyCreatorSwapReq.FundingSource))
+		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateReserveSwapReq.FundingSource))
 	}
 
 	record := &swap.Record{
@@ -469,9 +469,9 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		Owner:                owner.PublicKey().ToBase58(),
 		FromMint:             fromMint.PublicKey().ToBase58(),
 		ToMint:               toMint.PublicKey().ToBase58(),
-		Amount:               initiateCurrencyCreatorSwapReq.Amount,
-		FundingSource:        swap.FundingSource(initiateCurrencyCreatorSwapReq.FundingSource),
-		FundingId:            initiateCurrencyCreatorSwapReq.FundingId,
+		Amount:               initiateReserveSwapReq.Amount,
+		FundingSource:        swap.FundingSource(initiateReserveSwapReq.FundingSource),
+		FundingId:            initiateReserveSwapReq.FundingId,
 		Nonce:                selectedNonce.Account.PublicKey().ToBase58(),
 		Blockhash:            base58.Encode(selectedNonce.Blockhash[:]),
 		ProofSignature:       base58.Encode(initiateReq.ProofSignature.Value),
@@ -640,9 +640,9 @@ func toProtoSwap(record *swap.Record) (*transactionpb.SwapMetadata, error) {
 
 	return &transactionpb.SwapMetadata{
 		VerifiedMetadata: &transactionpb.VerifiedSwapMetadata{
-			Kind: &transactionpb.VerifiedSwapMetadata_CurrencyCreator{
-				CurrencyCreator: &transactionpb.VerifiedCurrencyCreatorSwapMetadata{
-					ClientParameters: &transactionpb.StatefulSwapRequest_Initiate_CurrencyCreator{
+			Kind: &transactionpb.VerifiedSwapMetadata_Reserve{
+				Reserve: &transactionpb.VerifiedReserveSwapMetadata{
+					ClientParameters: &transactionpb.StatefulSwapRequest_Initiate_ReserveSwapClientParameters{
 						Id:            &commonpb.SwapId{Value: decodedSwapId},
 						FromMint:      fromMint.ToProto(),
 						ToMint:        toMint.ToProto(),
