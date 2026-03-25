@@ -33,7 +33,7 @@ type SwapHandler interface {
 	MakeInstructions(ctx context.Context) ([]solana.Instruction, error)
 }
 
-type CurrencyCreatorBuySwapHandler struct {
+type ReserveBuySwapHandler struct {
 	data ocp_data.Provider
 
 	buyer           *common.Account
@@ -49,7 +49,7 @@ type CurrencyCreatorBuySwapHandler struct {
 	memoryIndex      uint16
 }
 
-func NewCurrencyCreatorBuySwapHandler(
+func NewReserveBuySwapHandler(
 	data ocp_data.Provider,
 	buyer *common.Account,
 	temporaryHolder *common.Account,
@@ -57,7 +57,7 @@ func NewCurrencyCreatorBuySwapHandler(
 	amount uint64,
 	nonce *common.Account,
 ) SwapHandler {
-	return &CurrencyCreatorBuySwapHandler{
+	return &ReserveBuySwapHandler{
 		data: data,
 
 		buyer:           buyer,
@@ -72,7 +72,7 @@ func NewCurrencyCreatorBuySwapHandler(
 	}
 }
 
-func (h *CurrencyCreatorBuySwapHandler) GetServerParameters() *SwapServerParameters {
+func (h *ReserveBuySwapHandler) GetServerParameters() *SwapServerParameters {
 	return &SwapServerParameters{
 		ComputeUnitLimit: h.computeUnitLimit,
 		ComputeUnitPrice: h.computeUnitPrice,
@@ -82,7 +82,7 @@ func (h *CurrencyCreatorBuySwapHandler) GetServerParameters() *SwapServerParamet
 	}
 }
 
-func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
 	sourceVmConfig, err := common.GetVmConfigForMint(ctx, h.data, common.CoreMintAccount)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (h *CurrencyCreatorBuySwapHandler) MakeInstructions(ctx context.Context) ([
 	}, nil
 }
 
-type CurrencyCreatorSellSwapHandler struct {
+type ReserveSellSwapHandler struct {
 	data ocp_data.Provider
 
 	seller          *common.Account
@@ -218,7 +218,7 @@ type CurrencyCreatorSellSwapHandler struct {
 	memoryIndex      uint16
 }
 
-func NewCurrencyCreatorSellSwapHandler(
+func NewReserveSellSwapHandler(
 	data ocp_data.Provider,
 	seller *common.Account,
 	temporaryHolder *common.Account,
@@ -226,7 +226,7 @@ func NewCurrencyCreatorSellSwapHandler(
 	amount uint64,
 	nonce *common.Account,
 ) SwapHandler {
-	return &CurrencyCreatorSellSwapHandler{
+	return &ReserveSellSwapHandler{
 		data: data,
 
 		seller:          seller,
@@ -241,7 +241,7 @@ func NewCurrencyCreatorSellSwapHandler(
 	}
 }
 
-func (h *CurrencyCreatorSellSwapHandler) GetServerParameters() *SwapServerParameters {
+func (h *ReserveSellSwapHandler) GetServerParameters() *SwapServerParameters {
 	return &SwapServerParameters{
 		ComputeUnitLimit: h.computeUnitLimit,
 		ComputeUnitPrice: h.computeUnitPrice,
@@ -251,7 +251,7 @@ func (h *CurrencyCreatorSellSwapHandler) GetServerParameters() *SwapServerParame
 	}
 }
 
-func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+func (h *ReserveSellSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
 	sourceVmConfig, err := common.GetVmConfigForMint(ctx, h.data, h.mint)
 	if err != nil {
 		return nil, err
@@ -371,7 +371,7 @@ func (h *CurrencyCreatorSellSwapHandler) MakeInstructions(ctx context.Context) (
 	}, nil
 }
 
-type CurrencyCreatorBuySellSwapHandler struct {
+type ReserveBuySellSwapHandler struct {
 	data ocp_data.Provider
 
 	swapper         *common.Account
@@ -388,7 +388,7 @@ type CurrencyCreatorBuySellSwapHandler struct {
 	memoryIndex      uint16
 }
 
-func NewCurrencyCreatorBuySellSwapHandler(
+func NewReserveBuySellSwapHandler(
 	data ocp_data.Provider,
 	swapper *common.Account,
 	temporaryHolder *common.Account,
@@ -397,7 +397,7 @@ func NewCurrencyCreatorBuySellSwapHandler(
 	amount uint64,
 	nonce *common.Account,
 ) SwapHandler {
-	return &CurrencyCreatorBuySellSwapHandler{
+	return &ReserveBuySellSwapHandler{
 		data: data,
 
 		swapper:         swapper,
@@ -413,7 +413,7 @@ func NewCurrencyCreatorBuySellSwapHandler(
 	}
 }
 
-func (h *CurrencyCreatorBuySellSwapHandler) GetServerParameters() *SwapServerParameters {
+func (h *ReserveBuySellSwapHandler) GetServerParameters() *SwapServerParameters {
 	return &SwapServerParameters{
 		ComputeUnitLimit: h.computeUnitLimit,
 		ComputeUnitPrice: h.computeUnitPrice,
@@ -423,7 +423,7 @@ func (h *CurrencyCreatorBuySellSwapHandler) GetServerParameters() *SwapServerPar
 	}
 }
 
-func (h *CurrencyCreatorBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
 	sourceVmConfig, err := common.GetVmConfigForMint(ctx, h.data, h.fromMint)
 	if err != nil {
 		return nil, err
