@@ -973,7 +973,8 @@ func (m *MintDataProvider) fetchAndUpdateHolderCounts(ctx context.Context) {
 
 	var includeWeeklyDeltas bool
 	oneWeekAgo := time.Now().Add(-7 * 24 * time.Hour)
-	historicalCounts, err := m.data.GetAllCurrencyHolderCountsAtTime(ctx, oneWeekAgo)
+	endOfWeekAgoDay := time.Date(oneWeekAgo.Year(), oneWeekAgo.Month(), oneWeekAgo.Day(), 23, 59, 59, 0, time.UTC)
+	historicalCounts, err := m.data.GetAllCurrencyHolderCountsAtTime(ctx, endOfWeekAgoDay)
 	if err != nil && err != currency.ErrNotFound {
 		m.log.With(zap.Error(err)).Warn("failed to fetch historical holder counts for weekly delta")
 	} else {
