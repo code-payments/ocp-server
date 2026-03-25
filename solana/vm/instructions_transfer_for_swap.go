@@ -53,7 +53,7 @@ func NewTransferForSwapInstruction(
 			},
 			{
 				PublicKey:  accounts.Vm,
-				IsWritable: false,
+				IsWritable: true,
 				IsSigner:   false,
 			},
 			{
