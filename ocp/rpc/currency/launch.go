@@ -59,6 +59,9 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	if isReservedCurrencyName(name) {
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
+	if name != req.Name {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
 
 	symbol := strings.TrimSpace(req.Symbol)
 	if len(symbol) == 0 {
@@ -74,6 +77,8 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		if len(symbol) > currencycreator.MaxCurrencyConfigAccountSymbolLength {
 			symbol = symbol[0:currencycreator.MaxCurrencyConfigAccountSymbolLength]
 		}
+	} else if symbol != req.Symbol {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
 	description := strings.TrimSpace(req.Description)
