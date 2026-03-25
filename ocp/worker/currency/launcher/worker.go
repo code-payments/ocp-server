@@ -228,8 +228,6 @@ func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataR
 		return errors.Wrap(err, "error adding timelock memory account to db")
 	}
 
-	// todo: add timelock memory account to reservation system
-
 	//
 	// Initialization phase 3 (nonce pool)
 	//
