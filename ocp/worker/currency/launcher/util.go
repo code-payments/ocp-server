@@ -727,9 +727,9 @@ func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrency
 		go func(batch int) {
 			defer wg.Done()
 
-			func() error {
+			err := func() error {
 				ixns := []solana.Instruction{
-					compute_budget.SetComputeUnitLimit(400_000),
+					compute_budget.SetComputeUnitLimit(550_000),
 					compute_budget.SetComputeUnitPrice(10_000),
 				}
 				for i := range initVdnIxnsPerTxn {
