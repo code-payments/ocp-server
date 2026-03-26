@@ -3,31 +3,33 @@ package transaction
 import (
 	"context"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
+
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
+	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
+	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/solana/memo"
 	"github.com/code-payments/ocp-server/solana/system"
+	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 // todo: Move transaction-related stuff to the transaction utility package
 
-type SwapServerParameters struct {
-	ComputeUnitLimit uint32
-	ComputeUnitPrice uint64
-	MemoValue        string
-	MemoryAccount    *common.Account
-	MemoryIndex      uint16
-}
-
 type SwapHandler interface {
+	// GetAlts returns the set of ALTs that should be used for versioned transaction construction
+	GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error)
+
 	// GetServerParameter gets the server parameters to return to client for the swap
-	GetServerParameters() *SwapServerParameters
+	GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters
 
 	// MakeInstructions makes the Solana transaction instructions to perform the swap
 	MakeInstructions(ctx context.Context) ([]solana.Instruction, error)
@@ -41,12 +43,14 @@ type ReserveBuySwapHandler struct {
 	mint            *common.Account
 	amount          uint64
 
-	nonce            *common.Account
+	alts             []solana.AddressLookupTable
+	selectedNonce    *transaction_util.Nonce
 	computeUnitLimit uint32
 	computeUnitPrice uint64
 	memoValue        string
-	memoryAccount    *common.Account
-	memoryIndex      uint16
+
+	memoryAccount *common.Account
+	memoryIndex   uint16
 }
 
 func NewReserveBuySwapHandler(
@@ -55,7 +59,7 @@ func NewReserveBuySwapHandler(
 	temporaryHolder *common.Account,
 	mint *common.Account,
 	amount uint64,
-	nonce *common.Account,
+	selectedNonce *transaction_util.Nonce,
 ) SwapHandler {
 	return &ReserveBuySwapHandler{
 		data: data,
@@ -65,20 +69,37 @@ func NewReserveBuySwapHandler(
 		mint:            mint,
 		amount:          amount,
 
-		nonce:            nonce,
+		selectedNonce:    selectedNonce,
 		computeUnitLimit: 150_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_v0",
 	}
 }
 
-func (h *ReserveBuySwapHandler) GetServerParameters() *SwapServerParameters {
-	return &SwapServerParameters{
-		ComputeUnitLimit: h.computeUnitLimit,
-		ComputeUnitPrice: h.computeUnitPrice,
-		MemoValue:        h.memoValue,
-		MemoryAccount:    h.memoryAccount,
-		MemoryIndex:      h.memoryIndex,
+func (h *ReserveBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	alt, err := transaction_util.GetAltForMint(ctx, h.data, h.mint)
+	if err != nil {
+		return nil, err
+	}
+	h.alts = []solana.AddressLookupTable{alt}
+	return h.alts, nil
+}
+
+func (h *ReserveBuySwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
+			ReserveExistingCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
+				Payer:            common.GetSubsidizer().ToProto(),
+				Nonce:            h.selectedNonce.Account.ToProto(),
+				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+				Alts:             transaction_util.ToProtoAlts(h.alts),
+				ComputeUnitLimit: h.computeUnitLimit,
+				ComputeUnitPrice: h.computeUnitPrice,
+				MemoValue:        h.memoValue,
+				MemoryAccount:    h.memoryAccount.ToProto(),
+				MemoryIndex:      uint32(h.memoryIndex),
+			},
+		},
 	}
 }
 
@@ -190,7 +211,7 @@ func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.
 	)
 
 	return []solana.Instruction{
-		system.AdvanceNonce(h.nonce.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
+		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
 		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
 		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
 		memo.Instruction(h.memoValue),
@@ -210,12 +231,14 @@ type ReserveSellSwapHandler struct {
 	mint            *common.Account
 	amount          uint64
 
-	nonce            *common.Account
+	alts             []solana.AddressLookupTable
+	selectedNonce    *transaction_util.Nonce
 	computeUnitLimit uint32
 	computeUnitPrice uint64
 	memoValue        string
-	memoryAccount    *common.Account
-	memoryIndex      uint16
+
+	memoryAccount *common.Account
+	memoryIndex   uint16
 }
 
 func NewReserveSellSwapHandler(
@@ -224,7 +247,7 @@ func NewReserveSellSwapHandler(
 	temporaryHolder *common.Account,
 	mint *common.Account,
 	amount uint64,
-	nonce *common.Account,
+	selectedNonce *transaction_util.Nonce,
 ) SwapHandler {
 	return &ReserveSellSwapHandler{
 		data: data,
@@ -234,20 +257,37 @@ func NewReserveSellSwapHandler(
 		mint:            mint,
 		amount:          amount,
 
-		nonce:            nonce,
+		selectedNonce:    selectedNonce,
 		computeUnitLimit: 175_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "sell_v0",
 	}
 }
 
-func (h *ReserveSellSwapHandler) GetServerParameters() *SwapServerParameters {
-	return &SwapServerParameters{
-		ComputeUnitLimit: h.computeUnitLimit,
-		ComputeUnitPrice: h.computeUnitPrice,
-		MemoValue:        h.memoValue,
-		MemoryAccount:    h.memoryAccount,
-		MemoryIndex:      h.memoryIndex,
+func (h *ReserveSellSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	alt, err := transaction_util.GetAltForMint(ctx, h.data, h.mint)
+	if err != nil {
+		return nil, err
+	}
+	h.alts = []solana.AddressLookupTable{alt}
+	return h.alts, nil
+}
+
+func (h *ReserveSellSwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
+			ReserveExistingCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
+				Payer:            common.GetSubsidizer().ToProto(),
+				Nonce:            h.selectedNonce.Account.ToProto(),
+				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+				Alts:             transaction_util.ToProtoAlts(h.alts),
+				ComputeUnitLimit: h.computeUnitLimit,
+				ComputeUnitPrice: h.computeUnitPrice,
+				MemoValue:        h.memoValue,
+				MemoryAccount:    h.memoryAccount.ToProto(),
+				MemoryIndex:      uint32(h.memoryIndex),
+			},
+		},
 	}
 }
 
@@ -359,7 +399,7 @@ func (h *ReserveSellSwapHandler) MakeInstructions(ctx context.Context) ([]solana
 	)
 
 	return []solana.Instruction{
-		system.AdvanceNonce(h.nonce.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
+		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
 		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
 		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
 		memo.Instruction(h.memoValue),
@@ -380,12 +420,14 @@ type ReserveBuySellSwapHandler struct {
 	toMint          *common.Account
 	amount          uint64
 
-	nonce            *common.Account
+	alts             []solana.AddressLookupTable
+	selectedNonce    *transaction_util.Nonce
 	computeUnitLimit uint32
 	computeUnitPrice uint64
 	memoValue        string
-	memoryAccount    *common.Account
-	memoryIndex      uint16
+
+	memoryAccount *common.Account
+	memoryIndex   uint16
 }
 
 func NewReserveBuySellSwapHandler(
@@ -395,7 +437,7 @@ func NewReserveBuySellSwapHandler(
 	fromMint *common.Account,
 	toMint *common.Account,
 	amount uint64,
-	nonce *common.Account,
+	selectedNonce *transaction_util.Nonce,
 ) SwapHandler {
 	return &ReserveBuySellSwapHandler{
 		data: data,
@@ -406,20 +448,41 @@ func NewReserveBuySellSwapHandler(
 		toMint:          toMint,
 		amount:          amount,
 
-		nonce:            nonce,
+		selectedNonce:    selectedNonce,
 		computeUnitLimit: 400_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_sell_v0",
 	}
 }
 
-func (h *ReserveBuySellSwapHandler) GetServerParameters() *SwapServerParameters {
-	return &SwapServerParameters{
-		ComputeUnitLimit: h.computeUnitLimit,
-		ComputeUnitPrice: h.computeUnitPrice,
-		MemoValue:        h.memoValue,
-		MemoryAccount:    h.memoryAccount,
-		MemoryIndex:      h.memoryIndex,
+func (h *ReserveBuySellSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	alt1, err := transaction_util.GetAltForMint(ctx, h.data, h.fromMint)
+	if err != nil {
+		return nil, err
+	}
+	alt2, err := transaction_util.GetAltForMint(ctx, h.data, h.toMint)
+	if err != nil {
+		return nil, err
+	}
+	h.alts = []solana.AddressLookupTable{alt1, alt2}
+	return h.alts, nil
+}
+
+func (h *ReserveBuySellSwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
+			ReserveExistingCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
+				Payer:            common.GetSubsidizer().ToProto(),
+				Nonce:            h.selectedNonce.Account.ToProto(),
+				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+				Alts:             transaction_util.ToProtoAlts(h.alts),
+				ComputeUnitLimit: h.computeUnitLimit,
+				ComputeUnitPrice: h.computeUnitPrice,
+				MemoValue:        h.memoValue,
+				MemoryAccount:    h.memoryAccount.ToProto(),
+				MemoryIndex:      uint32(h.memoryIndex),
+			},
+		},
 	}
 }
 
@@ -577,7 +640,7 @@ func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]sol
 	)
 
 	return []solana.Instruction{
-		system.AdvanceNonce(h.nonce.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
+		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
 		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
 		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
 		memo.Instruction(h.memoValue),
@@ -589,5 +652,231 @@ func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]sol
 		closeTemporaryCoreMintAtaIxn,
 		closeTemporarySourceCurrencyAtaIxn,
 		closeSourceVmSwapAccountIfEmptyIxn,
+	}, nil
+}
+
+type ReserveCreateAndBuySwapHandler struct {
+	buyer  *common.Account
+	mint   *common.Account
+	amount uint64
+
+	alts             []solana.AddressLookupTable
+	selectedNonce    *transaction_util.Nonce
+	computeUnitLimit uint32
+	computeUnitPrice uint64
+
+	sourceVmConfig                    *common.VmConfig
+	destinationCurrencyMetadataRecord *currency.MetadataRecord
+	destinationCurrencyAccounts       *common.LaunchpadCurrencyAccounts
+	destinationVmMetadataRecord       *vm_metadata.Record
+	destinationVmConfig               *common.VmConfig
+}
+
+func NewReserveCreateAndBuySwapHandler(
+	ctx context.Context,
+	data ocp_data.Provider,
+	buyer *common.Account,
+	mint *common.Account,
+	amount uint64,
+	selectedNonce *transaction_util.Nonce,
+) (SwapHandler, error) {
+	var err error
+
+	h := &ReserveCreateAndBuySwapHandler{
+		buyer:  buyer,
+		mint:   mint,
+		amount: amount,
+
+		selectedNonce:    selectedNonce,
+		computeUnitLimit: 300_000, // todo: optimize
+		computeUnitPrice: 10_000,
+	}
+
+	h.alts = []solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}
+
+	h.sourceVmConfig, err = common.GetVmConfigForMint(ctx, data, common.CoreMintAccount)
+	if err != nil {
+		return nil, err
+	}
+
+	h.destinationCurrencyMetadataRecord, err = data.GetCurrencyMetadata(ctx, h.mint.PublicKey().ToBase58())
+	if err != nil {
+		return nil, err
+	}
+
+	h.destinationCurrencyAccounts, err = common.GetLaunchpadCurrencyAccounts(h.destinationCurrencyMetadataRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	// The VM is not supported yet, so we need to work around GetVmConfigForMint
+	h.destinationVmMetadataRecord, err = data.GetVmMetadataByMint(ctx, h.mint.PublicKey().ToBase58())
+	if err != nil {
+		return nil, err
+	}
+	vmAccount, err := common.NewAccountFromPublicKeyString(h.destinationVmMetadataRecord.Vm)
+	if err != nil {
+		return nil, err
+	}
+	omnibusAccount, err := common.NewAccountFromPublicKeyString(h.destinationVmMetadataRecord.Omnibus)
+	if err != nil {
+		return nil, err
+	}
+	h.destinationVmConfig = &common.VmConfig{
+		Authority: h.destinationCurrencyAccounts.Authority,
+		Vm:        vmAccount,
+		Omnibus:   omnibusAccount,
+		Mint:      h.mint,
+	}
+
+	return h, nil
+}
+
+func (h *ReserveCreateAndBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	return h.alts, nil
+}
+
+func (h *ReserveCreateAndBuySwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrency{
+			ReserveNewCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrencyServerParameter{
+				Payer:                h.destinationCurrencyAccounts.Authority.ToProto(),
+				Nonce:                h.selectedNonce.Account.ToProto(),
+				Blockhash:            &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+				Alts:                 transaction_util.ToProtoAlts(h.alts),
+				ComputeUnitLimit:     h.computeUnitLimit,
+				ComputeUnitPrice:     h.computeUnitPrice,
+				MemoValue:            "",
+				Authority:            h.destinationCurrencyAccounts.Authority.ToProto(),
+				Name:                 h.destinationCurrencyMetadataRecord.Name,
+				Symbol:               h.destinationCurrencyMetadataRecord.Symbol,
+				Seed:                 h.destinationCurrencyAccounts.Seed.ToProto(),
+				SellFeeBps:           currencycreator.DefaultSellFeeBps,
+				VmLockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
+			},
+		},
+	}
+}
+
+func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+	buyerVmSwapAccounts, err := h.buyer.GetVmSwapAccounts(h.sourceVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	buyerVmDepositAccounts, err := h.buyer.GetVmDepositAccounts(h.destinationVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	createTemporaryCoreMintAtaIxn, temporaryCoreMintAta, err := token.CreateAssociatedTokenAccountIdempotent(
+		h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
+		h.buyer.PublicKey().ToBytes(),
+		common.CoreMintAccount.PublicKey().ToBytes(),
+	)
+
+	createVmDepositAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(
+		h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
+		buyerVmDepositAccounts.Pda.PublicKey().ToBytes(),
+		h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
+	)
+
+	closeTemporaryCoreMintAta := token.CloseAccount(
+		temporaryCoreMintAta,
+		h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
+		h.buyer.PublicKey().ToBytes(),
+	)
+
+	initCurrencyIxn := currencycreator.NewInitializeCurrencyInstruction(
+		&currencycreator.InitializeCurrencyInstructionAccounts{
+			Authority: h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
+			Mint:      h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
+			Currency:  h.destinationCurrencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializeCurrencyInstructionArgs{
+			Name:     h.destinationCurrencyMetadataRecord.Name,
+			Symbol:   h.destinationCurrencyMetadataRecord.Symbol,
+			Seed:     h.destinationCurrencyAccounts.Seed.PublicKey().ToBytes(),
+			Bump:     h.destinationCurrencyAccounts.CurrencyConfigBump,
+			MintBump: h.destinationCurrencyAccounts.MintBump,
+		},
+	)
+
+	initPoolIxn := currencycreator.NewInitializePoolInstruction(
+		&currencycreator.InitializePoolInstructionAccounts{
+			Authority:   h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
+			Currency:    h.destinationCurrencyAccounts.CurrencyConfig.PublicKey().ToBytes(),
+			TargetMint:  h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
+			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
+			Pool:        h.destinationCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
+			VaultTarget: h.destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
+			VaultBase:   h.destinationCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializePoolInstructionArgs{
+			SellFee:         currencycreator.DefaultSellFeeBps,
+			Bump:            h.destinationCurrencyAccounts.LiquidityPoolBump,
+			VaultTargetBump: h.destinationCurrencyAccounts.VaultMintBump,
+			VaultBaseBump:   h.destinationCurrencyAccounts.VaultBaseBump,
+		},
+	)
+
+	initVmIxn := vm.NewInitVmInstruction(
+		&vm.InitVmInstructionAccounts{
+			VmAuthority: h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
+			Vm:          h.destinationVmConfig.Vm.PublicKey().ToBytes(),
+			VmOmnibus:   h.destinationVmConfig.Omnibus.PublicKey().ToBytes(),
+			Mint:        h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
+		},
+		&vm.InitVmInstructionArgs{
+			LockDuration:  timelock_token.DefaultNumDaysLocked,
+			VmBump:        h.destinationVmMetadataRecord.VmBump,
+			VmOmnibusBump: h.destinationVmMetadataRecord.OmnibusBump,
+		},
+	)
+
+	transferForSwapIxn := vm.NewTransferForSwapInstruction(
+		&vm.TransferForSwapInstructionAccounts{
+			VmAuthority: common.GetSubsidizer().PublicKey().ToBytes(),
+			Vm:          common.CoreMintVmAccount.PublicKey().ToBytes(),
+			Swapper:     h.buyer.PublicKey().ToBytes(),
+			SwapPda:     buyerVmSwapAccounts.Pda.PublicKey().ToBytes(),
+			SwapAta:     buyerVmSwapAccounts.Ata.PublicKey().ToBytes(),
+			Destination: temporaryCoreMintAta,
+		},
+		&vm.TransferForSwapInstructionArgs{
+			Amount: h.amount,
+			Bump:   buyerVmSwapAccounts.PdaBump,
+		},
+	)
+
+	buyIxn := currencycreator.NewBuyTokensInstruction(
+		&currencycreator.BuyTokensInstructionAccounts{
+			Buyer:       h.buyer.PublicKey().ToBytes(),
+			Pool:        h.destinationCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
+			TargetMint:  h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
+			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
+			VaultTarget: h.destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
+			VaultBase:   h.destinationCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
+			BuyerTarget: buyerVmDepositAccounts.Ata.PublicKey().ToBytes(),
+			BuyerBase:   temporaryCoreMintAta,
+		},
+		&currencycreator.BuyTokensInstructionArgs{
+			InAmount:     h.amount,
+			MinAmountOut: 0,
+		},
+	)
+
+	return []solana.Instruction{
+		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
+		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
+		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+		initCurrencyIxn,
+		initPoolIxn,
+		initVmIxn,
+		createTemporaryCoreMintAtaIxn,
+		createVmDepositAtaIxn,
+		transferForSwapIxn,
+		buyIxn,
+		closeTemporaryCoreMintAta,
 	}, nil
 }

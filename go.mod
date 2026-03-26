@@ -6,7 +6,7 @@ require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/aws/aws-sdk-go-v2 v0.17.0
 	github.com/code-payments/code-vm-indexer v1.2.0
-	github.com/code-payments/ocp-protobuf-api v1.6.1-0.20260325154106-63d4d261070d
+	github.com/code-payments/ocp-protobuf-api v1.7.0
 	github.com/emirpasic/gods v1.12.0
 	github.com/envoyproxy/protoc-gen-validate v1.2.1
 	github.com/golang/protobuf v1.5.4

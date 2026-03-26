@@ -23,6 +23,8 @@ var (
 	CoreMintName          = config.CoreMintName
 	CoreMintSymbol        = config.CoreMintSymbol
 
+	CoreMintAlt, _ = NewAccountFromPublicKeyString(config.CoreMintAltPublicKeyString)
+
 	ErrUnsupportedMint = errors.New("unsupported mint")
 
 	supportedMintCacheMu  sync.RWMutex
