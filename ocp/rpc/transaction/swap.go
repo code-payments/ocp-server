@@ -538,7 +538,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		}
 
 		if initializesMint {
-			currencyMetadataRecord.State = currency.MetadataStateInitializing
+			currencyMetadataRecord.State = currency.MetadataStateFundingAuthority
 			err = s.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failure saving currency metadata record")
