@@ -93,8 +93,6 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 
 	var err error
 	switch record.State {
-	case currency.MetadataStateUnknown:
-		err = p.handleStateUnknown(ctx, record)
 	case currency.MetadataStateFundingAuthority:
 		err = p.handleStateFundingAuthority(ctx, record)
 	case currency.MetadataStateInitializing:
@@ -107,17 +105,6 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 		return err
 	}
 	return nil
-}
-
-func (p *runtime) handleStateUnknown(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateUnknown)
-	if err != nil {
-		return err
-	}
-
-	// Nothing to do here currently
-
-	return p.markCurrencyMetadataFundingAuthority(ctx, record)
 }
 
 // Note: Assumes unique authority per currency

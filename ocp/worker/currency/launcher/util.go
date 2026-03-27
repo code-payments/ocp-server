@@ -68,16 +68,6 @@ func (p *runtime) validateCurrencyMetadataState(record *currency.MetadataRecord,
 	return errors.New("invalid currency metadata state")
 }
 
-func (p *runtime) markCurrencyMetadataFundingAuthority(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateUnknown)
-	if err != nil {
-		return err
-	}
-
-	record.State = currency.MetadataStateFundingAuthority
-	return p.data.SaveCurrencyMetadata(ctx, record)
-}
-
 func (p *runtime) markCurrencyMetadataInitializing(ctx context.Context, record *currency.MetadataRecord) error {
 	err := p.validateCurrencyMetadataState(record, currency.MetadataStateFundingAuthority)
 	if err != nil {

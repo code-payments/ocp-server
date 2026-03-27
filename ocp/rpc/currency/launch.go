@@ -232,7 +232,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 		Alt: base58.Encode(system.ProgramKey[:]), // ALT filled in later due to recent slot requirements
 
-		State: currency.MetadataStateUnknown,
+		State: currency.MetadataStateWaitingForInitialPurchase,
 
 		CreatedBy: ownerAccount.PublicKey().ToBase58(),
 		CreatedAt: creationTs,
