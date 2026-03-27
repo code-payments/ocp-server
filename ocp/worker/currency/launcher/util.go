@@ -22,7 +22,6 @@ import (
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/solana/system"
-	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
@@ -68,18 +67,18 @@ func (p *runtime) validateCurrencyMetadataState(record *currency.MetadataRecord,
 	return errors.New("invalid currency metadata state")
 }
 
-func (p *runtime) markCurrencyMetadataInitializing(ctx context.Context, record *currency.MetadataRecord) error {
+func (p *runtime) markCurrencyMetadataExecutingInitialPurchase(ctx context.Context, record *currency.MetadataRecord) error {
 	err := p.validateCurrencyMetadataState(record, currency.MetadataStateFundingAuthority)
 	if err != nil {
 		return err
 	}
 
-	record.State = currency.MetadataStateInitializing
+	record.State = currency.MetadataStateExecutingInitialPurchase
 	return p.data.SaveCurrencyMetadata(ctx, record)
 }
 
 func (p *runtime) markCurrencyMetadataFinalValidation(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateInitializing)
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateCompletingInitialization)
 	if err != nil {
 		return err
 	}
@@ -454,45 +453,7 @@ func (p *runtime) deriveNewAlt(ctx context.Context, accounts *newCurrencyAccount
 	return nil
 }
 
-func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
-	seed, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Seed)
-	if err != nil {
-		return errors.Wrap(err, "invalid seed")
-	}
-
-	initCurrencyIxn := currencycreator.NewInitializeCurrencyInstruction(
-		&currencycreator.InitializeCurrencyInstructionAccounts{
-			Authority: accounts.Authority.PublicKey().ToBytes(),
-			Mint:      accounts.Mint.PublicKey().ToBytes(),
-			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializeCurrencyInstructionArgs{
-			Name:     currencyMetadataRecord.Name,
-			Symbol:   currencyMetadataRecord.Symbol,
-			Seed:     seed.PublicKey().ToBytes(),
-			Bump:     accounts.CurrencyConfigBump,
-			MintBump: accounts.MintBump,
-		},
-	)
-
-	initPoolIxn := currencycreator.NewInitializePoolInstruction(
-		&currencycreator.InitializePoolInstructionAccounts{
-			Authority:   accounts.Authority.PublicKey().ToBytes(),
-			Currency:    accounts.CurrencyConfig.PublicKey().ToBytes(),
-			TargetMint:  accounts.Mint.PublicKey().ToBytes(),
-			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
-			Pool:        accounts.LiquidityPool.PublicKey().ToBytes(),
-			VaultTarget: accounts.VaultMint.PublicKey().ToBytes(),
-			VaultBase:   accounts.VaultBase.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializePoolInstructionArgs{
-			SellFee:         currencycreator.DefaultSellFeeBps,
-			Bump:            accounts.LiquidityPoolBump,
-			VaultTargetBump: accounts.VaultMintBump,
-			VaultBaseBump:   accounts.VaultBaseBump,
-		},
-	)
-
+func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
 	initMetadataIxn := currencycreator.NewInitializeMetadataInstruction(
 		&currencycreator.InitializeMetadataInstructionAccounts{
 			Authority: accounts.Authority.PublicKey().ToBytes(),
@@ -501,20 +462,6 @@ func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRe
 			Metadata:  accounts.MetaplexMetadata.PublicKey().ToBytes(),
 		},
 		&currencycreator.InitializeMetadataInstructionArgs{},
-	)
-
-	initVmIxn := vm.NewInitVmInstruction(
-		&vm.InitVmInstructionAccounts{
-			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-			Vm:          accounts.Vm.PublicKey().ToBytes(),
-			VmOmnibus:   accounts.Omnibus.PublicKey().ToBytes(),
-			Mint:        accounts.Mint.PublicKey().ToBytes(),
-		},
-		&vm.InitVmInstructionArgs{
-			LockDuration:  timelock_token.DefaultNumDaysLocked,
-			VmBump:        accounts.VmBump,
-			VmOmnibusBump: accounts.OmnibusBump,
-		},
 	)
 
 	initNonceMemoryIxn := vm.NewInitMemoryInstruction(
@@ -561,12 +508,9 @@ func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRe
 
 	txn := solana.NewLegacyTransaction(
 		accounts.Authority.PublicKey().ToBytes(),
-		compute_budget.SetComputeUnitLimit(300_000),
+		compute_budget.SetComputeUnitLimit(300_000), // todo: optimize
 		compute_budget.SetComputeUnitPrice(10_000),
-		initCurrencyIxn,
-		initPoolIxn,
 		initMetadataIxn,
-		initVmIxn,
 		initNonceMemoryIxn,
 		initTimelockMemoryIxn,
 		initFeeAtaIxn,

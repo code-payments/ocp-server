@@ -37,9 +37,8 @@ func New(log *zap.Logger, data ocp_data.Provider, configProvider ConfigProvider)
 
 func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 	for _, state := range []currency.MetadataState{
-		currency.MetadataStateUnknown,
 		currency.MetadataStateFundingAuthority,
-		currency.MetadataStateInitializing,
+		currency.MetadataStateCompletingInitialization,
 		currency.MetadataStateFinalValidation,
 	} {
 		go func(state currency.MetadataState) {
