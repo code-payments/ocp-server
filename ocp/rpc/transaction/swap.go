@@ -103,31 +103,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	)
 
 	//
-	// Section: Antispam
-	//
-
-	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
-	if err == common.ErrOwnerNotFound {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner metadata")
-		return handleStatefulSwapError(streamer, err)
-	}
-	if ownerMetadata.State != common.OwnerManagementStateOcpAccount {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
-	}
-	if ownerMetadata.Type != common.OwnerTypeUser12Words {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
-	}
-
-	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint)
-	if err != nil {
-		return handleStatefulSwapError(streamer, err)
-	} else if !allow {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("rate limited"))
-	}
-
-	//
 	// Section: Verified metadata signature verification
 	//
 
@@ -316,6 +291,31 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			log.With(zap.Error(err)).Warn("invalid destination vm authority private key")
 			return handleStatefulSwapError(streamer, err)
 		}
+	}
+
+	//
+	// Section: Antispam
+	//
+
+	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
+	if err == common.ErrOwnerNotFound {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting owner metadata")
+		return handleStatefulSwapError(streamer, err)
+	}
+	if ownerMetadata.State != common.OwnerManagementStateOcpAccount {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
+	}
+	if ownerMetadata.Type != common.OwnerTypeUser12Words {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
+	}
+
+	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint, initiateReserveSwapReq.Amount, initializesMint)
+	if err != nil {
+		return handleStatefulSwapError(streamer, err)
+	} else if !allow {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("rate limited"))
 	}
 
 	//

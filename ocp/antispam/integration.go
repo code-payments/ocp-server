@@ -20,7 +20,7 @@ type Integration interface {
 
 	AllowDistribution(ctx context.Context, owner *common.Account, isPublic bool) (bool, string, error)
 
-	AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account) (bool, string, error)
+	AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account, amount uint64, initializesMint bool) (bool, string, error)
 
 	AllowCurrencyLaunch(ctx context.Context, owner *common.Account, name, symbol string) (bool, string, error)
 }
@@ -49,7 +49,7 @@ func (i *allowEverythingIntegration) AllowDistribution(ctx context.Context, owne
 	return true, "", nil
 }
 
-func (i *allowEverythingIntegration) AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account) (bool, string, error) {
+func (i *allowEverythingIntegration) AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account, amount uint64, initializesMint bool) (bool, string, error) {
 	return true, "", nil
 }
 
