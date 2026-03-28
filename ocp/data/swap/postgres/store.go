@@ -53,8 +53,8 @@ func (s *store) GetByFundingId(ctx context.Context, id string) (*swap.Record, er
 	return fromModel(obj), nil
 }
 
-func (s *store) GetAllByOwnerAndState(ctx context.Context, owner string, state swap.State) ([]*swap.Record, error) {
-	models, err := dbGetAllByOwnerAndState(ctx, s.db, owner, state)
+func (s *store) GetAllByOwnerAndStates(ctx context.Context, owner string, states ...swap.State) ([]*swap.Record, error) {
+	models, err := dbGetAllByOwnerAndStates(ctx, s.db, owner, states)
 	if err != nil {
 		return nil, err
 	}

@@ -23,8 +23,8 @@ type Store interface {
 	// GetByFundingId gets a swap by the funding ID
 	GetByFundingId(ctx context.Context, fundingId string) (*Record, error)
 
-	// GetAllByOwnerAndState gets all swaps for an owner in a state
-	GetAllByOwnerAndState(ctx context.Context, owner string, state State) ([]*Record, error)
+	// GetAllByOwnerAndStates gets all swaps for an owner in any of the provided states
+	GetAllByOwnerAndStates(ctx context.Context, owner string, states ...State) ([]*Record, error)
 
 	// GetAllByState gets all swaps by state
 	GetAllByState(ctx context.Context, state State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
