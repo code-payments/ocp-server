@@ -353,6 +353,11 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 			return err
 		}
 
-		return p.putInitialHolderCount(ctx, currencyMetadataRecord)
+		err = p.putInitialHolderCount(ctx, currencyMetadataRecord)
+		if err != nil {
+			return err
+		}
+
+		return p.initializeCreatorAcccount(ctx, currencyMetadataRecord, accounts)
 	})
 }

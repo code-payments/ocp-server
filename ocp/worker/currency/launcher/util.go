@@ -10,9 +10,15 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/account"
+	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
+	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	"github.com/code-payments/ocp-server/ocp/data/vm/ram"
@@ -940,4 +946,117 @@ func (p *runtime) getNewCurrencyAccounts(ctx context.Context, currencyMetadataRe
 
 		Fees: fees,
 	}, nil
+}
+
+func (p *runtime) initializeCreatorAcccount(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
+	creatorOwner, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.CreatedBy)
+	if err != nil {
+		return errors.Wrap(err, "invalid creator account")
+	}
+
+	vmConfig := &common.VmConfig{
+		Authority: accounts.Authority,
+		Vm:        accounts.Vm,
+		Omnibus:   accounts.Omnibus,
+		Mint:      accounts.Mint,
+	}
+
+	timelockAccounts, err := creatorOwner.GetTimelockAccounts(vmConfig)
+	if err != nil {
+		return errors.Wrap(err, "error getting creator timelock accounts")
+	}
+
+	now := time.Now()
+	vaultAddress := timelockAccounts.Vault.PublicKey().ToBase58()
+
+	// Create the open accounts intent record
+	intentId, err := common.NewRandomAccount()
+	if err != nil {
+		return errors.Wrap(err, "error generating intent id")
+	}
+
+	intentRecord := &intent.Record{
+		IntentId:   intentId.PublicKey().ToBase58(),
+		IntentType: intent.OpenAccounts,
+
+		MintAccount: accounts.Mint.PublicKey().ToBase58(),
+
+		InitiatorOwnerAccount: creatorOwner.PublicKey().ToBase58(),
+
+		OpenAccountsMetadata: &intent.OpenAccountsMetadata{},
+
+		State: intent.StatePending,
+
+		CreatedAt: now,
+	}
+	err = p.data.SaveIntent(ctx, intentRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator open accounts intent")
+	}
+
+	// Create the open account action record
+	actionRecord := &action.Record{
+		Intent:     intentId.PublicKey().ToBase58(),
+		IntentType: intent.OpenAccounts,
+
+		ActionId:   0,
+		ActionType: action.OpenAccount,
+
+		Source: vaultAddress,
+
+		State: action.StatePending,
+
+		CreatedAt: now,
+	}
+	err = p.data.PutAllActions(ctx, actionRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator open account action")
+	}
+
+	// Create the timelock record
+	timelockRecord := timelockAccounts.ToDBRecord()
+	err = p.data.SaveTimelock(ctx, timelockRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator timelock record")
+	}
+
+	// Create the account info record with deposit sync enabled so
+	// Geyser can process the initial purchase
+	accountInfoRecord := &account.Record{
+		OwnerAccount:        creatorOwner.PublicKey().ToBase58(),
+		AuthorityAccount:    creatorOwner.PublicKey().ToBase58(),
+		TokenAccount:        vaultAddress,
+		MintAccount:         timelockAccounts.Mint.PublicKey().ToBase58(),
+		AccountType:         commonpb.AccountType_PRIMARY,
+		Index:               0,
+		RequiresDepositSync: true,
+	}
+	err = p.data.CreateAccountInfo(ctx, accountInfoRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator account info record")
+	}
+
+	// Create the fulfillment record for initializing the timelock account
+	fulfillmentRecord := &fulfillment.Record{
+		Intent:     intentId.PublicKey().ToBase58(),
+		IntentType: intent.OpenAccounts,
+
+		ActionId:   0,
+		ActionType: action.OpenAccount,
+
+		FulfillmentType: fulfillment.InitializeLockedTimelockAccount,
+
+		Source: vaultAddress,
+
+		IntentOrderingIndex:      intentRecord.Id,
+		ActionOrderingIndex:      0,
+		FulfillmentOrderingIndex: 0,
+
+		DisableActiveScheduling: false,
+
+		State: fulfillment.StateUnknown,
+
+		CreatedAt: now,
+	}
+	return p.data.PutAllFulfillments(ctx, fulfillmentRecord)
 }
