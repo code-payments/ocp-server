@@ -19,6 +19,7 @@ func RunTests(t *testing.T, s swap.Store, teardown func()) {
 		testUpdateHappyPath,
 		testUpdateStaleRecord,
 		testGetAllByOwnerAndState,
+		testGetAllByOwnerAndMint,
 		testGetAllByState,
 	} {
 		tf(t, s)
@@ -244,6 +245,87 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 				}
 			}
 		}
+	})
+}
+
+func testGetAllByOwnerAndMint(t *testing.T, s swap.Store) {
+	t.Run("testGetAllByOwnerAndMint", func(t *testing.T) {
+		ctx := context.Background()
+
+		_, err := s.GetAllByOwnerAndMint(ctx, "test_owner", "test_mint", swap.StateFinalized)
+		assert.Equal(t, swap.ErrNotFound, err)
+
+		// Create swaps with different owners, mints, and states
+		records := []*swap.Record{
+			{ // owner_a buying mint_x
+				SwapId: "swap_0", Owner: "owner_a",
+				FromMint: "core_mint", ToMint: "mint_x", Amount: 100,
+				FundingId: "fund_0", FundingSource: swap.FundingSourceSubmitIntent,
+				Nonce: "nonce_0", Blockhash: "bh_0", ProofSignature: "proof_0",
+				TransactionSignature: "sig_0", State: swap.StateFinalized, CreatedAt: time.Now(),
+			},
+			{ // owner_a selling mint_x
+				SwapId: "swap_1", Owner: "owner_a",
+				FromMint: "mint_x", ToMint: "core_mint", Amount: 50,
+				FundingId: "fund_1", FundingSource: swap.FundingSourceSubmitIntent,
+				Nonce: "nonce_1", Blockhash: "bh_1", ProofSignature: "proof_1",
+				TransactionSignature: "sig_1", State: swap.StateFinalized, CreatedAt: time.Now(),
+			},
+			{ // owner_a buying mint_y (different mint)
+				SwapId: "swap_2", Owner: "owner_a",
+				FromMint: "core_mint", ToMint: "mint_y", Amount: 200,
+				FundingId: "fund_2", FundingSource: swap.FundingSourceSubmitIntent,
+				Nonce: "nonce_2", Blockhash: "bh_2", ProofSignature: "proof_2",
+				TransactionSignature: "sig_2", State: swap.StateFinalized, CreatedAt: time.Now(),
+			},
+			{ // owner_b buying mint_x (different owner)
+				SwapId: "swap_3", Owner: "owner_b",
+				FromMint: "core_mint", ToMint: "mint_x", Amount: 300,
+				FundingId: "fund_3", FundingSource: swap.FundingSourceSubmitIntent,
+				Nonce: "nonce_3", Blockhash: "bh_3", ProofSignature: "proof_3",
+				TransactionSignature: "sig_3", State: swap.StateFinalized, CreatedAt: time.Now(),
+			},
+			{ // owner_a buying mint_x but not finalized
+				SwapId: "swap_4", Owner: "owner_a",
+				FromMint: "core_mint", ToMint: "mint_x", Amount: 400,
+				FundingId: "fund_4", FundingSource: swap.FundingSourceSubmitIntent,
+				Nonce: "nonce_4", Blockhash: "bh_4", ProofSignature: "proof_4",
+				TransactionSignature: "sig_4", State: swap.StateCreated, CreatedAt: time.Now(),
+			},
+		}
+
+		for _, record := range records {
+			require.NoError(t, s.Save(ctx, record))
+		}
+
+		// owner_a + mint_x + finalized: should get swap_0 (buy) and swap_1 (sell)
+		results, err := s.GetAllByOwnerAndMint(ctx, "owner_a", "mint_x", swap.StateFinalized)
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		assert.Equal(t, "swap_0", results[0].SwapId)
+		assert.Equal(t, "swap_1", results[1].SwapId)
+
+		// owner_a + mint_y + finalized: should get swap_2 only
+		results, err = s.GetAllByOwnerAndMint(ctx, "owner_a", "mint_y", swap.StateFinalized)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, "swap_2", results[0].SwapId)
+
+		// owner_b + mint_x + finalized: should get swap_3 only
+		results, err = s.GetAllByOwnerAndMint(ctx, "owner_b", "mint_x", swap.StateFinalized)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, "swap_3", results[0].SwapId)
+
+		// owner_a + mint_x + created: should get swap_4 only
+		results, err = s.GetAllByOwnerAndMint(ctx, "owner_a", "mint_x", swap.StateCreated)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, "swap_4", results[0].SwapId)
+
+		// no matching records
+		_, err = s.GetAllByOwnerAndMint(ctx, "owner_b", "mint_y", swap.StateFinalized)
+		assert.Equal(t, swap.ErrNotFound, err)
 	})
 }
 

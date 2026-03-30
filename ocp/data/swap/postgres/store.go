@@ -66,6 +66,19 @@ func (s *store) GetAllByOwnerAndState(ctx context.Context, owner string, state s
 	return records, nil
 }
 
+func (s *store) GetAllByOwnerAndMint(ctx context.Context, owner string, mint string, state swap.State) ([]*swap.Record, error) {
+	models, err := dbGetAllByOwnerAndMint(ctx, s.db, owner, mint, state)
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]*swap.Record, len(models))
+	for i, model := range models {
+		records[i] = fromModel(model)
+	}
+	return records, nil
+}
+
 func (s *store) GetAllByState(ctx context.Context, state swap.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*swap.Record, error) {
 	models, err := dbGetAllByState(ctx, s.db, state, cursor, limit, direction)
 	if err != nil {
