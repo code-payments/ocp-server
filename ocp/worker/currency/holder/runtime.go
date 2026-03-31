@@ -16,10 +16,15 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/worker"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
 const (
 	historicalUpdateTimeInterval = time.Hour
+)
+
+var (
+	minHoldingValue = common.ToCoreMintQuarks(10)
 )
 
 type holderRuntime struct {
@@ -59,16 +64,16 @@ func (p *holderRuntime) Start(runtimeCtx context.Context, interval time.Duration
 }
 
 func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Context) {
-	liveHolderRecordsByMint, err := p.data.GetAllLiveCurrencyHolderCounts(ctx)
+	liveReserveRecordsByMint, err := p.data.GetAllLiveCurrencyReserves(ctx)
 	if err != nil {
 		p.log.With(zap.Error(err)).Warn("failed getting all available currencies")
 		return
 	}
 
-	for mint := range liveHolderRecordsByMint {
+	for mint, reserveRecord := range liveReserveRecordsByMint {
 		log := p.log.With(zap.String("mint", mint))
 
-		holderCount, err := p.countHoldersForMint(ctx, mint)
+		holderCount, err := p.countHoldersForMint(ctx, mint, reserveRecord.SupplyFromBonding)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed counting holders for mint")
 			continue
@@ -112,7 +117,16 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 	}
 }
 
-func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string) (uint64, error) {
+func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string, currentSupply uint64) (uint64, error) {
+	minHoldings := currencycreator.EstimateValueExchange(&currencycreator.EstimateValueExchangeArgs{
+		CurrentSupplyInQuarks: currentSupply,
+		ValueInQuarks:         minHoldingValue,
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+	})
+	if minHoldings == 0 {
+		return 0, nil
+	}
+
 	accountRecords, err := p.data.GetAccountInfosByMintAndType(ctx, mint, commonpb.AccountType_PRIMARY)
 	if err == account.ErrAccountInfoNotFound {
 		return 0, nil
@@ -139,7 +153,7 @@ func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string) (u
 
 	var count uint64
 	for _, bal := range balances {
-		if bal > 0 {
+		if bal >= minHoldings {
 			count++
 		}
 	}

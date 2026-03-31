@@ -443,6 +443,211 @@ func TestDiscreteFractionalSupply(t *testing.T) {
 	assertApproxEq(t, tokensBack, big.NewFloat(10), 0.0000000001, "Tokens from fractional supply")
 }
 
+func TestDiscreteTokensForValueExchangeZeroValue(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	// Test with 0 value from various supplies
+	for _, supplyVal := range []float64{0, 50, 100, 1000, 10000} {
+		supply := big.NewFloat(supplyVal)
+		value := big.NewFloat(0)
+		tokens := curve.TokensForValueExchange(supply, value)
+		if tokens.Cmp(big.NewFloat(0)) != 0 {
+			t.Errorf("0 value from supply %f should yield 0 tokens, got %s",
+				supplyVal, tokens.Text('f', 18))
+		}
+	}
+}
+
+func TestDiscreteTokensForValueExchangeWithinSingleStep(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	// Supply at 50, sell tokens within the same step (step 0)
+	supply := big.NewFloat(50)
+	price0 := big.NewFloat(0.01)
+
+	// Value for 25 tokens at price0 = 0.25
+	valueFor25 := new(big.Float).Mul(price0, big.NewFloat(25))
+	tokens := curve.TokensForValueExchange(supply, valueFor25)
+	assertApproxEq(t, tokens, big.NewFloat(25), 0.0000000001, "Tokens for value within single step")
+}
+
+func TestDiscreteTokensForValueExchangeCrossingBoundary(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	// Supply at 250, sell tokens crossing step boundaries
+	supply := big.NewFloat(250)
+	sellTokens := big.NewFloat(150)
+
+	// Calculate the value of selling 150 tokens from supply 250
+	// (that's TokensToValue from supply 100 to 250)
+	newSupply := new(big.Float).Sub(supply, sellTokens)
+	value := curve.TokensToValue(newSupply, sellTokens)
+
+	// Now TokensForValueExchange should return 150
+	tokensResult := curve.TokensForValueExchange(supply, value)
+	assertApproxEq(t, tokensResult, sellTokens, 1, "Tokens for value crossing boundary")
+}
+
+func TestDiscreteTokensForValueExchangeRoundtrip(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	testCases := []struct {
+		supply float64
+		tokens float64
+	}{
+		{100, 50},
+		{100, 100},
+		{250, 150},
+		{500, 250},
+		{1000, 500},
+		{1000, 1000},
+		{10000, 5000},
+		{50000, 25000},
+	}
+
+	for _, tc := range testCases {
+		supply := big.NewFloat(tc.supply)
+		sellTokens := big.NewFloat(tc.tokens)
+
+		// Calculate value of selling these tokens
+		newSupply := new(big.Float).Sub(supply, sellTokens)
+		value := curve.TokensToValue(newSupply, sellTokens)
+		if value == nil {
+			t.Errorf("TokensToValue returned nil for supply=%f, tokens=%f", tc.supply, tc.tokens)
+			continue
+		}
+
+		// Roundtrip: value -> tokens should give back the original tokens
+		tokensBack := curve.TokensForValueExchange(supply, value)
+		if tokensBack == nil {
+			t.Errorf("TokensForValueExchange returned nil for supply=%f, value=%s", tc.supply, value.Text('f', 18))
+			continue
+		}
+
+		assertApproxEq(t, tokensBack, sellTokens, 1,
+			fmt.Sprintf("Roundtrip value->tokens for supply=%f, tokens=%f", tc.supply, tc.tokens))
+	}
+}
+
+func TestDiscreteTokensForValueExchangeFractionalRoundtrip(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	testCases := []struct {
+		supply float64
+		tokens float64
+	}{
+		{50.5, 25.3},
+		{100.25, 50.75},
+		{250.123, 100.456},
+		{1000.5, 500.25},
+		{10000.5, 1234.567},
+	}
+
+	for _, tc := range testCases {
+		supply := big.NewFloat(tc.supply)
+		sellTokens := big.NewFloat(tc.tokens)
+
+		// Calculate value of selling these tokens
+		newSupply := new(big.Float).Sub(supply, sellTokens)
+		value := curve.TokensToValue(newSupply, sellTokens)
+		if value == nil {
+			t.Errorf("TokensToValue returned nil for supply=%f, tokens=%f", tc.supply, tc.tokens)
+			continue
+		}
+
+		// Roundtrip: value -> tokens should give back the original tokens
+		tokensBack := curve.TokensForValueExchange(supply, value)
+		if tokensBack == nil {
+			t.Errorf("TokensForValueExchange returned nil for supply=%f, value=%s", tc.supply, value.Text('f', 18))
+			continue
+		}
+
+		assertApproxEq(t, tokensBack, sellTokens, 0.0000000001,
+			fmt.Sprintf("Fractional roundtrip value->tokens for supply=%f, tokens=%f", tc.supply, tc.tokens))
+	}
+}
+
+func TestDiscreteTokensForValueExchangeEntireSupply(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	// Selling the entire supply should return all tokens
+	supply := big.NewFloat(1000)
+	zero := big.NewFloat(0)
+	totalValue := curve.TokensToValue(zero, supply)
+
+	tokens := curve.TokensForValueExchange(supply, totalValue)
+	assertApproxEq(t, tokens, supply, 1, "Selling entire supply should return all tokens")
+}
+
+func TestDiscreteTokensForValueExchangeExceedsSupplyReturnsNil(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	supply := big.NewFloat(100)
+	zero := big.NewFloat(0)
+	totalValue := curve.TokensToValue(zero, supply)
+
+	// Try to extract more value than the entire supply is worth
+	excessValue := new(big.Float).Add(totalValue, big.NewFloat(1))
+	tokens := curve.TokensForValueExchange(supply, excessValue)
+	if tokens != nil {
+		t.Errorf("Value exceeding supply should return nil, got %s", tokens.Text('f', 18))
+	}
+}
+
+func TestDiscreteTokensForValueExchangeZeroSupplyReturnsNil(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	// At zero supply, any positive value should return nil
+	supply := big.NewFloat(0)
+	value := big.NewFloat(1)
+	tokens := curve.TokensForValueExchange(supply, value)
+	if tokens != nil {
+		t.Errorf("Zero supply with positive value should return nil, got %s", tokens.Text('f', 18))
+	}
+}
+
+func TestDiscreteTokensForValueExchangeSellingInPartsEqualsSellingAllAtOnce(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	supply := big.NewFloat(500)
+
+	// Sell 300 tokens total: first sell for some value, then sell more for more value
+	sellTokens := big.NewFloat(300)
+	newSupply := new(big.Float).Sub(supply, sellTokens)
+	totalValue := curve.TokensToValue(newSupply, sellTokens)
+
+	// Split the value into two parts
+	value1 := new(big.Float).Quo(totalValue, big.NewFloat(3))
+	value2 := new(big.Float).Sub(totalValue, value1)
+
+	// Sell for value1 first
+	tokens1 := curve.TokensForValueExchange(supply, value1)
+	supplyAfterFirstSell := new(big.Float).Sub(supply, tokens1)
+
+	// Then sell for value2
+	tokens2 := curve.TokensForValueExchange(supplyAfterFirstSell, value2)
+
+	// Total tokens should equal selling all at once
+	tokensAll := curve.TokensForValueExchange(supply, totalValue)
+	tokensParts := new(big.Float).Add(tokens1, tokens2)
+
+	assertApproxEq(t, tokensParts, tokensAll, 1,
+		"Selling in parts should equal selling all at once")
+}
+
+func TestDiscreteTokensForValueExchangeLargeAcrossManySteps(t *testing.T) {
+	curve := DefaultDiscreteExponentialCurve()
+
+	supply := big.NewFloat(1234567)
+	sellTokens := big.NewFloat(10000)
+
+	newSupply := new(big.Float).Sub(supply, sellTokens)
+	value := curve.TokensToValue(newSupply, sellTokens)
+
+	tokensBack := curve.TokensForValueExchange(supply, value)
+	assertApproxEq(t, tokensBack, sellTokens, 1, "Large exchange across many steps roundtrip")
+}
+
 func TestGenerateDiscreteCurveTable(t *testing.T) {
 	t.Skip()
 
