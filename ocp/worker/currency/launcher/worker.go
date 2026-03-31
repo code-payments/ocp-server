@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	initialAuthorityFundingLamports = 2_000_000_000 // 2 SOL
+	initialAuthorityFundingLamports = 1_300_000_000 // 1.3 SOL
 
 	initialNoncePoolSize          = 1_000
 	initialNonceMemoryAccountName = "nonce-0"
