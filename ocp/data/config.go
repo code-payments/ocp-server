@@ -6,13 +6,16 @@ import (
 )
 
 const (
-	FixerApiKeyConfigEnvName = "FIXER_API_KEY"
-	defaultFixerApiKey       = ""
+	FixerApiKeyConfigEnvName           = "FIXER_API_KEY"
+	ExchangeRateApiKeyConfigEnvName    = "EXCHANGE_RATE_API_KEY"
+	defaultFixerApiKey                 = ""
+	defaultExchangeRateApiKey          = ""
 )
 
 // todo: Add other data store configs here (eg. postgres, solana, etc).
 type conf struct {
-	fixerApiKey config.String
+	fixerApiKey           config.String
+	exchangeRateApiKey    config.String
 }
 
 // ConfigProvider defines how config values are pulled
@@ -24,7 +27,8 @@ type ConfigProvider func() *conf
 func WithEnvConfigs() ConfigProvider {
 	return func() *conf {
 		return &conf{
-			fixerApiKey: env.NewStringConfig(FixerApiKeyConfigEnvName, defaultFixerApiKey),
+			fixerApiKey:        env.NewStringConfig(FixerApiKeyConfigEnvName, defaultFixerApiKey),
+			exchangeRateApiKey: env.NewStringConfig(ExchangeRateApiKeyConfigEnvName, defaultExchangeRateApiKey),
 		}
 	}
 }
