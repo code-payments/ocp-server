@@ -193,19 +193,22 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 		return errors.Wrap(err, "error ensuring swap destination is initialized")
 	}
 
-	ok, err := p.validateDestinationCurrencyReadyForSwap(ctx, record)
-	if err != nil {
-		return errors.Wrap(err, "error ensuring destination currency is ready to be initialized")
-	} else if !ok {
-		return nil
-	}
-
 	return p.markSwapSubmitting(ctx, record)
 }
 
 func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record) error {
 	if err := p.validateSwapState(record, swap.StateSubmitting); err != nil {
 		return err
+	}
+
+	// todo: Need to wait for authority funding, which should only happen after swap
+	//       funding is validated. However, having it in this handler is a bit awkward.
+	//       Refactor swap state management to address.
+	ok, err := p.validateDestinationCurrencyReadyForSwap(ctx, record)
+	if err != nil {
+		return errors.Wrap(err, "error ensuring destination currency is ready to be initialized")
+	} else if !ok {
+		return nil
 	}
 
 	// Monitor for a finalized swap transaction

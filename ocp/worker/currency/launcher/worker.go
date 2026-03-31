@@ -13,6 +13,7 @@ import (
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/retry"
 )
 
@@ -112,6 +113,19 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateFundingAuthority)
 	if err != nil {
 		return err
+	}
+
+	// Validate the associated swap is in the submitting state before funding
+	// the authority. This prevents wasting SOL if the swap has been cancelled
+	// or hasn't progressed far enough.
+	swapRecords, err := p.data.GetAllSwapsByOwnerAndMint(ctx, currencyMetadataRecord.CreatedBy, currencyMetadataRecord.Mint, swap.StateSubmitting)
+	if err == swap.ErrNotFound {
+		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "error checking associated swap state")
+	}
+	if len(swapRecords) == 0 {
+		return nil
 	}
 
 	authorityAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Authority)
