@@ -7,6 +7,7 @@ import (
 
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/currency/coingecko"
+	"github.com/code-payments/ocp-server/currency/exchangerateapi"
 	"github.com/code-payments/ocp-server/currency/fixer"
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/config"
@@ -29,15 +30,17 @@ type WebData interface {
 }
 
 type WebProvider struct {
-	coinGecko currency_lib.Client
-	fixer     currency_lib.Client
+	coinGecko       currency_lib.Client
+	fixer           currency_lib.Client
+	exchangeRateApi currency_lib.Client
 }
 
 func NewWebProvider(configProvider ConfigProvider) (WebData, error) {
 	conf := configProvider()
 	return &WebProvider{
-		coinGecko: coingecko.NewClient(),
-		fixer:     fixer.NewClient(conf.fixerApiKey.Get(context.Background())),
+		coinGecko:       coingecko.NewClient(),
+		fixer:           fixer.NewClient(conf.fixerApiKey.Get(context.Background())),
+		exchangeRateApi: exchangerateapi.NewClient(conf.exchangeRateApiKey.Get(context.Background())),
 	}, nil
 }
 
@@ -61,12 +64,12 @@ func (dp *WebProvider) GetCurrentExchangeRatesFromExternalProviders(ctx context.
 		coinGeckoRates = coinGeckoData.Rates
 	}
 
-	fixerData, err := dp.fixer.GetCurrentRates(ctx, string(currency_lib.USD))
+	fiatRates, err := dp.getCurrentFiatRates(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	rates, err := computeAllExchangeRates(coinGeckoRates, fixerData.Rates)
+	rates, err := computeAllExchangeRates(coinGeckoRates, fiatRates)
 	if err != nil {
 		return nil, err
 	}
@@ -95,12 +98,12 @@ func (dp *WebProvider) GetPastExchangeRatesFromExternalProviders(ctx context.Con
 		ts = coinGeckoData.Timestamp
 	}
 
-	fixerData, err := dp.fixer.GetHistoricalRates(ctx, string(currency_lib.USD), t.UTC())
+	fiatRates, err := dp.getHistoricalFiatRates(ctx, t.UTC())
 	if err != nil {
 		return nil, err
 	}
 
-	rates, err := computeAllExchangeRates(coinGeckoRates, fixerData.Rates)
+	rates, err := computeAllExchangeRates(coinGeckoRates, fiatRates)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +112,32 @@ func (dp *WebProvider) GetPastExchangeRatesFromExternalProviders(ctx context.Con
 		Time:  ts,
 		Rates: rates,
 	}, nil
+}
+
+func (dp *WebProvider) getCurrentFiatRates(ctx context.Context) (map[string]float64, error) {
+	fixerData, err := dp.fixer.GetCurrentRates(ctx, string(currency_lib.USD))
+	if err == nil {
+		return fixerData.Rates, nil
+	}
+
+	exchangeRateData, err := dp.exchangeRateApi.GetCurrentRates(ctx, string(currency_lib.USD))
+	if err != nil {
+		return nil, err
+	}
+	return exchangeRateData.Rates, nil
+}
+
+func (dp *WebProvider) getHistoricalFiatRates(ctx context.Context, t time.Time) (map[string]float64, error) {
+	fixerData, err := dp.fixer.GetHistoricalRates(ctx, string(currency_lib.USD), t)
+	if err == nil {
+		return fixerData.Rates, nil
+	}
+
+	exchangeRateData, err := dp.exchangeRateApi.GetHistoricalRates(ctx, string(currency_lib.USD), t)
+	if err != nil {
+		return nil, err
+	}
+	return exchangeRateData.Rates, nil
 }
 
 func computeAllExchangeRates(coreMintRates map[string]float64, usdRates map[string]float64) (map[string]float64, error) {
