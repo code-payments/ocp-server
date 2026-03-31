@@ -118,7 +118,7 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 	// Validate the associated swap is in the submitting state before funding
 	// the authority. This prevents wasting SOL if the swap has been cancelled
 	// or hasn't progressed far enough.
-	swapRecords, err := p.data.GetAllSwapsByOwnerAndMint(ctx, currencyMetadataRecord.CreatedBy, currencyMetadataRecord.Mint, swap.StateSubmitting)
+	swapRecords, err := p.data.GetAllSwapsByOwnerMintAndState(ctx, currencyMetadataRecord.CreatedBy, currencyMetadataRecord.Mint, swap.StateSubmitting)
 	if err == swap.ErrNotFound {
 		return nil
 	} else if err != nil {

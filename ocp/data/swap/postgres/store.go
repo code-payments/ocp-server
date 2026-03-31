@@ -6,8 +6,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/database/query"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
 type store struct {
@@ -66,8 +66,8 @@ func (s *store) GetAllByOwnerAndState(ctx context.Context, owner string, state s
 	return records, nil
 }
 
-func (s *store) GetAllByOwnerAndMint(ctx context.Context, owner string, mint string, state swap.State) ([]*swap.Record, error) {
-	models, err := dbGetAllByOwnerAndMint(ctx, s.db, owner, mint, state)
+func (s *store) GetAllByOwnerMintAndState(ctx context.Context, owner string, mint string, state swap.State) ([]*swap.Record, error) {
+	models, err := dbGetAllByOwnerMintAndState(ctx, s.db, owner, mint, state)
 	if err != nil {
 		return nil, err
 	}

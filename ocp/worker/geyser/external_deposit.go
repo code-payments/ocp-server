@@ -459,7 +459,7 @@ func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider
 		return false, 0, nil
 	}
 
-	swapRecords, err := data.GetAllSwapsByOwnerAndMint(ctx, owner.PublicKey().ToBase58(), mint.PublicKey().ToBase58(), swap.StateFinalized)
+	swapRecords, err := data.GetAllSwapsByOwnerMintAndState(ctx, owner.PublicKey().ToBase58(), mint.PublicKey().ToBase58(), swap.StateFinalized)
 	if err == swap.ErrNotFound {
 		return false, 0, nil
 	} else if err != nil {

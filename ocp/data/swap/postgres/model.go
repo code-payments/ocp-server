@@ -175,7 +175,7 @@ func dbGetAllByOwnerAndState(ctx context.Context, db *sqlx.DB, owner string, sta
 	return res, nil
 }
 
-func dbGetAllByOwnerAndMint(ctx context.Context, db *sqlx.DB, owner string, mint string, state swap.State) ([]*model, error) {
+func dbGetAllByOwnerMintAndState(ctx context.Context, db *sqlx.DB, owner string, mint string, state swap.State) ([]*model, error) {
 	res := []*model{}
 
 	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at

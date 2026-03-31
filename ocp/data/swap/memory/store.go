@@ -100,7 +100,7 @@ func (s *store) GetAllByOwnerAndState(_ context.Context, owner string, state swa
 	return cloneRecords(items), nil
 }
 
-func (s *store) GetAllByOwnerAndMint(_ context.Context, owner string, mint string, state swap.State) ([]*swap.Record, error) {
+func (s *store) GetAllByOwnerMintAndState(_ context.Context, owner string, mint string, state swap.State) ([]*swap.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

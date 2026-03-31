@@ -19,7 +19,7 @@ func RunTests(t *testing.T, s swap.Store, teardown func()) {
 		testUpdateHappyPath,
 		testUpdateStaleRecord,
 		testGetAllByOwnerAndState,
-		testGetAllByOwnerAndMint,
+		testGetAllByOwnerMintAndState,
 		testGetAllByState,
 	} {
 		tf(t, s)
@@ -248,11 +248,11 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 	})
 }
 
-func testGetAllByOwnerAndMint(t *testing.T, s swap.Store) {
+func testGetAllByOwnerMintAndState(t *testing.T, s swap.Store) {
 	t.Run("testGetAllByOwnerAndMint", func(t *testing.T) {
 		ctx := context.Background()
 
-		_, err := s.GetAllByOwnerAndMint(ctx, "test_owner", "test_mint", swap.StateFinalized)
+		_, err := s.GetAllByOwnerMintAndState(ctx, "test_owner", "test_mint", swap.StateFinalized)
 		assert.Equal(t, swap.ErrNotFound, err)
 
 		// Create swaps with different owners, mints, and states
@@ -299,32 +299,32 @@ func testGetAllByOwnerAndMint(t *testing.T, s swap.Store) {
 		}
 
 		// owner_a + mint_x + finalized: should get swap_0 (buy) and swap_1 (sell)
-		results, err := s.GetAllByOwnerAndMint(ctx, "owner_a", "mint_x", swap.StateFinalized)
+		results, err := s.GetAllByOwnerMintAndState(ctx, "owner_a", "mint_x", swap.StateFinalized)
 		require.NoError(t, err)
 		require.Len(t, results, 2)
 		assert.Equal(t, "swap_0", results[0].SwapId)
 		assert.Equal(t, "swap_1", results[1].SwapId)
 
 		// owner_a + mint_y + finalized: should get swap_2 only
-		results, err = s.GetAllByOwnerAndMint(ctx, "owner_a", "mint_y", swap.StateFinalized)
+		results, err = s.GetAllByOwnerMintAndState(ctx, "owner_a", "mint_y", swap.StateFinalized)
 		require.NoError(t, err)
 		require.Len(t, results, 1)
 		assert.Equal(t, "swap_2", results[0].SwapId)
 
 		// owner_b + mint_x + finalized: should get swap_3 only
-		results, err = s.GetAllByOwnerAndMint(ctx, "owner_b", "mint_x", swap.StateFinalized)
+		results, err = s.GetAllByOwnerMintAndState(ctx, "owner_b", "mint_x", swap.StateFinalized)
 		require.NoError(t, err)
 		require.Len(t, results, 1)
 		assert.Equal(t, "swap_3", results[0].SwapId)
 
 		// owner_a + mint_x + created: should get swap_4 only
-		results, err = s.GetAllByOwnerAndMint(ctx, "owner_a", "mint_x", swap.StateCreated)
+		results, err = s.GetAllByOwnerMintAndState(ctx, "owner_a", "mint_x", swap.StateCreated)
 		require.NoError(t, err)
 		require.Len(t, results, 1)
 		assert.Equal(t, "swap_4", results[0].SwapId)
 
 		// no matching records
-		_, err = s.GetAllByOwnerAndMint(ctx, "owner_b", "mint_y", swap.StateFinalized)
+		_, err = s.GetAllByOwnerMintAndState(ctx, "owner_b", "mint_y", swap.StateFinalized)
 		assert.Equal(t, swap.ErrNotFound, err)
 	})
 }
