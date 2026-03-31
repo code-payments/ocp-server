@@ -194,7 +194,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 
 			deltaQuarksOutOfVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
 			if err != nil {
-				return 0, false, nil
+				return 0, false, err
 			}
 
 			if deltaQuarksOutOfVault >= 0 {

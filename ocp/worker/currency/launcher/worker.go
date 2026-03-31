@@ -175,7 +175,7 @@ func (p *runtime) handleStateCompletingInitialization(ctx context.Context, curre
 		return errors.Wrap(err, "error checking if initialization phase 1 is complete")
 	} else if !ok {
 		// todo: How do we recover from this?
-		return errors.Wrap(err, "initialization phase 1 did not happen")
+		return errors.New("initialization phase 1 did not happen")
 	}
 
 	//
@@ -233,7 +233,7 @@ func (p *runtime) handleStateCompletingInitialization(ctx context.Context, curre
 
 	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, accounts.NonceMemoryAccount)
 	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
+		return errors.Wrap(err, "error checking if initialization phase 4 is complete")
 	} else if !ok {
 		err := p.populateNonceMemory(ctx, accounts)
 		if err != nil {
@@ -243,7 +243,7 @@ func (p *runtime) handleStateCompletingInitialization(ctx context.Context, curre
 
 	ok, err = validateNoncePoolInitialized(ctx, p.data, accounts.NonceMemoryAccount)
 	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
+		return errors.Wrap(err, "error checking if initialization phase 4 is complete")
 	} else if !ok {
 		err := p.initializeNoncePool(ctx, accounts)
 		if err != nil {
@@ -292,7 +292,7 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 	if err != nil {
 		return errors.Wrap(err, "error validating liquidity pool exists")
 	} else if !ok {
-		return errors.New("")
+		return errors.New("liquidity pool doesn't exist")
 	}
 
 	ok, err = validateVmExists(ctx, p.data, accounts.Vm)

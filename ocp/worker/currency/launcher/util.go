@@ -495,6 +495,9 @@ func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyM
 		common.GetSubsidizer().PublicKey().ToBytes(),
 		accounts.Mint.PublicKey().ToBytes(),
 	)
+	if err != nil {
+		return errors.Wrap(err, "error creating init fee ata ixn")
+	}
 
 	initAltIxn := address_lookup_table.Create(
 		accounts.Alt.PublicKey().ToBytes(),

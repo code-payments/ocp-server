@@ -774,12 +774,18 @@ func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) (
 		h.buyer.PublicKey().ToBytes(),
 		common.CoreMintAccount.PublicKey().ToBytes(),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	createVmDepositAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(
 		h.destinationCurrencyAccounts.Authority.PublicKey().ToBytes(),
 		buyerVmDepositAccounts.Pda.PublicKey().ToBytes(),
 		h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	closeTemporaryCoreMintAta := token.CloseAccount(
 		temporaryCoreMintAta,
