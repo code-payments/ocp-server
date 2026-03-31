@@ -205,3 +205,104 @@ func (c *DiscreteExponentialCurve) ValueToTokens(currentSupply, value *big.Float
 
 	return totalTokens
 }
+
+// TokensForValueExchange calculates the number of tokens that should be exchanged
+// (sold) starting at `currentSupply` to receive `value` in return.
+// This is equivalent to "How many tokens do I need to sell to get Y value?"
+// Returns nil if the supply is beyond table bounds or if there aren't enough tokens.
+// Supports fractional tokens - does not round up or down.
+func (c *DiscreteExponentialCurve) TokensForValueExchange(currentSupply, value *big.Float) *big.Float {
+	zero := big.NewFloat(0)
+	if value.Cmp(zero) == 0 {
+		return big.NewFloat(0)
+	}
+
+	stepSizeFloat := big.NewFloat(DiscretePricingStepSize)
+	scaleFloat := new(big.Float).SetPrec(defaultCurvePrec).SetInt(c.scale)
+
+	// Calculate start step
+	startStepFloat := new(big.Float).SetPrec(defaultCurvePrec).Quo(currentSupply, stepSizeFloat)
+	startStepInt, _ := startStepFloat.Int(nil)
+	startStep := startStepInt.Int64()
+
+	if startStep < 0 || int(startStep) >= len(DiscretePricingTable) {
+		return nil
+	}
+
+	// Convert value to scaled float for comparison with scaled prices
+	valueScaled := new(big.Float).SetPrec(defaultCurvePrec).Mul(value, scaleFloat)
+
+	// Calculate tokens available in the current partial step (from step boundary to currentSupply)
+	startStepBoundary := new(big.Float).SetPrec(defaultCurvePrec).Mul(big.NewFloat(float64(startStep)), stepSizeFloat)
+	tokensInCurrentPartialStep := new(big.Float).SetPrec(defaultCurvePrec).Sub(currentSupply, startStepBoundary)
+	startPrice := new(big.Float).SetPrec(defaultCurvePrec).SetInt(DiscretePricingTable[startStep])
+	costOfCurrentPartialStep := new(big.Float).SetPrec(defaultCurvePrec).Mul(tokensInCurrentPartialStep, startPrice)
+
+	// If the value fits within the current partial step, divide value by price for fractional tokens
+	if valueScaled.Cmp(costOfCurrentPartialStep) <= 0 {
+		tokens := new(big.Float).SetPrec(defaultCurvePrec).Quo(valueScaled, startPrice)
+		return tokens
+	}
+
+	// We can at least consume the entire current partial step
+	remainingValueScaled := new(big.Float).SetPrec(defaultCurvePrec).Sub(valueScaled, costOfCurrentPartialStep)
+
+	// baseCumulative is the total value of all complete steps below startStep (steps 0..startStep-1)
+	baseCumulative := new(big.Float).SetPrec(defaultCurvePrec).SetInt(DiscreteCumulativeValueTable[startStep])
+
+	// Check if there's enough value in the entire supply below
+	if remainingValueScaled.Cmp(baseCumulative) > 0 {
+		return nil
+	}
+
+	// Target cumulative: find endStep where cumulative[endStep] >= baseCumulative - remainingValueScaled
+	targetCumulative := new(big.Float).SetPrec(defaultCurvePrec).Sub(baseCumulative, remainingValueScaled)
+
+	// Convert to big.Int for binary search (use ceiling to avoid overshooting complete steps)
+	targetCumulativeInt, accuracy := targetCumulative.Int(nil)
+	if accuracy == big.Below {
+		targetCumulativeInt.Add(targetCumulativeInt, big.NewInt(1))
+	}
+
+	// Binary search for the smallest endStep where cumulative[endStep] >= targetCumulativeInt
+	low := 0
+	high := int(startStep)
+
+	for low < high {
+		mid := (low + high) / 2
+		if DiscreteCumulativeValueTable[mid].Cmp(targetCumulativeInt) >= 0 {
+			high = mid
+		} else {
+			low = mid + 1
+		}
+	}
+
+	endStep := low
+
+	// Calculate tokens from complete steps (selling steps startStep-1 down to endStep)
+	endStepSupply := new(big.Float).SetPrec(defaultCurvePrec).Mul(big.NewFloat(float64(endStep)), stepSizeFloat)
+	tokensFromCompleteSteps := new(big.Float).SetPrec(defaultCurvePrec).Sub(startStepBoundary, endStepSupply)
+
+	// Calculate remaining value after complete steps
+	cumulativeAtEndStep := new(big.Float).SetPrec(defaultCurvePrec).SetInt(DiscreteCumulativeValueTable[endStep])
+	valueUsedForCompleteSteps := new(big.Float).SetPrec(defaultCurvePrec).Sub(baseCumulative, cumulativeAtEndStep)
+	remainingValue := new(big.Float).SetPrec(defaultCurvePrec).Sub(remainingValueScaled, valueUsedForCompleteSteps)
+
+	// Sell fractional tokens in the step below endStep with remaining value
+	var tokensInEndPartialStep *big.Float
+	if remainingValue.Cmp(zero) > 0 {
+		if endStep == 0 {
+			return nil
+		}
+		endPrice := new(big.Float).SetPrec(defaultCurvePrec).SetInt(DiscretePricingTable[endStep-1])
+		tokensInEndPartialStep = new(big.Float).SetPrec(defaultCurvePrec).Quo(remainingValue, endPrice)
+	} else {
+		tokensInEndPartialStep = new(big.Float).SetPrec(defaultCurvePrec).SetFloat64(0)
+	}
+
+	// Total tokens = partial top step + complete middle steps + fractional bottom step
+	totalTokens := new(big.Float).SetPrec(defaultCurvePrec).Add(tokensInCurrentPartialStep, tokensFromCompleteSteps)
+	totalTokens.Add(totalTokens, tokensInEndPartialStep)
+
+	return totalTokens
+}
