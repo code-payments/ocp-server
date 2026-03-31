@@ -62,13 +62,21 @@ func (p *runtime) markSwapSubmitting(ctx context.Context, record *swap.Record) e
 }
 
 func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record) error {
-	destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return err
 	}
-	err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
-	if err != nil {
-		return err
+
+	var destinationCurrencyMetadataRecord *currency.MetadataRecord
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+		if err != nil {
+			return err
+		}
+		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
+		if err != nil {
+			return err
+		}
 	}
 
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
@@ -82,11 +90,13 @@ func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record
 			return err
 		}
 
-		if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
-			destinationCurrencyMetadataRecord.State = currency.MetadataStateCompletingInitialization
-			err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
-			if err != nil {
-				return err
+		if !common.IsCoreMint(toMint) {
+			if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
+				destinationCurrencyMetadataRecord.State = currency.MetadataStateCompletingInitialization
+				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
