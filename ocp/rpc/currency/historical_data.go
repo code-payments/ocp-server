@@ -259,11 +259,15 @@ func (s *currencyServer) getCachedExchangeRateHistory(
 
 // findClosestExchangeRate finds the exchange rate closest to the given time.
 func findClosestExchangeRate(t time.Time, history []*currency.ExchangeRateRecord) (float64, bool) {
-	// Find the closest preceding exchange rate
+	// Find the closest exchange rate
 	var closestRate float64
 	var found bool
 	for _, record := range history {
 		if record.Time.After(t) {
+			if !found {
+				closestRate = record.Rate
+				found = true
+			}
 			break
 		}
 		closestRate = record.Rate
