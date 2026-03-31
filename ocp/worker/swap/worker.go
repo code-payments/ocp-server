@@ -193,6 +193,13 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 		return errors.Wrap(err, "error ensuring swap destination is initialized")
 	}
 
+	ok, err := p.validateDestinationCurrencyReadyForSwap(ctx, record)
+	if err != nil {
+		return errors.Wrap(err, "error ensuring destination currency is ready to be initialized")
+	} else if !ok {
+		return nil
+	}
+
 	return p.markSwapSubmitting(ctx, record)
 }
 

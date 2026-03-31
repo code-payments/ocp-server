@@ -181,29 +181,31 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 		return 0, false, errors.New("core mint must be involved in swap")
 	}
 
-	destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
-	if err != nil {
-		return 0, false, err
-	}
-	if destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable {
-		currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(destinationCurrencyMetadataRecord)
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
 		if err != nil {
 			return 0, false, err
 		}
+		if destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable {
+			currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(destinationCurrencyMetadataRecord)
+			if err != nil {
+				return 0, false, err
+			}
 
-		deltaQuarksOutOfVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
-		if err != nil {
-			return 0, false, nil
+			deltaQuarksOutOfVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
+			if err != nil {
+				return 0, false, nil
+			}
+
+			if deltaQuarksOutOfVault >= 0 {
+				return 0, false, errors.New("delta quarks into destination vm omnibus is not negative")
+			}
+
+			// This swap is initializing the VM and the funds will be deposited
+			// after memory accounts become available. Balances should only be
+			// reflected after finalized deposit into a VTA.
+			return uint64(-deltaQuarksOutOfVault), true, nil
 		}
-
-		if deltaQuarksOutOfVault >= 0 {
-			return 0, false, errors.New("delta quarks into destination vm omnibus is not negative")
-		}
-
-		// This swap is initializing the VM and the funds will be deposited
-		// after memory accounts become available. Balances should only be
-		// reflected after finalized deposit into a VTA.
-		return uint64(-deltaQuarksOutOfVault), true, nil
 	}
 
 	destinationVmConfig, err := common.GetVmConfigForMint(ctx, p.data, toMint)
@@ -554,14 +556,16 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 		return err
 	}
 
-	destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, record.ToMint)
-	if err != nil {
-		return err
-	}
-	if destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable {
-		// This swap is initializing the VM and the funds will be deposited
-		// after memory accounts become available.
-		return nil
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, record.ToMint)
+		if err != nil {
+			return err
+		}
+		if destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable {
+			// This swap is initializing the VM and the funds will be deposited
+			// after memory accounts become available.
+			return nil
+		}
 	}
 
 	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
@@ -580,6 +584,28 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 	}
 
 	return vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, p.data, destinationTimelockVault, true)
+}
+
+func (p *runtime) validateDestinationCurrencyReadyForSwap(ctx context.Context, swapRecord *swap.Record) (bool, error) {
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return false, err
+	}
+
+	if common.IsCoreMint(toMint) {
+		return true, nil
+	}
+
+	destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+	if err != nil {
+		return false, err
+	}
+
+	err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
+	if err == nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (p *runtime) updateLiveReserveStateForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) error {
