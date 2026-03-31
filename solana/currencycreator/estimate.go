@@ -86,27 +86,30 @@ func EstimateSell(args *EstimateSellArgs) (uint64, uint64) {
 	return uint64(value - fees), uint64(fees)
 }
 
-// todo: Implement value exchange functionality for DiscreteExponentialCurve
+type EstimateValueExchangeArgs struct {
+	CurrentSupplyInQuarks uint64
+	ValueInQuarks         uint64
+	ValueMintDecimals     uint8
+}
 
-//type EstimateValueExchangeArgs struct {
-//	ValueInQuarks        uint64
-//	CurrentValueInQuarks uint64
-//	ValueMintDecimals    uint8
-//}
-//
-//func EstimateValueExchange(args *EstimateValueExchangeArgs) uint64 {
-//	scale := big.NewFloat(math.Pow10(int(args.ValueMintDecimals))).SetPrec(defaultCurvePrec)
-//	unscaledValue := big.NewFloat(float64(args.ValueInQuarks)).SetPrec(defaultCurvePrec)
-//	scaledValue := new(big.Float).Quo(unscaledValue, scale)
-//
-//	scale = big.NewFloat(math.Pow10(int(args.ValueMintDecimals))).SetPrec(defaultCurvePrec)
-//	unscaledCurrentValue := big.NewFloat(float64(args.CurrentValueInQuarks)).SetPrec(defaultCurvePrec)
-//	scaledCurrentValue := new(big.Float).Quo(unscaledCurrentValue, scale)
-//
-//	scale = big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
-//	scaledTokens := DefaultContinuousExponentialCurve().TokensForValueExchange(scaledCurrentValue, scaledValue)
-//	unscaledTokens := new(big.Float).Mul(scaledTokens, scale)
-//
-//	quarks, _ := unscaledTokens.Int64()
-//	return uint64(quarks)
-//}
+func EstimateValueExchange(args *EstimateValueExchangeArgs) uint64 {
+	scale := big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
+	unscaledCurrentSupply := big.NewFloat(float64(args.CurrentSupplyInQuarks)).SetPrec(defaultCurvePrec)
+	scaledCurrentSupply := new(big.Float).Quo(unscaledCurrentSupply, scale)
+
+	scale = big.NewFloat(math.Pow10(int(args.ValueMintDecimals))).SetPrec(defaultCurvePrec)
+	unscaledValue := big.NewFloat(float64(args.ValueInQuarks)).SetPrec(defaultCurvePrec)
+	scaledValue := new(big.Float).Quo(unscaledValue, scale)
+
+	curve := DefaultDiscreteExponentialCurve()
+	scaledTokens := curve.TokensForValueExchange(scaledCurrentSupply, scaledValue)
+	if scaledTokens == nil {
+		return 0
+	}
+
+	scale = big.NewFloat(math.Pow10(int(DefaultMintDecimals))).SetPrec(defaultCurvePrec)
+	unscaledTokens := new(big.Float).Mul(scaledTokens, scale)
+
+	quarks, _ := unscaledTokens.Int64()
+	return uint64(quarks)
+}
