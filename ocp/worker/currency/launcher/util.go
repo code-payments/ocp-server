@@ -188,10 +188,10 @@ func validateMinimumAuthorityFunding(ctx context.Context, data ocp_data.Provider
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	switch err {
 	case nil:
-		if ai.Lamports >= initialAuthorityFundingLamports {
+		if ai.Lamports >= amount {
 			return true, 0, nil
 		}
-		return false, initialAuthorityFundingLamports - ai.Lamports, nil
+		return false, amount - ai.Lamports, nil
 	case solana.ErrNoAccountInfo:
 		return false, amount, nil
 	default:
