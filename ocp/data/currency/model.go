@@ -347,7 +347,7 @@ func (s MetadataState) String() string {
 	case MetadataStateExecutingInitialPurchase:
 		return "executing_initial_purchase"
 	case MetadataStateCompletingInitialization:
-		return "completing_initializing"
+		return "completing_initialization"
 	case MetadataStateFinalValidation:
 		return "final_validation"
 	}
