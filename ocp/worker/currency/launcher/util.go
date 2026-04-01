@@ -10,9 +10,15 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/account"
+	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
+	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	"github.com/code-payments/ocp-server/ocp/data/vm/ram"
@@ -22,7 +28,6 @@ import (
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/solana/system"
-	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
@@ -68,28 +73,18 @@ func (p *runtime) validateCurrencyMetadataState(record *currency.MetadataRecord,
 	return errors.New("invalid currency metadata state")
 }
 
-func (p *runtime) markCurrencyMetadataFundingAuthority(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateUnknown)
-	if err != nil {
-		return err
-	}
-
-	record.State = currency.MetadataStateFundingAuthority
-	return p.data.SaveCurrencyMetadata(ctx, record)
-}
-
-func (p *runtime) markCurrencyMetadataInitializing(ctx context.Context, record *currency.MetadataRecord) error {
+func (p *runtime) markCurrencyMetadataExecutingInitialPurchase(ctx context.Context, record *currency.MetadataRecord) error {
 	err := p.validateCurrencyMetadataState(record, currency.MetadataStateFundingAuthority)
 	if err != nil {
 		return err
 	}
 
-	record.State = currency.MetadataStateInitializing
+	record.State = currency.MetadataStateExecutingInitialPurchase
 	return p.data.SaveCurrencyMetadata(ctx, record)
 }
 
 func (p *runtime) markCurrencyMetadataFinalValidation(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateInitializing)
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateCompletingInitialization)
 	if err != nil {
 		return err
 	}
@@ -109,17 +104,9 @@ func (p *runtime) markCurrencyMetadataAvailable(ctx context.Context, record *cur
 }
 
 func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.data.PutLiveCurrencyReserve(ctx, &currency.ReserveRecord{
-		Mint:              record.Mint,
-		SupplyFromBonding: 0,
-		Slot:              0,
-		Time:              record.CreatedAt,
-	})
-	if err != nil {
-		return errors.Wrap(err, "error putting initial live reserve state")
-	}
+	// Note: The live reserve state is initialized by the swap worker on initial purchase
 
-	err = p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
+	err := p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
 		Mint:              record.Mint,
 		SupplyFromBonding: 0,
 		Time:              record.CreatedAt,
@@ -134,8 +121,8 @@ func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.M
 func (p *runtime) putInitialHolderCount(ctx context.Context, record *currency.MetadataRecord) error {
 	err := p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
 		Mint:        record.Mint,
-		HolderCount: 0,
-		Time:        record.CreatedAt,
+		HolderCount: 1,
+		Time:        time.Now(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "error putting initial live holder count")
@@ -201,10 +188,10 @@ func validateMinimumAuthorityFunding(ctx context.Context, data ocp_data.Provider
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	switch err {
 	case nil:
-		if ai.Lamports >= initialAuthorityFundingLamports {
+		if ai.Lamports >= amount {
 			return true, 0, nil
 		}
-		return false, initialAuthorityFundingLamports - ai.Lamports, nil
+		return false, amount - ai.Lamports, nil
 	case solana.ErrNoAccountInfo:
 		return false, amount, nil
 	default:
@@ -464,45 +451,7 @@ func (p *runtime) deriveNewAlt(ctx context.Context, accounts *newCurrencyAccount
 	return nil
 }
 
-func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
-	seed, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Seed)
-	if err != nil {
-		return errors.Wrap(err, "invalid seed")
-	}
-
-	initCurrencyIxn := currencycreator.NewInitializeCurrencyInstruction(
-		&currencycreator.InitializeCurrencyInstructionAccounts{
-			Authority: accounts.Authority.PublicKey().ToBytes(),
-			Mint:      accounts.Mint.PublicKey().ToBytes(),
-			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializeCurrencyInstructionArgs{
-			Name:     currencyMetadataRecord.Name,
-			Symbol:   currencyMetadataRecord.Symbol,
-			Seed:     seed.PublicKey().ToBytes(),
-			Bump:     accounts.CurrencyConfigBump,
-			MintBump: accounts.MintBump,
-		},
-	)
-
-	initPoolIxn := currencycreator.NewInitializePoolInstruction(
-		&currencycreator.InitializePoolInstructionAccounts{
-			Authority:   accounts.Authority.PublicKey().ToBytes(),
-			Currency:    accounts.CurrencyConfig.PublicKey().ToBytes(),
-			TargetMint:  accounts.Mint.PublicKey().ToBytes(),
-			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
-			Pool:        accounts.LiquidityPool.PublicKey().ToBytes(),
-			VaultTarget: accounts.VaultMint.PublicKey().ToBytes(),
-			VaultBase:   accounts.VaultBase.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializePoolInstructionArgs{
-			SellFee:         currencycreator.DefaultSellFeeBps,
-			Bump:            accounts.LiquidityPoolBump,
-			VaultTargetBump: accounts.VaultMintBump,
-			VaultBaseBump:   accounts.VaultBaseBump,
-		},
-	)
-
+func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
 	initMetadataIxn := currencycreator.NewInitializeMetadataInstruction(
 		&currencycreator.InitializeMetadataInstructionAccounts{
 			Authority: accounts.Authority.PublicKey().ToBytes(),
@@ -511,20 +460,6 @@ func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRe
 			Metadata:  accounts.MetaplexMetadata.PublicKey().ToBytes(),
 		},
 		&currencycreator.InitializeMetadataInstructionArgs{},
-	)
-
-	initVmIxn := vm.NewInitVmInstruction(
-		&vm.InitVmInstructionAccounts{
-			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-			Vm:          accounts.Vm.PublicKey().ToBytes(),
-			VmOmnibus:   accounts.Omnibus.PublicKey().ToBytes(),
-			Mint:        accounts.Mint.PublicKey().ToBytes(),
-		},
-		&vm.InitVmInstructionArgs{
-			LockDuration:  timelock_token.DefaultNumDaysLocked,
-			VmBump:        accounts.VmBump,
-			VmOmnibusBump: accounts.OmnibusBump,
-		},
 	)
 
 	initNonceMemoryIxn := vm.NewInitMemoryInstruction(
@@ -560,6 +495,9 @@ func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRe
 		common.GetSubsidizer().PublicKey().ToBytes(),
 		accounts.Mint.PublicKey().ToBytes(),
 	)
+	if err != nil {
+		return errors.Wrap(err, "error creating init fee ata ixn")
+	}
 
 	initAltIxn := address_lookup_table.Create(
 		accounts.Alt.PublicKey().ToBytes(),
@@ -571,12 +509,9 @@ func (p *runtime) initBlockchainAccounts(ctx context.Context, currencyMetadataRe
 
 	txn := solana.NewLegacyTransaction(
 		accounts.Authority.PublicKey().ToBytes(),
-		compute_budget.SetComputeUnitLimit(300_000),
+		compute_budget.SetComputeUnitLimit(300_000), // todo: optimize
 		compute_budget.SetComputeUnitPrice(10_000),
-		initCurrencyIxn,
-		initPoolIxn,
 		initMetadataIxn,
-		initVmIxn,
 		initNonceMemoryIxn,
 		initTimelockMemoryIxn,
 		initFeeAtaIxn,
@@ -1014,4 +949,117 @@ func (p *runtime) getNewCurrencyAccounts(ctx context.Context, currencyMetadataRe
 
 		Fees: fees,
 	}, nil
+}
+
+func (p *runtime) initializeCreatorAcccount(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
+	creatorOwner, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.CreatedBy)
+	if err != nil {
+		return errors.Wrap(err, "invalid creator account")
+	}
+
+	vmConfig := &common.VmConfig{
+		Authority: accounts.Authority,
+		Vm:        accounts.Vm,
+		Omnibus:   accounts.Omnibus,
+		Mint:      accounts.Mint,
+	}
+
+	timelockAccounts, err := creatorOwner.GetTimelockAccounts(vmConfig)
+	if err != nil {
+		return errors.Wrap(err, "error getting creator timelock accounts")
+	}
+
+	now := time.Now()
+	vaultAddress := timelockAccounts.Vault.PublicKey().ToBase58()
+
+	// Create the open accounts intent record
+	intentId, err := common.NewRandomAccount()
+	if err != nil {
+		return errors.Wrap(err, "error generating intent id")
+	}
+
+	intentRecord := &intent.Record{
+		IntentId:   intentId.PublicKey().ToBase58(),
+		IntentType: intent.OpenAccounts,
+
+		MintAccount: accounts.Mint.PublicKey().ToBase58(),
+
+		InitiatorOwnerAccount: creatorOwner.PublicKey().ToBase58(),
+
+		OpenAccountsMetadata: &intent.OpenAccountsMetadata{},
+
+		State: intent.StatePending,
+
+		CreatedAt: now,
+	}
+	err = p.data.SaveIntent(ctx, intentRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator open accounts intent")
+	}
+
+	// Create the open account action record
+	actionRecord := &action.Record{
+		Intent:     intentId.PublicKey().ToBase58(),
+		IntentType: intent.OpenAccounts,
+
+		ActionId:   0,
+		ActionType: action.OpenAccount,
+
+		Source: vaultAddress,
+
+		State: action.StatePending,
+
+		CreatedAt: now,
+	}
+	err = p.data.PutAllActions(ctx, actionRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator open account action")
+	}
+
+	// Create the timelock record
+	timelockRecord := timelockAccounts.ToDBRecord()
+	err = p.data.SaveTimelock(ctx, timelockRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator timelock record")
+	}
+
+	// Create the account info record with deposit sync enabled so
+	// Geyser can process the initial purchase
+	accountInfoRecord := &account.Record{
+		OwnerAccount:        creatorOwner.PublicKey().ToBase58(),
+		AuthorityAccount:    creatorOwner.PublicKey().ToBase58(),
+		TokenAccount:        vaultAddress,
+		MintAccount:         timelockAccounts.Mint.PublicKey().ToBase58(),
+		AccountType:         commonpb.AccountType_PRIMARY,
+		Index:               0,
+		RequiresDepositSync: true,
+	}
+	err = p.data.CreateAccountInfo(ctx, accountInfoRecord)
+	if err != nil {
+		return errors.Wrap(err, "error saving creator account info record")
+	}
+
+	// Create the fulfillment record for initializing the timelock account
+	fulfillmentRecord := &fulfillment.Record{
+		Intent:     intentId.PublicKey().ToBase58(),
+		IntentType: intent.OpenAccounts,
+
+		ActionId:   0,
+		ActionType: action.OpenAccount,
+
+		FulfillmentType: fulfillment.InitializeLockedTimelockAccount,
+
+		Source: vaultAddress,
+
+		IntentOrderingIndex:      intentRecord.Id,
+		ActionOrderingIndex:      0,
+		FulfillmentOrderingIndex: 0,
+
+		DisableActiveScheduling: false,
+
+		State: fulfillment.StateUnknown,
+
+		CreatedAt: now,
+	}
+	return p.data.PutAllFulfillments(ctx, fulfillmentRecord)
 }

@@ -15,6 +15,10 @@ import (
 // GetAltForMint gets an address lookup table to operate in a versioned
 // transaction for the provided mint
 func GetAltForMint(ctx context.Context, data ocp_data.Provider, mint *common.Account) (solana.AddressLookupTable, error) {
+	if common.IsCoreMint(mint) {
+		return GetAltForCoreMint(), nil
+	}
+
 	metadataRecord, err := data.GetCurrencyMetadata(ctx, mint.PublicKey().ToBase58())
 	if err != nil {
 		return solana.AddressLookupTable{}, err
@@ -51,6 +55,21 @@ func GetAltForMint(ctx context.Context, data ocp_data.Provider, mint *common.Acc
 	}, nil
 }
 
+// GetAltForCoreMint gets an address lookup table to operate in a versioned
+// transaction that operates with the core mint
+func GetAltForCoreMint() solana.AddressLookupTable {
+	return solana.AddressLookupTable{
+		PublicKey: common.CoreMintAlt.PublicKey().ToBytes(),
+		Addresses: []ed25519.PublicKey{
+			common.CoreMintAccount.PublicKey().ToBytes(),
+			common.CoreMintVmAccount.PublicKey().ToBytes(),
+			common.CoreMintVmOmnibusAccount.PublicKey().ToBytes(),
+			system.RentSysVar,
+			system.RecentBlockhashesSysVar,
+		},
+	}
+}
+
 func ToProtoAlt(alt solana.AddressLookupTable) *commonpb.SolanaAddressLookupTable {
 	proto := &commonpb.SolanaAddressLookupTable{
 		Address: &commonpb.SolanaAccountId{Value: alt.PublicKey},
@@ -62,4 +81,12 @@ func ToProtoAlt(alt solana.AddressLookupTable) *commonpb.SolanaAddressLookupTabl
 	}
 
 	return proto
+}
+
+func ToProtoAlts(alts []solana.AddressLookupTable) []*commonpb.SolanaAddressLookupTable {
+	res := make([]*commonpb.SolanaAddressLookupTable, len(alts))
+	for i, alt := range alts {
+		res[i] = ToProtoAlt(alt)
+	}
+	return res
 }

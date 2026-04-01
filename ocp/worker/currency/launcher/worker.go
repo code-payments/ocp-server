@@ -13,11 +13,12 @@ import (
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/retry"
 )
 
 const (
-	initialAuthorityFundingLamports = 2_000_000_000 // 2 SOL
+	initialAuthorityFundingLamports = 1_300_000_000 // 1.3 SOL
 
 	initialNoncePoolSize          = 1_000
 	initialNonceMemoryAccountName = "nonce-0"
@@ -93,12 +94,10 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 
 	var err error
 	switch record.State {
-	case currency.MetadataStateUnknown:
-		err = p.handleStateUnknown(ctx, record)
 	case currency.MetadataStateFundingAuthority:
 		err = p.handleStateFundingAuthority(ctx, record)
-	case currency.MetadataStateInitializing:
-		err = p.handleStateInitializing(ctx, record)
+	case currency.MetadataStateCompletingInitialization:
+		err = p.handleStateCompletingInitialization(ctx, record)
 	case currency.MetadataStateFinalValidation:
 		err = p.handleStateFinalValidation(ctx, record)
 	}
@@ -109,22 +108,24 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 	return nil
 }
 
-func (p *runtime) handleStateUnknown(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateUnknown)
-	if err != nil {
-		return err
-	}
-
-	// Nothing to do here currently
-
-	return p.markCurrencyMetadataFundingAuthority(ctx, record)
-}
-
 // Note: Assumes unique authority per currency
 func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
 	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateFundingAuthority)
 	if err != nil {
 		return err
+	}
+
+	// Validate the associated swap is in the submitting state before funding
+	// the authority. This prevents wasting SOL if the swap has been cancelled
+	// or hasn't progressed far enough.
+	swapRecords, err := p.data.GetAllSwapsByOwnerMintAndState(ctx, currencyMetadataRecord.CreatedBy, currencyMetadataRecord.Mint, swap.StateSubmitting)
+	if err == swap.ErrNotFound {
+		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "error checking associated swap state")
+	}
+	if len(swapRecords) == 0 {
+		return nil
 	}
 
 	authorityAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Authority)
@@ -159,12 +160,12 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 		if err != nil {
 			return err
 		}
-		return p.markCurrencyMetadataInitializing(ctx, currencyMetadataRecord)
+		return p.markCurrencyMetadataExecutingInitialPurchase(ctx, currencyMetadataRecord)
 	})
 }
 
-func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateInitializing)
+func (p *runtime) handleStateCompletingInitialization(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateCompletingInitialization)
 	if err != nil {
 		return err
 	}
@@ -180,12 +181,24 @@ func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataR
 	}
 
 	//
-	// Initialization phase 1 (init blockchain accounts)
+	// Initialization phase 1 (sanity check that initial purchase and init succeeded)
 	//
 
 	ok, err := validateMintExists(ctx, p.data, accounts.Mint)
 	if err != nil {
 		return errors.Wrap(err, "error checking if initialization phase 1 is complete")
+	} else if !ok {
+		// todo: How do we recover from this?
+		return errors.New("initialization phase 1 did not happen")
+	}
+
+	//
+	// Initialization phase 2 (init remaming blockchain accounts not initialized during initial purchase)
+	//
+
+	ok, err = validateMemoryAccountExists(ctx, p.data, accounts.TimelockMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 2 is complete")
 	} else if !ok {
 		// Must derive ALT near time of creation due to recent slot requirement
 		err := p.deriveNewAlt(ctx, accounts)
@@ -199,19 +212,19 @@ func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataR
 			return errors.Wrap(err, "error saving new alt")
 		}
 
-		err = p.initBlockchainAccounts(ctx, currencyMetadataRecord, accounts)
+		err = p.initRemainingBlockchainAccounts(ctx, currencyMetadataRecord, accounts)
 		if err != nil {
-			return errors.Wrap(err, "error initializing blockchain accounts")
+			return errors.Wrap(err, "error initializing remaining blockchain accounts")
 		}
 	}
 
 	//
-	// Initialization phase 2 (resize and extend blockchain accounts)
+	// Initialization phase 3 (resize and extend blockchain accounts)
 	//
 
 	ok, err = validateAltIsExtended(ctx, p.data, accounts.Alt)
 	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 2 is complete")
+		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
 	} else if !ok {
 		err = p.resizeAndExtendBlockchainAccounts(ctx, accounts)
 		if err != nil {
@@ -229,12 +242,12 @@ func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataR
 	}
 
 	//
-	// Initialization phase 3 (nonce pool)
+	// Initialization phase 4 (nonce pool)
 	//
 
 	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, accounts.NonceMemoryAccount)
 	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
+		return errors.Wrap(err, "error checking if initialization phase 4 is complete")
 	} else if !ok {
 		err := p.populateNonceMemory(ctx, accounts)
 		if err != nil {
@@ -244,7 +257,7 @@ func (p *runtime) handleStateInitializing(ctx context.Context, currencyMetadataR
 
 	ok, err = validateNoncePoolInitialized(ctx, p.data, accounts.NonceMemoryAccount)
 	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
+		return errors.Wrap(err, "error checking if initialization phase 4 is complete")
 	} else if !ok {
 		err := p.initializeNoncePool(ctx, accounts)
 		if err != nil {
@@ -293,7 +306,7 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 	if err != nil {
 		return errors.Wrap(err, "error validating liquidity pool exists")
 	} else if !ok {
-		return errors.New("")
+		return errors.New("liquidity pool doesn't exist")
 	}
 
 	ok, err = validateVmExists(ctx, p.data, accounts.Vm)
@@ -354,6 +367,11 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 			return err
 		}
 
-		return p.putInitialHolderCount(ctx, currencyMetadataRecord)
+		err = p.putInitialHolderCount(ctx, currencyMetadataRecord)
+		if err != nil {
+			return err
+		}
+
+		return p.initializeCreatorAcccount(ctx, currencyMetadataRecord, accounts)
 	})
 }

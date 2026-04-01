@@ -160,9 +160,30 @@ func dbGetAllByOwnerAndState(ctx context.Context, db *sqlx.DB, owner string, sta
 
 	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
 		FROM ` + tableName + `
-		WHERE owner = $1 AND state = $2`
+		WHERE owner = $1 AND state = $2
+		ORDER BY id ASC`
 
 	err := db.SelectContext(ctx, &res, query, owner, state)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, swap.ErrNotFound)
+	}
+
+	if len(res) == 0 {
+		return nil, swap.ErrNotFound
+	}
+
+	return res, nil
+}
+
+func dbGetAllByOwnerMintAndState(ctx context.Context, db *sqlx.DB, owner string, mint string, state swap.State) ([]*model, error) {
+	res := []*model{}
+
+	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+		FROM ` + tableName + `
+		WHERE owner = $1 AND state = $2 AND (from_mint = $3 OR to_mint = $3)
+		ORDER BY id ASC`
+
+	err := db.SelectContext(ctx, &res, query, owner, state, mint)
 	if err != nil {
 		return nil, pgutil.CheckNoRows(err, swap.ErrNotFound)
 	}

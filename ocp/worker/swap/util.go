@@ -34,6 +34,13 @@ func (p *runtime) validateSwapState(record *swap.Record, states ...swap.State) e
 	return errors.New("invalid swap state")
 }
 
+func (p *runtime) validateCurrencyMetadataState(record *currency.MetadataRecord, states ...currency.MetadataState) error {
+	if slices.Contains(states, record.State) {
+		return nil
+	}
+	return errors.New("invalid currency state")
+}
+
 func (p *runtime) markSwapFunded(ctx context.Context, record *swap.Record) error {
 	err := p.validateSwapState(record, swap.StateFunding)
 	if err != nil {
@@ -54,21 +61,48 @@ func (p *runtime) markSwapSubmitting(ctx context.Context, record *swap.Record) e
 	return p.data.SaveSwap(ctx, record)
 }
 
-func (p *runtime) markSwapFinalized(ctx context.Context, record *swap.Record) error {
+func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record) error {
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return err
+	}
+
+	var destinationCurrencyMetadataRecord *currency.MetadataRecord
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+		if err != nil {
+			return err
+		}
+		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
+		if err != nil {
+			return err
+		}
+	}
+
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateSubmitting)
+		err := p.validateSwapState(swapRecord, swap.StateSubmitting)
 		if err != nil {
 			return err
 		}
 
-		err = p.markNonceReleasedDueToSubmittedTransaction(ctx, record)
+		err = p.markNonceReleasedDueToSubmittedTransaction(ctx, swapRecord)
 		if err != nil {
 			return err
 		}
 
-		record.TransactionBlob = nil
-		record.State = swap.StateFinalized
-		return p.data.SaveSwap(ctx, record)
+		if !common.IsCoreMint(toMint) {
+			if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
+				destinationCurrencyMetadataRecord.State = currency.MetadataStateCompletingInitialization
+				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		swapRecord.TransactionBlob = nil
+		swapRecord.State = swap.StateFinalized
+		return p.data.SaveSwap(ctx, swapRecord)
 	})
 }
 
@@ -134,45 +168,72 @@ func (p *runtime) submitTransaction(ctx context.Context, record *swap.Record) er
 	return nil
 }
 
-func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, error) {
+func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, bool, error) {
 	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	if !common.IsCoreMintUsdStableCoin() {
-		return 0, errors.New("core mint is not a usd stable coin")
+		return 0, false, errors.New("core mint is not a usd stable coin")
 	}
 	if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
-		return 0, errors.New("core mint must be involved in swap")
+		return 0, false, errors.New("core mint must be involved in swap")
+	}
+
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+		if err != nil {
+			return 0, false, err
+		}
+		if destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable {
+			currencyAccounts, err := common.GetLaunchpadCurrencyAccounts(destinationCurrencyMetadataRecord)
+			if err != nil {
+				return 0, false, err
+			}
+
+			deltaQuarksIntoVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
+			if err != nil {
+				return 0, false, err
+			}
+
+			if deltaQuarksIntoVault <= 0 {
+				return 0, false, errors.New("delta quarks into pool vault is not positives")
+			}
+
+			// This swap is initializing the VM and the funds will be deposited
+			// after memory accounts become available. Balances should only be
+			// reflected after finalized deposit into a VTA.
+			return currencycreator.DefaultMintMaxQuarkSupply - uint64(deltaQuarksIntoVault), true, nil
+		}
 	}
 
 	destinationVmConfig, err := common.GetVmConfigForMint(ctx, p.data, toMint)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	ownerDestinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	deltaQuarksIntoOmnibus, err := transaction_util.GetDeltaQuarksFromTokenBalances(destinationVmConfig.Omnibus, tokenBalances)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if deltaQuarksIntoOmnibus <= 0 {
-		return 0, errors.New("delta quarks into destination vm omnibus is not positive")
+		return 0, false, errors.New("delta quarks into destination vm omnibus is not positive")
 	}
 
 	var exchangeCurrency currency_lib.Code
@@ -182,11 +243,11 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 	case swap.FundingSourceSubmitIntent:
 		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 
 		if fundingIntentRecord.IntentType != intent.SendPublicPayment {
-			return 0, errors.New("unexpected intent type")
+			return 0, false, errors.New("unexpected intent type")
 		}
 
 		exchangeCurrency = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
@@ -196,7 +257,7 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 		if common.IsCoreMint(toMint) {
 			usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, uint64(deltaQuarksIntoOmnibus), time.Now())
 			if err != nil {
-				return 0, err
+				return 0, false, err
 			}
 
 			usdMarketValueWithoutFees, _ = new(big.Float).Quo(
@@ -212,22 +273,22 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 			fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue = usdMarketValueWithoutFees
 			err = p.data.SaveIntent(ctx, fundingIntentRecord)
 			if err != nil {
-				return 0, err
+				return 0, false, err
 			}
 		}
 	case swap.FundingSourceExternalWallet:
 		if !common.IsCoreMint(fromMint) {
-			return 0, errors.New("unexpected source mint")
+			return 0, false, errors.New("unexpected source mint")
 		}
 
 		exchangeCurrency = currency_lib.USD
 		usdMarketValueWithoutFees, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.Amount, time.Now())
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		nativeAmountWithoutFees = usdMarketValueWithoutFees
 	default:
-		return 0, errors.New("unsupported funding source")
+		return 0, false, errors.New("unsupported funding source")
 	}
 
 	nativeAmount := nativeAmountWithoutFees
@@ -287,12 +348,12 @@ func (p *runtime) updateBalancesForFinalizedSwap(ctx context.Context, swapRecord
 		return p.data.SaveExternalDeposit(ctx, externalDepositRecord)
 	})
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return uint64(deltaQuarksIntoOmnibus), nil
+	return uint64(deltaQuarksIntoOmnibus), false, nil
 }
 
-func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Record) error {
+func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Record, isMintInit bool) error {
 	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
 		return err
@@ -358,7 +419,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		).Float64()
 	}
 
-	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetMint, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
+	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetMint, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived, isMintInit)
 }
 
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {
@@ -505,6 +566,18 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 		return err
 	}
 
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, record.ToMint)
+		if err != nil {
+			return err
+		}
+		if destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable {
+			// This swap is initializing the VM and the funds will be deposited
+			// after memory accounts become available.
+			return nil
+		}
+	}
+
 	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
 	if err != nil {
 		return err
@@ -521,6 +594,28 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 	}
 
 	return vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, p.data, destinationTimelockVault, true)
+}
+
+func (p *runtime) validateDestinationCurrencyReadyForSwap(ctx context.Context, swapRecord *swap.Record) (bool, error) {
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return false, err
+	}
+
+	if common.IsCoreMint(toMint) {
+		return true, nil
+	}
+
+	destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+	if err != nil {
+		return false, err
+	}
+
+	err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
+	if err == nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (p *runtime) updateLiveReserveStateForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) error {

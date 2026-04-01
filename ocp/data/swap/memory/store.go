@@ -100,6 +100,20 @@ func (s *store) GetAllByOwnerAndState(_ context.Context, owner string, state swa
 	return cloneRecords(items), nil
 }
 
+func (s *store) GetAllByOwnerMintAndState(_ context.Context, owner string, mint string, state swap.State) ([]*swap.Record, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := s.findByOwner(owner)
+	items = s.filterByMint(items, mint)
+	items = s.filterByState(items, state)
+
+	if len(items) == 0 {
+		return nil, swap.ErrNotFound
+	}
+	return cloneRecords(items), nil
+}
+
 func (s *store) GetAllByState(_ context.Context, state swap.State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*swap.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -204,6 +218,16 @@ func (s *store) filter(items []*swap.Record, cursor query.Cursor, limit uint64, 
 		return res[:limit]
 	}
 
+	return res
+}
+
+func (s *store) filterByMint(items []*swap.Record, mint string) []*swap.Record {
+	var res []*swap.Record
+	for _, item := range items {
+		if item.FromMint == mint || item.ToMint == mint {
+			res = append(res, item)
+		}
+	}
 	return res
 }
 

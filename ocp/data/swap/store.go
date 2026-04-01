@@ -26,6 +26,10 @@ type Store interface {
 	// GetAllByOwnerAndState gets all swaps for an owner in a state
 	GetAllByOwnerAndState(ctx context.Context, owner string, state State) ([]*Record, error)
 
+	// GetAllByOwnerMintAndState gets all swaps for an owner involving a mint (as
+	// either the source or destination) in a given state
+	GetAllByOwnerMintAndState(ctx context.Context, owner string, mint string, state State) ([]*Record, error)
+
 	// GetAllByState gets all swaps by state
 	GetAllByState(ctx context.Context, state State, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mr-tron/base58/base58"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -18,6 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
@@ -101,28 +103,20 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	)
 
 	//
-	// Section: Antispam
+	// Section: Verified metadata signature verification
 	//
 
-	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
-	if err == common.ErrOwnerNotFound {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner metadata")
-		return handleStatefulSwapError(streamer, err)
-	}
-	if ownerMetadata.State != common.OwnerManagementStateOcpAccount {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
-	}
-	if ownerMetadata.Type != common.OwnerTypeUser12Words {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
+	verifiedMetadata := &transactionpb.VerifiedSwapMetadata{
+		Kind: &transactionpb.VerifiedSwapMetadata_Reserve{
+			Reserve: &transactionpb.VerifiedReserveSwapMetadata{
+				ClientParameters: initiateReserveSwapReq,
+			},
+		},
 	}
 
-	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint)
-	if err != nil {
-		return handleStatefulSwapError(streamer, err)
-	} else if !allow {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("rate limited"))
+	metadataSignature := initiateReq.ProofSignature
+	if err := s.auth.Authenticate(ctx, owner, verifiedMetadata, metadataSignature); err != nil {
+		return handleStatefulSwapStructuredError(streamer, transactionpb.StatefulSwapResponse_Error_SIGNATURE_ERROR)
 	}
 
 	//
@@ -145,10 +139,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	if owner.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58() {
-		return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
-	}
-
 	if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("swap must involve core mint"))
 	}
@@ -169,14 +159,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	destinationVmConfig, err := common.GetVmConfigForMint(ctx, s.data, toMint)
-	if err == common.ErrUnsupportedMint {
-		return handleStatefulSwapError(streamer, NewSwapValidationError("invalid destination mint"))
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting destination vm config")
-		return handleStatefulSwapError(streamer, err)
-	}
-
 	ownerSourceTimelockVault, err := owner.ToTimelockVault(sourceVmConfig)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting owner source timelock vault")
@@ -188,20 +170,6 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapValidationError("source timelock vault account not opened"))
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting source timelock record")
-		return handleStatefulSwapError(streamer, err)
-	}
-
-	ownerDestinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner destination timelock vault")
-		return handleStatefulSwapError(streamer, err)
-	}
-
-	_, err = s.data.GetTimelockByVault(ctx, ownerDestinationTimelockVault.PublicKey().ToBase58())
-	if err == timelock.ErrTimelockNotFound {
-		return handleStatefulSwapError(streamer, NewSwapValidationError("destination timelock vault account not opened"))
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting destination timelock record")
 		return handleStatefulSwapError(streamer, err)
 	}
 
@@ -243,31 +211,111 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateReserveSwapReq.FundingSource))
 	}
 
-	//
-	// Section: Verified metadata signature verification
-	//
-
-	verifiedMetadata := &transactionpb.VerifiedSwapMetadata{
-		Kind: &transactionpb.VerifiedSwapMetadata_Reserve{
-			Reserve: &transactionpb.VerifiedReserveSwapMetadata{
-				ClientParameters: initiateReserveSwapReq,
-			},
-		},
+	otherMint := fromMint
+	if common.IsCoreMint(otherMint) {
+		otherMint = toMint
 	}
 
-	metadataSignature := initiateReq.ProofSignature
-	if err := s.auth.Authenticate(ctx, owner, verifiedMetadata, metadataSignature); err != nil {
-		return handleStatefulSwapStructuredError(streamer, transactionpb.StatefulSwapResponse_Error_SIGNATURE_ERROR)
-	}
-
-	//
-	// Section: On-demand account creation
-	//
-
-	err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, ownerDestinationTimelockVault, false)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("error ensuring destination virtual timelock account is initialized")
+	var initializesMint bool
+	currencyMetadataRecord, err := s.data.GetCurrencyMetadata(ctx, otherMint.PublicKey().ToBase58())
+	if err == currency.ErrNotFound {
+		return handleStatefulSwapError(streamer, NewSwapValidationError("mint not found"))
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting destination timelock record")
 		return handleStatefulSwapError(streamer, err)
+	}
+	switch currencyMetadataRecord.State {
+	case currency.MetadataStateAvailable:
+		initializesMint = false
+	case currency.MetadataStateWaitingForInitialPurchase:
+		initializesMint = true
+	default:
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("mint is being initialized"))
+	}
+
+	var destinationVmAuthority *common.Account
+	if !initializesMint {
+		if owner.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58() {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
+		}
+
+		destinationVmConfig, err := common.GetVmConfigForMint(ctx, s.data, toMint)
+		if err == common.ErrUnsupportedMint {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("invalid destination mint"))
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting destination vm config")
+			return handleStatefulSwapError(streamer, err)
+		}
+		destinationVmAuthority = destinationVmConfig.Authority
+
+		ownerDestinationTimelockVault, err := owner.ToTimelockVault(destinationVmConfig)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting owner destination timelock vault")
+			return handleStatefulSwapError(streamer, err)
+		}
+
+		_, err = s.data.GetTimelockByVault(ctx, ownerDestinationTimelockVault.PublicKey().ToBase58())
+		if err == timelock.ErrTimelockNotFound {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("destination timelock vault account not opened"))
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting destination timelock record")
+			return handleStatefulSwapError(streamer, err)
+		}
+
+		err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, ownerDestinationTimelockVault, false)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("error ensuring destination virtual timelock account is initialized")
+			return handleStatefulSwapError(streamer, err)
+		}
+	} else {
+		if owner.PublicKey().ToBase58() != swapAuthority.PublicKey().ToBase58() {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("owner must be swap authority"))
+		}
+
+		if owner.PublicKey().ToBase58() != currencyMetadataRecord.CreatedBy {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("only the currency creator can buy initial tokens"))
+		}
+
+		if !common.IsCoreMint(fromMint) {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("source mint must be the core mint"))
+		}
+
+		// The VM is not supported yet, so we need to work around GetVmConfigForMint
+		destinationVaultRecord, err := s.data.GetKey(ctx, currencyMetadataRecord.Authority)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting destination vm authority vault record")
+			return handleStatefulSwapError(streamer, err)
+		}
+		destinationVmAuthority, err = common.NewAccountFromPrivateKeyString(destinationVaultRecord.PrivateKey)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("invalid destination vm authority private key")
+			return handleStatefulSwapError(streamer, err)
+		}
+	}
+
+	//
+	// Section: Antispam
+	//
+
+	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
+	if err == common.ErrOwnerNotFound {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
+	} else if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting owner metadata")
+		return handleStatefulSwapError(streamer, err)
+	}
+	if ownerMetadata.State != common.OwnerManagementStateOcpAccount {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not an ocp account"))
+	}
+	if ownerMetadata.Type != common.OwnerTypeUser12Words {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
+	}
+
+	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint, initiateReserveSwapReq.Amount, initializesMint)
+	if err != nil {
+		return handleStatefulSwapError(streamer, err)
+	} else if !allow {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("rate limited"))
 	}
 
 	//
@@ -294,14 +342,23 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	}()
 
 	var swapHandler SwapHandler
-	if common.IsCoreMint(fromMint) {
+	if initializesMint {
+		swapHandler, err = NewReserveCreateAndBuySwapHandler(
+			ctx,
+			s.data,
+			owner,
+			toMint,
+			initiateReserveSwapReq.Amount,
+			selectedNonce,
+		)
+	} else if common.IsCoreMint(fromMint) {
 		swapHandler = NewReserveBuySwapHandler(
 			s.data,
 			owner,
 			swapAuthority,
 			toMint,
 			initiateReserveSwapReq.Amount,
-			selectedNonce.Account,
+			selectedNonce,
 		)
 	} else if common.IsCoreMint(toMint) {
 		swapHandler = NewReserveSellSwapHandler(
@@ -310,7 +367,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			swapAuthority,
 			fromMint,
 			initiateReserveSwapReq.Amount,
-			selectedNonce.Account,
+			selectedNonce,
 		)
 	} else {
 		swapHandler = NewReserveBuySellSwapHandler(
@@ -320,22 +377,18 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			fromMint,
 			toMint,
 			initiateReserveSwapReq.Amount,
-			selectedNonce.Account,
+			selectedNonce,
 		)
 	}
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure initializing swap handler")
+		return handleStatefulSwapError(streamer, err)
+	}
 
-	var alts []solana.AddressLookupTable
-	for _, mint := range []*common.Account{fromMint, toMint} {
-		if common.IsCoreMint(mint) {
-			continue
-		}
-
-		alt, err := transaction_util.GetAltForMint(ctx, s.data, mint)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failure getting alt")
-			return handleStatefulSwapError(streamer, err)
-		}
-		alts = append(alts, alt)
+	alts, err := swapHandler.GetAlts(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting alt")
+		return handleStatefulSwapError(streamer, err)
 	}
 
 	ixns, err := swapHandler.MakeInstructions(ctx)
@@ -358,31 +411,9 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	// Section: Server parameters
 	//
 
-	serverParameters := swapHandler.GetServerParameters()
-
-	protoAlts := make([]*commonpb.SolanaAddressLookupTable, len(alts))
-	for i, alt := range alts {
-		protoAlts[i] = transaction_util.ToProtoAlt(alt)
-	}
-
-	protoServerParameters := &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
-		Payer:            common.GetSubsidizer().ToProto(),
-		Nonce:            selectedNonce.Account.ToProto(),
-		Blockhash:        &commonpb.Blockhash{Value: selectedNonce.Blockhash[:]},
-		Alts:             protoAlts,
-		ComputeUnitLimit: serverParameters.ComputeUnitLimit,
-		ComputeUnitPrice: serverParameters.ComputeUnitPrice,
-		MemoValue:        serverParameters.MemoValue,
-		MemoryAccount:    serverParameters.MemoryAccount.ToProto(),
-		MemoryIndex:      uint32(serverParameters.MemoryIndex),
-	}
 	if err := streamer.Send(&transactionpb.StatefulSwapResponse{
 		Response: &transactionpb.StatefulSwapResponse_ServerParameters_{
-			ServerParameters: &transactionpb.StatefulSwapResponse_ServerParameters{
-				Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
-					ReserveExistingCurrency: protoServerParameters,
-				},
-			},
+			ServerParameters: swapHandler.GetServerParameters(),
 		},
 	}); err != nil {
 		return handleStatefulSwapError(streamer, err)
@@ -401,6 +432,18 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	submitSignaturesReq := req.GetSubmitSignatures()
 	if submitSignaturesReq == nil {
 		return handleStatefulSwapError(streamer, status.Error(codes.InvalidArgument, "StatefulSwapRequest.SubmitSignatures is nil"))
+	}
+
+	requiredSignatures := 2
+	if bytes.Equal(owner.PublicKey().ToBytes(), swapAuthority.PublicKey().ToBytes()) {
+		requiredSignatures = 1
+	}
+	if len(submitSignaturesReq.TransactionSignatures) != requiredSignatures {
+		return handleStatefulSwapStructuredError(
+			streamer,
+			transactionpb.StatefulSwapResponse_Error_SIGNATURE_ERROR,
+			toReasonStringErrorDetails(errors.Errorf("expected %d signatures", requiredSignatures)),
+		)
 	}
 
 	for i := range txn.Message.Header.NumSignatures {
@@ -439,7 +482,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	err = txn.Sign(
 		common.GetSubsidizer().PrivateKey().ToBytes(),
 		sourceVmConfig.Authority.PrivateKey().ToBytes(),
-		destinationVmConfig.Authority.PrivateKey().ToBytes(),
+		destinationVmAuthority.PrivateKey().ToBytes(),
 	)
 	if err != nil {
 		log.With(zap.Error(err)).Info("failure signing transaction")
@@ -482,7 +525,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	}
 
 	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err = selectedNonce.MarkReservedWithSignature(ctx, txnSignature)
+		err := selectedNonce.MarkReservedWithSignature(ctx, txnSignature)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure reserving nonce")
 			return err
@@ -492,6 +535,15 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure saving swap record")
 			return err
+		}
+
+		if initializesMint {
+			currencyMetadataRecord.State = currency.MetadataStateFundingAuthority
+			err = s.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure saving currency metadata record")
+				return err
+			}
 		}
 
 		return nil

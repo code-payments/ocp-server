@@ -14,7 +14,8 @@ const (
 	MetadataStateAvailable
 	MetadataStateWaitingForInitialPurchase
 	MetadataStateFundingAuthority
-	MetadataStateInitializing
+	MetadataStateExecutingInitialPurchase
+	MetadataStateCompletingInitialization
 	MetadataStateFinalValidation
 )
 
@@ -343,8 +344,10 @@ func (s MetadataState) String() string {
 		return "waiting_for_initial_purchase"
 	case MetadataStateFundingAuthority:
 		return "funding_authority"
-	case MetadataStateInitializing:
-		return "initializing"
+	case MetadataStateExecutingInitialPurchase:
+		return "executing_initial_purchase"
+	case MetadataStateCompletingInitialization:
+		return "completing_initialization"
 	case MetadataStateFinalValidation:
 		return "final_validation"
 	}

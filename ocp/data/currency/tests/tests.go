@@ -601,7 +601,8 @@ func testCountMetadataByState(t *testing.T, s currency.Store) {
 		currency.MetadataStateAvailable,
 		currency.MetadataStateWaitingForInitialPurchase,
 		currency.MetadataStateFundingAuthority,
-		currency.MetadataStateInitializing,
+		currency.MetadataStateExecutingInitialPurchase,
+		currency.MetadataStateCompletingInitialization,
 		currency.MetadataStateFinalValidation,
 	} {
 		count, err := s.CountMetadataByState(ctx, state)
@@ -680,8 +681,8 @@ func testCountMetadataByState(t *testing.T, s currency.Store) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 
-	// Move record2 to initializing
-	record2.State = currency.MetadataStateInitializing
+	// Move record2 to completing initializing
+	record2.State = currency.MetadataStateCompletingInitialization
 	require.NoError(t, s.SaveMetadata(ctx, record2))
 
 	count, err = s.CountMetadataByState(ctx, currency.MetadataStateUnknown)
@@ -692,7 +693,7 @@ func testCountMetadataByState(t *testing.T, s currency.Store) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 
-	count, err = s.CountMetadataByState(ctx, currency.MetadataStateInitializing)
+	count, err = s.CountMetadataByState(ctx, currency.MetadataStateCompletingInitialization)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 }

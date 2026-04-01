@@ -201,6 +201,16 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 		return err
 	}
 
+	// todo: Need to wait for authority funding, which should only happen after swap
+	//       funding is validated. However, having it in this handler is a bit awkward.
+	//       Refactor swap state management to address.
+	ok, err := p.validateDestinationCurrencyReadyForSwap(ctx, record)
+	if err != nil {
+		return errors.Wrap(err, "error ensuring destination currency is ready to be initialized")
+	} else if !ok {
+		return nil
+	}
+
 	// Monitor for a finalized swap transaction
 
 	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature, solana.CommitmentFinalized)
@@ -223,7 +233,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 				return errors.Wrap(err, "error updating live reserve state")
 			}
 
-			quarksBought, err := p.updateBalancesForFinalizedSwap(ctx, record, tokenBalances)
+			quarksBought, isMintInit, err := p.maybeUpdateBalancesForFinalizedSwap(ctx, record, tokenBalances)
 			if err != nil {
 				return errors.Wrap(err, "error updating balances")
 			}
@@ -235,7 +245,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 
 			recordSwapFinalizedEvent(ctx, record, quarksBought)
 
-			go p.notifySwapFinalized(ctx, record)
+			go p.notifySwapFinalized(ctx, record, isMintInit)
 
 			return nil
 		}
