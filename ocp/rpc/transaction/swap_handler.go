@@ -740,7 +740,7 @@ func (h *ReserveCreateAndBuySwapHandler) GetServerParameters() *transactionpb.St
 	return &transactionpb.StatefulSwapResponse_ServerParameters{
 		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrency{
 			ReserveNewCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrencyServerParameter{
-				Payer:                h.destinationCurrencyAccounts.Authority.ToProto(),
+				Payer:                common.GetSubsidizer().ToProto(),
 				Nonce:                h.selectedNonce.Account.ToProto(),
 				Blockhash:            &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
 				Alts:                 transaction_util.ToProtoAlts(h.alts),
