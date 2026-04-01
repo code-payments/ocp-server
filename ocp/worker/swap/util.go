@@ -202,19 +202,19 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 				return 0, false, err
 			}
 
-			deltaQuarksOutOfVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
+			deltaQuarksIntoVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
 			if err != nil {
 				return 0, false, err
 			}
 
-			if deltaQuarksOutOfVault >= 0 {
-				return 0, false, errors.New("delta quarks into destination vm omnibus is not negative")
+			if deltaQuarksIntoVault <= 0 {
+				return 0, false, errors.New("delta quarks into pool vault is not positives")
 			}
 
 			// This swap is initializing the VM and the funds will be deposited
 			// after memory accounts become available. Balances should only be
 			// reflected after finalized deposit into a VTA.
-			return uint64(-deltaQuarksOutOfVault), true, nil
+			return currencycreator.DefaultMintMaxQuarkSupply - uint64(deltaQuarksIntoVault), true, nil
 		}
 	}
 
