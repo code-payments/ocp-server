@@ -342,12 +342,12 @@ func MakeExternalTransferWithAuthorityTransaction(
 }
 
 func MakeSolanaTransferTransaction(
-	source, destination *common.Account,
+	payer, source, destination *common.Account,
 	lamports uint64,
 	bh solana.Blockhash,
 ) (solana.Transaction, error) {
 	txn := solana.NewLegacyTransaction(
-		common.GetSubsidizer().PublicKey().ToBytes(),
+		payer.PublicKey().ToBytes(),
 		compute_budget.SetComputeUnitPrice(10_000),
 		compute_budget.SetComputeUnitLimit(1_000),
 		system.Transfer(

@@ -204,7 +204,7 @@ func fundAuthority(ctx context.Context, data ocp_data.Provider, subsidizer, acco
 	if err != nil {
 		return errors.Wrap(err, "error getting latest blockhash")
 	}
-	txn, err := transaction_util.MakeSolanaTransferTransaction(subsidizer, account, amount, bh)
+	txn, err := transaction_util.MakeSolanaTransferTransaction(subsidizer, subsidizer, account, amount, bh)
 	if err != nil {
 		return errors.Wrap(err, "error making solana transfer transaction")
 	}
