@@ -552,8 +552,9 @@ func dbCountMetadataByState(ctx context.Context, db *sqlx.DB, state currency.Met
 func dbIsNameAvailable(ctx context.Context, db *sqlx.DB, name string) (bool, error) {
 	var count uint64
 	err := db.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM `+metadataTableName+` WHERE LOWER(name) = LOWER($1)`,
+		`SELECT COUNT(*) FROM `+metadataTableName+` WHERE LOWER(name) = LOWER($1) AND state != $2`,
 		name,
+		currency.MetadataStateAbandoned,
 	)
 	if err != nil {
 		return false, err

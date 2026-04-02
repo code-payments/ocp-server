@@ -21,6 +21,7 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testMetadataSaveWithVersioning,
 		testMetadataUniqueNameConstraint,
 		testIsNameAvailable,
+		testAbandonedCurrencyNameReuse,
 		testGetAllMetadataByState,
 		testGetAllMints,
 		testCountMints,
@@ -347,6 +348,114 @@ func testIsNameAvailable(t *testing.T, s currency.Store) {
 	available, err = s.IsNameAvailable(ctx, "OtherCurrency")
 	require.NoError(t, err)
 	assert.True(t, available)
+}
+
+func testAbandonedCurrencyNameReuse(t *testing.T, s currency.Store) {
+	ctx := context.Background()
+
+	record := &currency.MetadataRecord{
+		Name:        "AbandonedCurrency",
+		Symbol:      "AB1",
+		Description: "A currency that will be abandoned",
+		ImageUrl:    "https://example.com/ab1.png",
+		BillColors:  []string{"#000000"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example.com"}},
+
+		Seed:      "abandonedseed1",
+		Authority: "abandonedauth1",
+
+		Mint:     "abandonedmint111111111111111111111111111111111",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "abandonedconfig1111111111111111111111111111",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "abandonedpool11111111111111111111111111111111",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "abandonedvmint1111111111111111111111111111111",
+		VaultMintBump: 255,
+
+		VaultCore:     "abandonedvcore1111111111111111111111111111111",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "abandonedalt1111111111111111111111111111111111",
+
+		CreatedBy: "abandonedcreator1",
+		CreatedAt: time.Now(),
+	}
+
+	require.NoError(t, s.SaveMetadata(ctx, record))
+
+	// Name should not be available while active
+	available, err := s.IsNameAvailable(ctx, "AbandonedCurrency")
+	require.NoError(t, err)
+	assert.False(t, available)
+
+	// Case-insensitive should also not be available
+	available, err = s.IsNameAvailable(ctx, "abandonedcurrency")
+	require.NoError(t, err)
+	assert.False(t, available)
+
+	// Transition to abandoned state
+	record.State = currency.MetadataStateAbandoned
+	require.NoError(t, s.SaveMetadata(ctx, record))
+
+	// Name should now be available
+	available, err = s.IsNameAvailable(ctx, "AbandonedCurrency")
+	require.NoError(t, err)
+	assert.True(t, available)
+
+	// Case-insensitive should also be available
+	available, err = s.IsNameAvailable(ctx, "abandonedcurrency")
+	require.NoError(t, err)
+	assert.True(t, available)
+
+	// Should be able to create a new currency with the same name
+	record2 := &currency.MetadataRecord{
+		Name:        "AbandonedCurrency",
+		Symbol:      "AB2",
+		Description: "Reusing the abandoned name",
+		ImageUrl:    "https://example.com/ab2.png",
+		BillColors:  []string{"#FFFFFF"},
+		SocialLinks: []currency.SocialLink{{Type: currency.SocialLinkTypeWebsite, Value: "https://example2.com"}},
+
+		Seed:      "abandonedseed2",
+		Authority: "abandonedauth2",
+
+		Mint:     "abandonedmint222222222222222222222222222222222",
+		MintBump: 255,
+		Decimals: currencycreator.DefaultMintDecimals,
+
+		CurrencyConfig:     "abandonedconfig2222222222222222222222222222",
+		CurrencyConfigBump: 255,
+
+		LiquidityPool:     "abandonedpool22222222222222222222222222222222",
+		LiquidityPoolBump: 255,
+
+		VaultMint:     "abandonedvmint2222222222222222222222222222222",
+		VaultMintBump: 255,
+
+		VaultCore:     "abandonedvcore2222222222222222222222222222222",
+		VaultCoreBump: 255,
+
+		SellFeeBps: currencycreator.DefaultSellFeeBps,
+
+		Alt: "abandonedalt2222222222222222222222222222222222",
+
+		CreatedBy: "abandonedcreator2",
+		CreatedAt: time.Now(),
+	}
+
+	require.NoError(t, s.SaveMetadata(ctx, record2))
+
+	// New currency's name should no longer be available
+	available, err = s.IsNameAvailable(ctx, "AbandonedCurrency")
+	require.NoError(t, err)
+	assert.False(t, available)
 }
 
 func testGetAllMetadataByState(t *testing.T, s currency.Store) {
