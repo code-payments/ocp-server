@@ -13,6 +13,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/antispam"
 	auth_util "github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/transaction"
@@ -23,7 +24,8 @@ type transactionServer struct {
 
 	log *zap.Logger
 
-	data ocp_data.Provider
+	data             ocp_data.Provider
+	mintDataProvider *currency_util.MintDataProvider
 
 	auth *auth_util.RPCSignatureVerifier
 
@@ -46,6 +48,7 @@ type transactionServer struct {
 func NewTransactionServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	mintDataProvider *currency_util.MintDataProvider,
 	submitIntentIntegration SubmitIntentIntegration,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
@@ -86,7 +89,8 @@ func NewTransactionServer(
 
 		log: log,
 
-		data: data,
+		data:             data,
+		mintDataProvider: mintDataProvider,
 
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 

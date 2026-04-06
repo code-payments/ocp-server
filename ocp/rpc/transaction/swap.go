@@ -28,6 +28,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/solana"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
 func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_StatefulSwapServer) error {
@@ -231,6 +232,24 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		initializesMint = true
 	default:
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("mint is being initialized"))
+	}
+
+	if !initializesMint && !common.IsCoreMint(fromMint) {
+		liveReserveState, err := s.mintDataProvider.GetLiveReserveState(ctx, fromMint)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting live reserve state")
+			return handleStatefulSwapError(streamer, err)
+		}
+
+		_, estimatedFees := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
+			CurrentSupplyInQuarks: liveReserveState.SupplyFromBonding,
+			SellAmountInQuarks:    initiateReserveSwapReq.Amount,
+			ValueMintDecimals:     uint8(common.CoreMintDecimals),
+			SellFeeBps:            currencyMetadataRecord.SellFeeBps,
+		})
+		if estimatedFees == 0 {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("swap would not generate a sell fee"))
+		}
 	}
 
 	var destinationVmAuthority *common.Account
