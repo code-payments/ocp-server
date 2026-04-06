@@ -103,6 +103,26 @@ func (p *runtime) markCurrencyMetadataAvailable(ctx context.Context, record *cur
 	return p.data.SaveCurrencyMetadata(ctx, record)
 }
 
+func (p *runtime) markCurrencyMetadataAbandoning(ctx context.Context, record *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateWaitingForInitialPurchase)
+	if err != nil {
+		return err
+	}
+
+	record.State = currency.MetadataStateAbandoning
+	return p.data.SaveCurrencyMetadata(ctx, record)
+}
+
+func (p *runtime) markCurrencyMetadataAbandoned(ctx context.Context, record *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStateAbandoning)
+	if err != nil {
+		return err
+	}
+
+	record.State = currency.MetadataStateAbandoned
+	return p.data.SaveCurrencyMetadata(ctx, record)
+}
+
 func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.MetadataRecord) error {
 	// Note: The live reserve state is initialized by the swap worker on initial purchase
 
@@ -197,6 +217,36 @@ func validateMinimumAuthorityFunding(ctx context.Context, data ocp_data.Provider
 	default:
 		return false, 0, errors.Wrap(err, "error getting authority account info")
 	}
+}
+
+func returnAuthorityFundsToSubsidizer(ctx context.Context, data ocp_data.Provider, subsidizer, authority *common.Account) error {
+	ai, _, err := data.GetBlockchainAccountInfo(ctx, authority.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	if err == solana.ErrNoAccountInfo {
+		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "error getting authority account info")
+	}
+
+	if ai.Lamports == 0 {
+		return nil
+	}
+
+	bh, err := data.GetBlockchainLatestBlockhash(ctx)
+	if err != nil {
+		return errors.Wrap(err, "error getting latest blockhash")
+	}
+
+	txn, err := transaction_util.MakeSolanaTransferTransaction(subsidizer, authority, subsidizer, ai.Lamports, bh)
+	if err != nil {
+		return errors.Wrap(err, "error making solana transfer transaction")
+	}
+
+	err = txn.Sign(subsidizer.PrivateKey().ToBytes(), authority.PrivateKey().ToBytes())
+	if err != nil {
+		return errors.Wrap(err, "error signing transaction")
+	}
+
+	return transaction_util.SubmitAndWaitForFinalization(ctx, data, &txn)
 }
 
 func fundAuthority(ctx context.Context, data ocp_data.Provider, subsidizer, account *common.Account, amount uint64) error {

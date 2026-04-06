@@ -94,18 +94,36 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 
 	var err error
 	switch record.State {
+	case currency.MetadataStateWaitingForInitialPurchase:
+		err = p.handleStateWaitingForInitialPurchase(ctx, record)
 	case currency.MetadataStateFundingAuthority:
 		err = p.handleStateFundingAuthority(ctx, record)
 	case currency.MetadataStateCompletingInitialization:
 		err = p.handleStateCompletingInitialization(ctx, record)
 	case currency.MetadataStateFinalValidation:
 		err = p.handleStateFinalValidation(ctx, record)
+	case currency.MetadataStateAbandoning:
+		err = p.handleStateAbandoning(ctx, record)
 	}
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure processing currency to launch")
 		return err
 	}
 	return nil
+}
+
+func (p *runtime) handleStateWaitingForInitialPurchase(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateWaitingForInitialPurchase)
+	if err != nil {
+		return err
+	}
+
+	timeout := p.conf.initialPurchaseTimeout.Get(ctx)
+	if time.Since(currencyMetadataRecord.CreatedAt) < timeout {
+		return nil
+	}
+
+	return p.markCurrencyMetadataAbandoning(ctx, currencyMetadataRecord)
 }
 
 // Note: Assumes unique authority per currency
@@ -374,4 +392,28 @@ func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetada
 
 		return p.initializeCreatorAcccount(ctx, currencyMetadataRecord, accounts)
 	})
+}
+
+func (p *runtime) handleStateAbandoning(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateAbandoning)
+	if err != nil {
+		return err
+	}
+
+	authorityVaultRecord, err := p.data.GetKey(ctx, currencyMetadataRecord.Authority)
+	if err != nil {
+		return errors.Wrap(err, "error getting authority vault record")
+	}
+
+	authority, err := common.NewAccountFromPrivateKeyString(authorityVaultRecord.PrivateKey)
+	if err != nil {
+		return errors.Wrap(err, "invalid authority private key")
+	}
+
+	err = returnAuthorityFundsToSubsidizer(ctx, p.data, p.subsidizer, authority)
+	if err != nil {
+		return errors.Wrap(err, "error returning authority funds to subsidizer")
+	}
+
+	return p.markCurrencyMetadataAbandoned(ctx, currencyMetadataRecord)
 }
