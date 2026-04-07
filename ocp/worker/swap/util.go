@@ -163,7 +163,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 		if err != nil {
 			return err
 		}
-		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateWaitingForInitialPurchase, currency.MetadataStateAvailable)
+		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateFundingAuthority, currency.MetadataStateAvailable)
 		if err != nil {
 			return err
 		}
@@ -184,7 +184,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 		}
 
 		if !common.IsCoreMint(toMint) {
-			if destinationCurrencyMetadataRecord.State == currency.MetadataStateWaitingForInitialPurchase {
+			if destinationCurrencyMetadataRecord.State == currency.MetadataStateFundingAuthority {
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 				if err != nil {
