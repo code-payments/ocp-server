@@ -17,6 +17,8 @@ const (
 	MetadataStateExecutingInitialPurchase
 	MetadataStateCompletingInitialization
 	MetadataStateFinalValidation
+	MetadataStateAbandoning
+	MetadataStateAbandoned
 )
 
 type SocialLinkType uint8
@@ -350,6 +352,10 @@ func (s MetadataState) String() string {
 		return "completing_initialization"
 	case MetadataStateFinalValidation:
 		return "final_validation"
+	case MetadataStateAbandoning:
+		return "abandoning"
+	case MetadataStateAbandoned:
+		return "abandoned"
 	}
 	return "unknown"
 }

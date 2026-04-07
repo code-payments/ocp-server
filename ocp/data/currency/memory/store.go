@@ -214,7 +214,7 @@ func (s *store) SaveMetadata(ctx context.Context, data *currency.MetadataRecord)
 	}
 
 	for _, item := range s.metadataRecords {
-		if strings.EqualFold(item.Name, data.Name) {
+		if strings.EqualFold(item.Name, data.Name) && item.State != currency.MetadataStateAbandoned {
 			return currency.ErrDuplicateCurrency
 		}
 	}
@@ -336,7 +336,7 @@ func (s *store) IsNameAvailable(_ context.Context, name string) (bool, error) {
 	defer s.mu.Unlock()
 
 	for _, item := range s.metadataRecords {
-		if strings.EqualFold(item.Name, name) {
+		if strings.EqualFold(item.Name, name) && item.State != currency.MetadataStateAbandoned {
 			return false, nil
 		}
 	}

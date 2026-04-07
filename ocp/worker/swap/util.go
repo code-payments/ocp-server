@@ -106,42 +106,96 @@ func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record
 	})
 }
 
-func (p *runtime) markSwapFailed(ctx context.Context, record *swap.Record) error {
+func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) error {
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return err
+	}
+
+	var destinationCurrencyMetadataRecord *currency.MetadataRecord
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+		if err != nil {
+			return err
+		}
+		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
+		if err != nil {
+			return err
+		}
+	}
+
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateSubmitting)
+		err := p.validateSwapState(swapRecord, swap.StateSubmitting)
 		if err != nil {
 			return err
 		}
 
-		err = p.markNonceReleasedDueToSubmittedTransaction(ctx, record)
+		err = p.markNonceReleasedDueToSubmittedTransaction(ctx, swapRecord)
 		if err != nil {
 			return err
 		}
 
-		record.TransactionBlob = nil
-		record.State = swap.StateFailed
-		return p.data.SaveSwap(ctx, record)
+		if !common.IsCoreMint(toMint) {
+			if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
+				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
+				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		swapRecord.TransactionBlob = nil
+		swapRecord.State = swap.StateFailed
+		return p.data.SaveSwap(ctx, swapRecord)
 	})
 }
 
-func (p *runtime) markSwapCancelled(ctx context.Context, record *swap.Record) error {
+func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record) error {
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return err
+	}
+
+	var destinationCurrencyMetadataRecord *currency.MetadataRecord
+	if !common.IsCoreMint(toMint) {
+		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+		if err != nil {
+			return err
+		}
+		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateWaitingForInitialPurchase, currency.MetadataStateAvailable)
+		if err != nil {
+			return err
+		}
+	}
+
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(record, swap.StateCreated, swap.StateFunding, swap.StateFunded)
+		err := p.validateSwapState(swapRecord, swap.StateCreated, swap.StateFunding, swap.StateFunded)
 		if err != nil {
 			return err
 		}
 
-		switch record.State {
+		switch swapRecord.State {
 		case swap.StateCreated, swap.StateFunding, swap.StateFunded:
-			err = p.markNonceAvailableDueToCancelledSwap(ctx, record)
+			err = p.markNonceAvailableDueToCancelledSwap(ctx, swapRecord)
 			if err != nil {
 				return err
 			}
 		}
 
-		record.TransactionBlob = nil
-		record.State = swap.StateCancelled
-		return p.data.SaveSwap(ctx, record)
+		if !common.IsCoreMint(toMint) {
+			if destinationCurrencyMetadataRecord.State == currency.MetadataStateWaitingForInitialPurchase {
+				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
+				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		swapRecord.TransactionBlob = nil
+		swapRecord.State = swap.StateCancelled
+		return p.data.SaveSwap(ctx, swapRecord)
 	})
 }
 

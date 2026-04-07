@@ -30,6 +30,7 @@ func (p *runtime) metricsGaugeWorker(ctx context.Context) error {
 				currency.MetadataStateCompletingInitialization,
 				currency.MetadataStateFinalValidation,
 				currency.MetadataStateAvailable,
+				currency.MetadataStateAbandoning,
 			} {
 				count, err := p.data.GetCurrencyMetadataCountByState(ctx, state)
 				if err != nil {

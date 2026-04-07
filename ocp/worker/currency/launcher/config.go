@@ -1,6 +1,8 @@
 package launcher
 
 import (
+	"time"
+
 	"github.com/code-payments/ocp-server/config"
 	"github.com/code-payments/ocp-server/config/env"
 )
@@ -13,11 +15,15 @@ const (
 
 	BatchSizeConfigEnvName = envConfigPrefix + "WORKER_BATCH_SIZE"
 	defaultBatchSize       = 100
+
+	InitialPurchaseTimeoutConfigEnvName = envConfigPrefix + "INITIAL_PURCHASE_TIMEOUT"
+	defaultInitialPurchaseTimeout       = 10 * time.Minute
 )
 
 type conf struct {
-	subsidizer config.String
-	batchSize  config.Uint64
+	subsidizer              config.String
+	batchSize               config.Uint64
+	initialPurchaseTimeout  config.Duration
 }
 
 // ConfigProvider defines how config values are pulled
@@ -27,8 +33,9 @@ type ConfigProvider func() *conf
 func WithEnvConfigs() ConfigProvider {
 	return func() *conf {
 		return &conf{
-			subsidizer: env.NewStringConfig(SubsidizerConfigEnvName, defaultSubsidizer),
-			batchSize:  env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
+			subsidizer:             env.NewStringConfig(SubsidizerConfigEnvName, defaultSubsidizer),
+			batchSize:              env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
+			initialPurchaseTimeout: env.NewDurationConfig(InitialPurchaseTimeoutConfigEnvName, defaultInitialPurchaseTimeout),
 		}
 	}
 }
