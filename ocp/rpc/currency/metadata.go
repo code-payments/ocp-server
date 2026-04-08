@@ -85,6 +85,14 @@ func (s *currencyServer) UpdateMetadata(ctx context.Context, req *currencypb.Upd
 	}
 
 	if req.NewDescription != nil {
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.NewDescription.ModerationAttestation.RawValue, req.NewDescription.Value)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to validate description moderation attestation")
+			return nil, status.Error(codes.Internal, "")
+		} else if !isModerated {
+			return &currencypb.UpdateMetadataResponse{Result: currencypb.UpdateMetadataResponse_DENIED}, nil
+		}
+
 		metadataRecord.Description = req.NewDescription.Value
 	}
 

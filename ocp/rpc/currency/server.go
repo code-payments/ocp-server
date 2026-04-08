@@ -12,6 +12,7 @@ import (
 	auth_util "github.com/code-payments/ocp-server/ocp/auth"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/integration"
 )
 
 type currencyServer struct {
@@ -24,6 +25,7 @@ type currencyServer struct {
 	auth *auth_util.RPCSignatureVerifier
 
 	antispamGuard *antispam.Guard
+	moderation    integration.Moderation
 
 	s3Client *s3.Client
 
@@ -40,6 +42,7 @@ func NewCurrencyServer(
 	data ocp_data.Provider,
 	mintDataProvider *currency_util.MintDataProvider,
 	antispamGuard *antispam.Guard,
+	moderation integration.Moderation,
 	s3Client *s3.Client,
 	configProvider ConfigProvider,
 ) currencypb.CurrencyServer {
@@ -56,6 +59,7 @@ func NewCurrencyServer(
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
 		antispamGuard: antispamGuard,
+		moderation:    moderation,
 
 		s3Client: s3Client,
 
