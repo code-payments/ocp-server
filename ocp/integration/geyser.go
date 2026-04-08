@@ -1,4 +1,4 @@
-package geyser
+package integration
 
 import (
 	"context"
@@ -6,7 +6,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 )
 
-// Integration allows for notifications based on events processed by Geyser
-type Integration interface {
+// Swap is an integration that hooks into the Geyser worker
+type Geyser interface {
+	// OnDepositReceived allows for notifications for external deposits processed by Geyser
 	OnDepositReceived(ctx context.Context, owner, mint *common.Account, currencyName string, usdMarketValue float64) error
 }

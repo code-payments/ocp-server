@@ -7,6 +7,7 @@ import (
 	"github.com/mr-tron/base58"
 	"github.com/pkg/errors"
 
+	"github.com/code-payments/ocp-server/ocp/integration"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 
 	"github.com/code-payments/ocp-server/ocp/common"
@@ -29,10 +30,10 @@ type ProgramAccountUpdateHandler interface {
 type TokenProgramAccountHandler struct {
 	conf        *conf
 	data        ocp_data.Provider
-	integration Integration
+	integration integration.Geyser
 }
 
-func NewTokenProgramAccountHandler(conf *conf, data ocp_data.Provider, integration Integration) ProgramAccountUpdateHandler {
+func NewTokenProgramAccountHandler(conf *conf, data ocp_data.Provider, integration integration.Geyser) ProgramAccountUpdateHandler {
 	return &TokenProgramAccountHandler{
 		conf:        conf,
 		data:        data,
@@ -120,7 +121,7 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 	return nil
 }
 
-func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, integration Integration) map[string]ProgramAccountUpdateHandler {
+func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, integration integration.Geyser) map[string]ProgramAccountUpdateHandler {
 	return map[string]ProgramAccountUpdateHandler{
 		base58.Encode(token.ProgramKey): NewTokenProgramAccountHandler(conf, data, integration),
 	}

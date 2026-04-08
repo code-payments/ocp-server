@@ -24,6 +24,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
+	"github.com/code-payments/ocp-server/ocp/integration"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/retry"
@@ -43,7 +44,7 @@ var (
 	syncedDepositCache = cache.NewCache(1_000_000)
 )
 
-func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, integration Integration, userAuthority, mint *common.Account) error {
+func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, integration integration.Geyser, userAuthority, mint *common.Account) error {
 	err := maybeInitiateExternalDepositIntoVm(ctx, data, userAuthority, mint)
 	if err != nil {
 		return errors.Wrap(err, "error depositing into the vm")
@@ -227,7 +228,7 @@ func findPotentialExternalDepositsIntoVm(ctx context.Context, data ocp_data.Prov
 	}
 }
 
-func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, integration Integration, signature string, userAuthority, mint *common.Account) error {
+func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, integration integration.Geyser, signature string, userAuthority, mint *common.Account) error {
 	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
 	if err != nil {
 		return err

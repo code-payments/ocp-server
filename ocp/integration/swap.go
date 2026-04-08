@@ -1,4 +1,4 @@
-package swap
+package integration
 
 import (
 	"context"
@@ -7,7 +7,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 )
 
-// Integration allows for notifications based on events processed by the swap worker
-type Integration interface {
+// Swap is an integration that hooks into the swap worker
+type Swap interface {
+	// OnSwapFinalized allows for notifications based on events processed by the swap worker
 	OnSwapFinalized(ctx context.Context, owner *common.Account, isBuy bool, mint *common.Account, currencyName string, region currency.Code, valueReceived float64, isMintInit bool) error
 }
