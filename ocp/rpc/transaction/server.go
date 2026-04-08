@@ -16,6 +16,7 @@ import (
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
+	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 )
 
@@ -29,7 +30,7 @@ type transactionServer struct {
 
 	auth *auth_util.RPCSignatureVerifier
 
-	submitIntentIntegration SubmitIntentIntegration
+	submitIntentIntegration integration.SubmitIntent
 
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -49,7 +50,7 @@ func NewTransactionServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
 	mintDataProvider *currency_util.MintDataProvider,
-	submitIntentIntegration SubmitIntentIntegration,
+	submitIntentIntegration integration.SubmitIntent,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 	nodeID string,

@@ -1,4 +1,4 @@
-package transaction
+package integration
 
 import (
 	"context"
@@ -8,7 +8,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 )
 
-type SubmitIntentIntegration interface {
+// SubmitIntent is an integration that hooks into SubmitIntent
+type SubmitIntent interface {
 	// AllowCreation determines whether the new intent creation should be allowed
 	// with app-specific validation rules
 	AllowCreation(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata, actions []*transactionpb.Action) error
@@ -22,7 +23,7 @@ type defaultSubmitIntentIntegration struct {
 }
 
 // NewDefaultSubmitIntentIntegration retuns a SubmitIntentIntegration that allows everything
-func NewDefaultSubmitIntentIntegration() SubmitIntentIntegration {
+func NewDefaultSubmitIntentIntegration() SubmitIntent {
 	return &defaultSubmitIntentIntegration{}
 }
 

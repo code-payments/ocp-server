@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/worker"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -25,7 +26,7 @@ type runtime struct {
 	data ocp_data.Provider
 	conf *conf
 
-	integration Integration
+	integration integration.Geyser
 
 	programUpdatesChan    chan *geyserpb.SubscribeUpdateAccount
 	programUpdateHandlers map[string]ProgramAccountUpdateHandler
@@ -45,7 +46,7 @@ type runtime struct {
 	backupExternalDepositWorkerStatus bool
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, integration Integration, configProvider ConfigProvider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, integration integration.Geyser, configProvider ConfigProvider) worker.Runtime {
 	conf := configProvider()
 	return &runtime{
 		log:                        log,

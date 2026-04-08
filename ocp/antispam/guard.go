@@ -8,13 +8,14 @@ import (
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
+	"github.com/code-payments/ocp-server/ocp/integration"
 )
 
 type Guard struct {
-	integration Integration
+	integration integration.Antispam
 }
 
-func NewGuard(integration Integration) *Guard {
+func NewGuard(integration integration.Antispam) *Guard {
 	return &Guard{integration: integration}
 }
 

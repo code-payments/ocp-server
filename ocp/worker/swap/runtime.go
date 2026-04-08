@@ -11,6 +11,7 @@ import (
 
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
+	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
 
@@ -19,10 +20,10 @@ type runtime struct {
 	conf            *conf
 	data            ocp_data.Provider
 	vmIndexerClient indexerpb.IndexerClient
-	integration     Integration
+	integration     integration.Swap
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration Integration, configProvider ConfigProvider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration integration.Swap, configProvider ConfigProvider) worker.Runtime {
 	return &runtime{
 		log:             log,
 		conf:            configProvider(),
