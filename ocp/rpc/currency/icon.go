@@ -72,6 +72,14 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_DENIED}, nil
 	}
 
+	isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.ModerationAttestation.RawValue, req.Icon)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to validate moderation attestation")
+		return nil, status.Error(codes.Internal, "")
+	} else if !isModerated {
+		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_DENIED}, nil
+	}
+
 	processed, ext, contentType, err := processIcon(req.Icon)
 	if err == errInvalidIcon {
 		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_INVALID_ICON}, nil

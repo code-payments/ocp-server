@@ -63,6 +63,14 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
+	isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.NameModerationAttestation.RawValue, req.Name)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to validate name moderation attestation")
+		return nil, status.Error(codes.Internal, "")
+	} else if !isModerated {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+
 	symbol := strings.TrimSpace(req.Symbol)
 	if len(symbol) == 0 {
 		symbol = strings.ToUpper(strings.Map(
@@ -77,15 +85,53 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		if len(symbol) > currencycreator.MaxCurrencyConfigAccountSymbolLength {
 			symbol = symbol[0:currencycreator.MaxCurrencyConfigAccountSymbolLength]
 		}
-	} else if symbol != req.Symbol {
-		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	} else {
+		if symbol != req.Symbol {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
+		if req.SymbolModerationAttestation == nil {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.SymbolModerationAttestation.RawValue, req.Symbol)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to validate symbol moderation attestation")
+			return nil, status.Error(codes.Internal, "")
+		} else if !isModerated {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
 	}
 
 	description := strings.TrimSpace(req.Description)
+	if description != req.Description {
+		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+	}
+	if len(req.Description) > 0 {
+		if req.DescriptionModerationAttestation == nil {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.DescriptionModerationAttestation.RawValue, req.Description)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to validate description moderation attestation")
+			return nil, status.Error(codes.Internal, "")
+		} else if !isModerated {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
+	}
 
 	var processedIcon []byte
 	var iconExt, iconContentType string
 	if len(req.Icon) > 0 {
+		if req.IconModerationAttestation == nil {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.IconModerationAttestation.RawValue, req.Icon)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed to validate icon moderation attestation")
+			return nil, status.Error(codes.Internal, "")
+		} else if !isModerated {
+			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
+		}
+
 		processedIcon, iconExt, iconContentType, err = processIcon(req.Icon)
 		if err == errInvalidIcon {
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_INVALID_ICON}, nil
