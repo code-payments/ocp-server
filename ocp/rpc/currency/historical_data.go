@@ -102,25 +102,19 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		}, nil
 	}
 
-	// Get exchange rate history (cached by currency code + range)
-	exchangeRateHistory, err := s.getCachedExchangeRateHistory(
-		ctx,
-		currencyCode,
-		req.GetPredefinedRange(),
-		startTime,
-		endTime,
-		interval,
-	)
-	if err == currency.ErrNotFound {
+	// Always use the latest FX rate for the entire data set
+	liveExchangeRates, err := s.mintDataProvider.GetLiveExchangeRates(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to load live exchange rates")
+		return nil, status.Error(codes.Internal, "")
+	}
+	if liveExchangeRates == nil {
 		return &currencypb.GetHistoricalMintDataResponse{
 			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
 		}, nil
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failed to load exchange rate history")
-		return nil, status.Error(codes.Internal, "")
 	}
-
-	if len(exchangeRateHistory) == 0 {
+	latestExchangeRate, ok := liveExchangeRates.Rates[string(currencyCode)]
+	if !ok {
 		return &currencypb.GetHistoricalMintDataResponse{
 			Result: currencypb.GetHistoricalMintDataResponse_MISSING_DATA,
 		}, nil
@@ -151,15 +145,9 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 	}
 
 	for _, reserve := range reserveHistory {
-		// Find the closest exchange rate for this time point
-		exchangeRate, ok := findClosestExchangeRate(reserve.Time, exchangeRateHistory)
-		if !ok {
-			continue
-		}
-
 		data = append(data, &currencypb.HistoricalMintData{
 			Timestamp: timestamppb.New(reserve.Time),
-			MarketCap: currency_util.CalculateMarketCap(reserve.SupplyFromBonding, exchangeRate),
+			MarketCap: currency_util.CalculateMarketCap(reserve.SupplyFromBonding, latestExchangeRate),
 		})
 	}
 
@@ -174,15 +162,9 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 				return
 			}
 
-			latestExchangeRate, err := s.data.GetExchangeRate(ctx, currencyCode, latestTime)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to load latest exchange rate")
-				return
-			}
-
 			data = append(data, &currencypb.HistoricalMintData{
 				Timestamp: timestamppb.New(latestTime),
-				MarketCap: currency_util.CalculateMarketCap(latestReserve.SupplyFromBonding, latestExchangeRate.Rate),
+				MarketCap: currency_util.CalculateMarketCap(latestReserve.SupplyFromBonding, latestExchangeRate),
 			})
 		}()
 	}
