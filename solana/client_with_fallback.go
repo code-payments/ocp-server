@@ -140,12 +140,12 @@ func (c *clientWithFallback) GetConfirmedBlocksWithLimit(start, limit uint64) ([
 	)
 }
 
-func (c *clientWithFallback) GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]string, uint64, error) {
+func (c *clientWithFallback) GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]ProgramAccount, uint64, error) {
 	return withFallback2(
-		func() ([]string, uint64, error) {
+		func() ([]ProgramAccount, uint64, error) {
 			return c.primary.GetFilteredProgramAccounts(program, offset, filterValue)
 		},
-		func() ([]string, uint64, error) {
+		func() ([]ProgramAccount, uint64, error) {
 			return c.fallback.GetFilteredProgramAccounts(program, offset, filterValue)
 		},
 	)

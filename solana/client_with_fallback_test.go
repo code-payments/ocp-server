@@ -95,7 +95,7 @@ func (m *mockClient) GetConfirmedBlocksWithLimit(uint64, uint64) ([]uint64, erro
 	m.callCount++
 	return nil, nil
 }
-func (m *mockClient) GetFilteredProgramAccounts(ed25519.PublicKey, uint, []byte) ([]string, uint64, error) {
+func (m *mockClient) GetFilteredProgramAccounts(ed25519.PublicKey, uint, []byte) ([]ProgramAccount, uint64, error) {
 	m.callCount++
 	return nil, 0, nil
 }

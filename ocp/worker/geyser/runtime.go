@@ -10,7 +10,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/worker"
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
-	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 )
@@ -62,13 +61,7 @@ func New(log *zap.Logger, data ocp_data.Provider, integration integration.Geyser
 func (p *runtime) Start(ctx context.Context, _ time.Duration) error {
 	// Start backup workers to catch missed events
 	go func() {
-		err := p.backupTimelockStateWorker(ctx, timelock_token.StateLocked, p.conf.backupTimelockWorkerInterval.Get(ctx))
-		if err != nil && err != context.Canceled {
-			p.log.With(zap.Error(err)).Warn("timelock backup worker terminated unexpectedly")
-		}
-	}()
-	go func() {
-		err := p.backupTimelockStateWorker(ctx, timelock_token.StateUnknown, p.conf.backupTimelockWorkerInterval.Get(ctx))
+		err := p.backupTimelockStateWorker(ctx, p.conf.backupTimelockWorkerInterval.Get(ctx))
 		if err != nil && err != context.Canceled {
 			p.log.With(zap.Error(err)).Warn("timelock backup worker terminated unexpectedly")
 		}

@@ -35,7 +35,7 @@ type BlockchainData interface {
 	GetBlockchainTokenAccountsByOwner(ctx context.Context, account string) ([]ed25519.PublicKey, error)
 	GetBlockchainTransaction(ctx context.Context, sig string, commitment solana.Commitment) (*solana.ConfirmedTransaction, error)
 	GetBlockchainTransactionTokenBalances(ctx context.Context, sig string) (*solana.TransactionTokenBalances, error)
-	GetBlockchainFilteredProgramAccounts(ctx context.Context, program string, offset uint, filterValue []byte) ([]string, uint64, error)
+	GetBlockchainFilteredProgramAccounts(ctx context.Context, program string, offset uint, filterValue []byte) ([]solana.ProgramAccount, uint64, error)
 }
 
 type BlockchainProvider struct {
@@ -320,7 +320,7 @@ func (dp *BlockchainProvider) GetBlockchainTransactionTokenBalances(ctx context.
 	return &res, nil
 }
 
-func (dp *BlockchainProvider) GetBlockchainFilteredProgramAccounts(ctx context.Context, program string, offset uint, filterValue []byte) ([]string, uint64, error) {
+func (dp *BlockchainProvider) GetBlockchainFilteredProgramAccounts(ctx context.Context, program string, offset uint, filterValue []byte) ([]solana.ProgramAccount, uint64, error) {
 	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainFilteredProgramAccounts")
 	defer tracer.End()
 
@@ -329,10 +329,10 @@ func (dp *BlockchainProvider) GetBlockchainFilteredProgramAccounts(ctx context.C
 		return nil, 0, err
 	}
 
-	addresses, slot, err := dp.sc.GetFilteredProgramAccounts(programId, offset, filterValue)
+	accounts, slot, err := dp.sc.GetFilteredProgramAccounts(programId, offset, filterValue)
 	if err != nil {
 		tracer.OnError(err)
 		return nil, 0, err
 	}
-	return addresses, slot, err
+	return accounts, slot, err
 }
