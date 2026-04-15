@@ -138,12 +138,36 @@ func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string, cu
 		return 0, nil
 	}
 
-	tokenAccounts := make([]*common.Account, len(accountRecords))
+	vaultAddresses := make([]string, len(accountRecords))
 	for i, record := range accountRecords {
-		tokenAccounts[i], err = common.NewAccountFromPublicKeyString(record.TokenAccount)
+		vaultAddresses[i] = record.TokenAccount
+	}
+
+	timelockRecordsByVault, err := p.data.GetTimelockByVaultBatch(ctx, vaultAddresses...)
+	if err != nil {
+		return 0, errors.Wrap(err, "error getting timelock records")
+	}
+
+	tokenAccounts := make([]*common.Account, 0)
+	for _, record := range accountRecords {
+		timelockRecord, ok := timelockRecordsByVault[record.TokenAccount]
+		if !ok {
+			return 0, errors.Errorf("timelock record unexpectedly missing for vault %s", record.TokenAccount)
+		}
+
+		if !timelockRecord.IsLocked() {
+			continue
+		}
+
+		tokenAccount, err := common.NewAccountFromPublicKeyString(record.TokenAccount)
 		if err != nil {
 			return 0, errors.Wrap(err, "invalid token account public key")
 		}
+		tokenAccounts = append(tokenAccounts, tokenAccount)
+	}
+
+	if len(tokenAccounts) == 0 {
+		return 0, nil
 	}
 
 	balances, err := balance.BatchCalculateFromCacheWithTokenAccounts(ctx, p.data, tokenAccounts...)
