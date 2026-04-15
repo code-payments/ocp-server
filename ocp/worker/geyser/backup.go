@@ -5,14 +5,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mr-tron/base58"
 	"go.uber.org/zap"
 
-	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
-	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 // Backup system workers can be found here. This is necessary because we can't rely
@@ -21,7 +21,7 @@ import (
 // the case? Real time updates. Backup workers likely won't be able to guarantee
 // real time (or near real time) updates at scale.
 
-func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state timelock_token.TimelockState, interval time.Duration) error {
+func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, interval time.Duration) error {
 	log := p.log.With(zap.String("method", "backupTimelockStateWorker"))
 	log.Debug("worker started")
 
@@ -36,13 +36,11 @@ func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state ti
 		log.Debug("worker stopped")
 	}()
 
-	start := time.Now()
-	cursor := query.EmptyCursor
 	delay := 0 * time.Second // Initially no delay, so we can run right after a deploy
 	for {
 		select {
 		case <-time.After(delay):
-			batchStart := time.Now()
+			start := time.Now()
 
 			func() {
 				provider := runtimeCtx.Value(metrics.ProviderContextKey).(metrics.Provider)
@@ -50,62 +48,62 @@ func (p *runtime) backupTimelockStateWorker(runtimeCtx context.Context, state ti
 				defer trace.End()
 				tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
-				timelockRecords, err := p.data.GetAllTimelocksByState(
+				// todo: Also filter on unlock at if the result set gets too large
+				programAccounts, slot, err := p.data.GetBlockchainFilteredProgramAccounts(
 					tracedCtx,
-					state,
-					query.WithDirection(query.Ascending),
-					query.WithCursor(cursor),
-					query.WithLimit(p.conf.backupTimelockWorkerBatchSize.Get(runtimeCtx)),
+					base58.Encode(vm.PROGRAM_ID),
+					0,
+					vm.UnlockStateAccountDiscriminator,
 				)
-				if err == timelock.ErrTimelockNotFound {
-					p.metricStatusLock.Lock()
-					duration := time.Since(start)
-					if p.backupTimelockStateWorkerDuration == nil || *p.backupTimelockStateWorkerDuration < duration {
-						p.backupTimelockStateWorkerDuration = &duration
-					}
-					p.metricStatusLock.Unlock()
-
-					start = time.Now()
-					cursor = query.EmptyCursor
-					return
-				} else if err != nil {
-					log.With(zap.Error(err)).Warn("failed to get timelock records")
+				if err != nil {
+					log.With(zap.Error(err)).Warn("failed to get unlock state program accounts")
 					return
 				}
 
 				reprocessDelay := p.conf.backupTimelockWorkerReprocessDelay.Get(runtimeCtx)
 
-				var wg sync.WaitGroup
-				for _, timelockRecord := range timelockRecords {
-					if lastProcessed, ok := p.backupTimelockProcessedCache.Load(timelockRecord.Address); ok {
+				for _, programAccount := range programAccounts {
+					var unlockState vm.UnlockStateAccount
+					if err := unlockState.Unmarshal(programAccount.Data); err != nil {
+						log.With(zap.Error(err)).Warn("failed to unmarshal unlock state account")
+						continue
+					}
+
+					stateAddress := base58.Encode(unlockState.Address)
+					log := log.With(zap.String("timelock", stateAddress))
+
+					if lastProcessed, ok := p.backupTimelockProcessedCache.Load(stateAddress); ok {
 						if time.Since(lastProcessed.(time.Time)) < reprocessDelay {
 							continue
 						}
 					}
 
-					wg.Add(1)
+					timelockRecord, err := p.data.GetTimelockByAddress(tracedCtx, stateAddress)
+					if err == timelock.ErrTimelockNotFound {
+						p.backupTimelockProcessedCache.Store(stateAddress, time.Now())
+						continue
+					} else if err != nil {
+						log.With(zap.Error(err)).Warn("failed to get timelock record")
+						continue
+					}
 
-					go func(timelockRecord *timelock.Record) {
-						defer wg.Done()
+					if err := updateTimelockAccountRecord(tracedCtx, p.data, timelockRecord, &unlockState, slot); err != nil && err != timelock.ErrStaleTimelockState {
+						log.With(zap.Error(err)).Warn("failed to update timelock account")
+						continue
+					}
 
-						log := log.With(zap.String("timelock", timelockRecord.Address))
-
-						err := updateTimelockAccountRecord(tracedCtx, p.data, timelockRecord)
-						if err != nil {
-							log.With(zap.Error(err)).Warn("failed to update timelock account")
-							return
-						}
-
-						p.backupTimelockProcessedCache.Store(timelockRecord.Address, time.Now())
-					}(timelockRecord)
+					p.backupTimelockProcessedCache.Store(stateAddress, time.Now())
 				}
 
-				wg.Wait()
-
-				cursor = query.ToCursor(timelockRecords[len(timelockRecords)-1].Id)
+				p.metricStatusLock.Lock()
+				duration := time.Since(start)
+				if p.backupTimelockStateWorkerDuration == nil || *p.backupTimelockStateWorkerDuration < duration {
+					p.backupTimelockStateWorkerDuration = &duration
+				}
+				p.metricStatusLock.Unlock()
 			}()
 
-			delay = interval - time.Since(batchStart)
+			delay = interval - time.Since(start)
 		case <-runtimeCtx.Done():
 			return runtimeCtx.Err()
 		}

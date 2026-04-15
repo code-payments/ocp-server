@@ -164,6 +164,11 @@ type TransactionSignature struct {
 	Memo      *string
 }
 
+type ProgramAccount struct {
+	PublicKey ed25519.PublicKey
+	Data      []byte
+}
+
 // Client provides an interaction with the Solana JSON RPC API.
 //
 // Reference: https://docs.solana.com/apps/jsonrpc-api
@@ -177,7 +182,7 @@ type Client interface {
 	GetConfirmationStatus(Signature, Commitment) (bool, error)
 	GetConfirmedBlock(slot uint64) (*Block, error)
 	GetConfirmedBlocksWithLimit(start, limit uint64) ([]uint64, error)
-	GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]string, uint64, error)
+	GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]ProgramAccount, uint64, error)
 	GetLatestBlockhash() (Blockhash, error)
 	GetMinimumBalanceForRentExemption(size uint64) (lamports uint64, err error)
 	GetSignatureStatus(Signature, Commitment) (*SignatureStatus, error)
@@ -1118,7 +1123,7 @@ func (c *client) GetTokenAccountsByOwner(owner, mint ed25519.PublicKey) ([]ed255
 	return keys, nil
 }
 
-func (c *client) GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]string, uint64, error) {
+func (c *client) GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]ProgramAccount, uint64, error) {
 	type memcmpFilter struct {
 		Offset uint   `json:"offset"`
 		Bytes  string `json:"bytes"`
@@ -1152,16 +1157,35 @@ func (c *client) GetFilteredProgramAccounts(program ed25519.PublicKey, offset ui
 			Slot int64 `json:"slot"`
 		} `json:"context"`
 		Value []struct {
-			PubKey string `json:"pubkey"`
+			PubKey  string `json:"pubkey"`
+			Account struct {
+				Data []string `json:"data"`
+			} `json:"account"`
 		} `json:"value"`
 	}
 	if err := c.call(&resp, "getProgramAccounts", base58.Encode(program), config); err != nil {
 		return nil, 0, err
 	}
 
-	var res []string
+	res := make([]ProgramAccount, 0, len(resp.Value))
 	for _, result := range resp.Value {
-		res = append(res, result.PubKey)
+		pubkey, err := base58.Decode(result.PubKey)
+		if err != nil {
+			return nil, 0, errors.Wrap(err, "invalid base58 encoded pubkey")
+		}
+
+		var data []byte
+		if len(result.Account.Data) > 0 {
+			data, err = base64.StdEncoding.DecodeString(result.Account.Data[0])
+			if err != nil {
+				return nil, 0, errors.Wrap(err, "invalid base64 encoded account data")
+			}
+		}
+
+		res = append(res, ProgramAccount{
+			PublicKey: pubkey,
+			Data:      data,
+		})
 	}
 	return res, uint64(resp.Context.Slot), nil
 }
