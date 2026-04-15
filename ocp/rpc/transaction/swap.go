@@ -166,12 +166,15 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	_, err = s.data.GetTimelockByVault(ctx, ownerSourceTimelockVault.PublicKey().ToBase58())
+	sourceTimelockAccountRecord, err := s.data.GetTimelockByVault(ctx, ownerSourceTimelockVault.PublicKey().ToBase58())
 	if err == timelock.ErrTimelockNotFound {
 		return handleStatefulSwapError(streamer, NewSwapValidationError("source timelock vault account not opened"))
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting source timelock record")
 		return handleStatefulSwapError(streamer, err)
+	}
+	if !sourceTimelockAccountRecord.IsLocked() {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("source timelock account isn't locked"))
 	}
 
 	switch initiateReserveSwapReq.FundingSource {
@@ -273,12 +276,15 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			return handleStatefulSwapError(streamer, err)
 		}
 
-		_, err = s.data.GetTimelockByVault(ctx, ownerDestinationTimelockVault.PublicKey().ToBase58())
+		destinationTimelockAccountRecord, err := s.data.GetTimelockByVault(ctx, ownerDestinationTimelockVault.PublicKey().ToBase58())
 		if err == timelock.ErrTimelockNotFound {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("destination timelock vault account not opened"))
 		} else if err != nil {
 			log.With(zap.Error(err)).Warn("failure getting destination timelock record")
 			return handleStatefulSwapError(streamer, err)
+		}
+		if !destinationTimelockAccountRecord.IsLocked() {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("destination timelock account isn't locked"))
 		}
 
 		err = vm.EnsureVirtualTimelockAccountIsInitialized(ctx, s.data, ownerDestinationTimelockVault, false)
