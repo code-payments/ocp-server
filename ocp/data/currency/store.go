@@ -69,7 +69,8 @@ type Store interface {
 	// ErrNotFound is returned if no mints exist
 	GetAllMints(ctx context.Context) ([]string, error)
 
-	// CountMints returns the total number of currency creator mints
+	// CountMints returns the total number of currency creator mints,
+	// excluding those in the abandoned state.
 	CountMints(ctx context.Context) (uint64, error)
 
 	// IsNameAvailable checks whether a currency name is available for use.

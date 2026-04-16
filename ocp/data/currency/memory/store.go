@@ -328,7 +328,14 @@ func (s *store) CountMints(ctx context.Context) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return uint64(len(s.metadataRecords)), nil
+	var count uint64
+	for _, item := range s.metadataRecords {
+		if item.State == currency.MetadataStateAbandoned {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 func (s *store) IsNameAvailable(_ context.Context, name string) (bool, error) {

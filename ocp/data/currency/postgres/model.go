@@ -532,7 +532,10 @@ func dbGetAllMints(ctx context.Context, db *sqlx.DB) ([]string, error) {
 
 func dbCountMints(ctx context.Context, db *sqlx.DB) (uint64, error) {
 	var count uint64
-	err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM `+metadataTableName)
+	err := db.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM `+metadataTableName+` WHERE state != $1`,
+		currency.MetadataStateAbandoned,
+	)
 	if err != nil {
 		return 0, err
 	}
