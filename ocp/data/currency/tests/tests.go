@@ -699,6 +699,14 @@ func testCountMints(t *testing.T, s currency.Store) {
 	count, err = s.CountMints(context.Background())
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, count)
+
+	// Abandoned mints must not be counted
+	record2.State = currency.MetadataStateAbandoned
+	require.NoError(t, s.SaveMetadata(context.Background(), record2))
+
+	count, err = s.CountMints(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, count)
 }
 
 func testCountMetadataByState(t *testing.T, s currency.Store) {
