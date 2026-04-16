@@ -42,8 +42,8 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		return nil, err
 	}
 
-	// Restrict currency launch internally for now
-	isDryRun := ownerAccount.PublicKey().ToBase58() != s.conf.adminPublicKey.Get(ctx)
+	// Do not restrict currency launch internally for now
+	isDryRun := false
 
 	count, err := s.data.CountCurrencyMints(ctx)
 	if err != nil {
