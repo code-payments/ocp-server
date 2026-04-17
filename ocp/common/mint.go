@@ -23,6 +23,8 @@ var (
 	CoreMintName          = config.CoreMintName
 	CoreMintSymbol        = config.CoreMintSymbol
 
+	CoreMintFeesAccount, _ = NewAccountFromPublicKeyString(config.CoreMintFeesPublicKey)
+
 	CoreMintAlt, _ = NewAccountFromPublicKeyString(config.CoreMintAltPublicKeyString)
 
 	ErrUnsupportedMint = errors.New("unsupported mint")

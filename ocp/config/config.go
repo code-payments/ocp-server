@@ -23,6 +23,8 @@ const (
 	CoreMintVmAccountPublicKey = "JACkaKsm2Rd6TNJwH4UB7G6tHrWUATJPTgNNnRVsg4ip"
 	CoreMintVmOmnibusPublicKey = "D8oUTXRvarxhx9cjYdFJqWAVj2rmzry58bS6JSTiQsv5"
 
+	CoreMintFeesPublicKey = "HkL1my3dtsn6FVbcv7rHA4htg6zdVyn4fna3e941WomZ"
+
 	CoreMintAltPublicKeyString = "4oLVyayQJCoPcrkKapE5Ry6pP6vTTTneLP5UPUSQZsvT"
 
 	CurrencyAssetsBaseUrl      = "https://currency-assets.flipcash-infra.net"
