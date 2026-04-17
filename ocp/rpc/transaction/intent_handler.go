@@ -2091,8 +2091,8 @@ func validateSwapFunding(ctx context.Context, data ocp_data.Provider, intentReco
 			return nil, NewIntentValidationErrorf("must fund swap with %s mint", swapRecord.FromMint)
 		}
 
-		if intentRecord.SendPublicPaymentMetadata.Quantity != swapRecord.Amount {
-			return nil, NewIntentValidationErrorf("must fund swap with %d quarks", swapRecord.Amount)
+		if intentRecord.SendPublicPaymentMetadata.Quantity != swapRecord.SwapAmount+swapRecord.FeeAmount {
+			return nil, NewIntentValidationErrorf("must fund swap with %d quarks", swapRecord.SwapAmount+swapRecord.FeeAmount)
 		}
 	}
 	if !isIntentReservedForSwap && intentRecord.IntentType != intent.SendPublicPayment {

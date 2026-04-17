@@ -58,7 +58,7 @@ func recordSwapFinalizedEvent(ctx context.Context, swapRecord *swap.Record, quar
 
 	var usdMarketValue float64
 	if common.CoreMintAccount.PublicKey().ToBase58() == swapRecord.FromMint {
-		usdMarketValue = float64(swapRecord.Amount) / float64(common.CoreMintQuarksPerUnit)
+		usdMarketValue = float64(swapRecord.SwapAmount) / float64(common.CoreMintQuarksPerUnit)
 	} else {
 		usdMarketValue = float64(quarksBought) / float64(common.CoreMintQuarksPerUnit)
 	}
@@ -67,7 +67,7 @@ func recordSwapFinalizedEvent(ctx context.Context, swapRecord *swap.Record, quar
 		"id":               swapRecord.Id,
 		"from_mint":        swapRecord.FromMint,
 		"to_mint":          swapRecord.ToMint,
-		"quarks_sold":      swapRecord.Amount,
+		"quarks_sold":      swapRecord.SwapAmount,
 		"quarks_bought":    quarksBought,
 		"usd_market_value": usdMarketValue,
 	})

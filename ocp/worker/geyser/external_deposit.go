@@ -472,14 +472,14 @@ func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider
 
 	initialSwap := swapRecords[0]
 
-	usdMarketValue, err := currency.CalculateUsdMarketValueFromTokenAmount(ctx, data, common.CoreMintAccount, initialSwap.Amount, initialSwap.CreatedAt)
+	usdMarketValue, err := currency.CalculateUsdMarketValueFromTokenAmount(ctx, data, common.CoreMintAccount, initialSwap.SwapAmount, initialSwap.CreatedAt)
 	if err != nil {
 		return false, 0, errors.Wrap(err, "error calculating usd market value")
 	}
 
 	expectedQuarks := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
 		CurrentSupplyInQuarks: 0,
-		BuyAmountInQuarks:     initialSwap.Amount,
+		BuyAmountInQuarks:     initialSwap.SwapAmount,
 		ValueMintDecimals:     uint8(common.CoreMintDecimals),
 	})
 
