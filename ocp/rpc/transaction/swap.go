@@ -340,7 +340,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
 	}
 
-	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint, initiateReserveSwapReq.SwapAmount, initializesMint)
+	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint, initiateReserveSwapReq.SwapAmount, initiateReserveSwapReq.FeeAmount, initializesMint)
 	if err != nil {
 		return handleStatefulSwapError(streamer, err)
 	} else if !allow {
