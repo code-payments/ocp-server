@@ -57,9 +57,11 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 	name := strings.TrimSpace(req.Name)
 	if isReservedCurrencyName(name) {
+		log.Info("denying reserved currency name")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 	if name != req.Name {
+		log.Info("name requires whitespace trimming")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
@@ -68,6 +70,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		log.With(zap.Error(err)).Warn("failed to validate name moderation attestation")
 		return nil, status.Error(codes.Internal, "")
 	} else if !isModerated {
+		log.Info("name is not moderated")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
@@ -87,9 +90,11 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		}
 	} else {
 		if symbol != req.Symbol {
+			log.Info("symbol requires whitespace trimming")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 		if req.SymbolModerationAttestation == nil {
+			log.Info("symbol moderation attestation is missing")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.SymbolModerationAttestation.RawValue, req.Symbol)
@@ -97,16 +102,15 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			log.With(zap.Error(err)).Warn("failed to validate symbol moderation attestation")
 			return nil, status.Error(codes.Internal, "")
 		} else if !isModerated {
+			log.Info("symbol is not moderated")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 	}
 
 	description := strings.TrimSpace(req.Description)
-	if description != req.Description {
-		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
-	}
 	if len(req.Description) > 0 {
 		if req.DescriptionModerationAttestation == nil {
+			log.Info("description moderation attestation is missing")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.DescriptionModerationAttestation.RawValue, req.Description)
@@ -114,6 +118,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			log.With(zap.Error(err)).Warn("failed to validate description moderation attestation")
 			return nil, status.Error(codes.Internal, "")
 		} else if !isModerated {
+			log.Info("description is not moderated")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 	}
@@ -122,6 +127,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	var iconExt, iconContentType string
 	if len(req.Icon) > 0 {
 		if req.IconModerationAttestation == nil {
+			log.Info("icon moderation attestation is missing")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.IconModerationAttestation.RawValue, req.Icon)
@@ -129,6 +135,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			log.With(zap.Error(err)).Warn("failed to validate icon moderation attestation")
 			return nil, status.Error(codes.Internal, "")
 		} else if !isModerated {
+			log.Info("icon is not moderated")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 
@@ -143,12 +150,14 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 
 	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, ownerAccount)
 	if err == common.ErrOwnerNotFound {
+		log.Info("owner is not an ocp account")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	} else if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting owner metadata")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 	if ownerMetadata.Type != common.OwnerTypeUser12Words || ownerMetadata.State != common.OwnerManagementStateOcpAccount {
+		log.Info("owner must be a user 12 word account")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
@@ -157,6 +166,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		log.With(zap.Error(err)).Warn("failed to perform antispam checks")
 		return nil, status.Error(codes.Internal, "")
 	} else if !allow {
+		log.Info("antispam guard denied currency launch")
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
