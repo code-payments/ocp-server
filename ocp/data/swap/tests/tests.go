@@ -48,7 +48,7 @@ func testRoundTrip(t *testing.T, s swap.Store) {
 
 			FromMint: "test_from_mint",
 			ToMint:   "test_to_mint",
-			Amount:   12345,
+			SwapAmount:   12345,
 
 			FundingId:     "test_funding_id",
 			FundingSource: swap.FundingSourceSubmitIntent,
@@ -97,7 +97,7 @@ func testUpdateHappyPath(t *testing.T, s swap.Store) {
 
 			FromMint: "test_from_mint",
 			ToMint:   "test_to_mint",
-			Amount:   12345,
+			SwapAmount:   12345,
 
 			FundingId:     "test_funding_id",
 			FundingSource: swap.FundingSourceSubmitIntent,
@@ -144,7 +144,7 @@ func testUpdateStaleRecord(t *testing.T, s swap.Store) {
 
 			FromMint: "test_from_mint",
 			ToMint:   "test_to_mint",
-			Amount:   12345,
+			SwapAmount:   12345,
 
 			FundingId:     "test_funding_id",
 			FundingSource: swap.FundingSourceSubmitIntent,
@@ -202,7 +202,7 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 
 				FromMint: fmt.Sprintf("test_from_mint_%d", i),
 				ToMint:   fmt.Sprintf("test_to_mint_%d", i),
-				Amount:   uint64(i + 1),
+				SwapAmount:   uint64(i + 1),
 
 				FundingId:     fmt.Sprintf("test_funding_id_%d", i),
 				FundingSource: swap.FundingSourceSubmitIntent,
@@ -259,35 +259,35 @@ func testGetAllByOwnerMintAndState(t *testing.T, s swap.Store) {
 		records := []*swap.Record{
 			{ // owner_a buying mint_x
 				SwapId: "swap_0", Owner: "owner_a",
-				FromMint: "core_mint", ToMint: "mint_x", Amount: 100,
+				FromMint: "core_mint", ToMint: "mint_x", SwapAmount: 100,
 				FundingId: "fund_0", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_0", Blockhash: "bh_0", ProofSignature: "proof_0",
 				TransactionSignature: "sig_0", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_a selling mint_x
 				SwapId: "swap_1", Owner: "owner_a",
-				FromMint: "mint_x", ToMint: "core_mint", Amount: 50,
+				FromMint: "mint_x", ToMint: "core_mint", SwapAmount: 50,
 				FundingId: "fund_1", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_1", Blockhash: "bh_1", ProofSignature: "proof_1",
 				TransactionSignature: "sig_1", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_a buying mint_y (different mint)
 				SwapId: "swap_2", Owner: "owner_a",
-				FromMint: "core_mint", ToMint: "mint_y", Amount: 200,
+				FromMint: "core_mint", ToMint: "mint_y", SwapAmount: 200,
 				FundingId: "fund_2", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_2", Blockhash: "bh_2", ProofSignature: "proof_2",
 				TransactionSignature: "sig_2", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_b buying mint_x (different owner)
 				SwapId: "swap_3", Owner: "owner_b",
-				FromMint: "core_mint", ToMint: "mint_x", Amount: 300,
+				FromMint: "core_mint", ToMint: "mint_x", SwapAmount: 300,
 				FundingId: "fund_3", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_3", Blockhash: "bh_3", ProofSignature: "proof_3",
 				TransactionSignature: "sig_3", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_a buying mint_x but not finalized
 				SwapId: "swap_4", Owner: "owner_a",
-				FromMint: "core_mint", ToMint: "mint_x", Amount: 400,
+				FromMint: "core_mint", ToMint: "mint_x", SwapAmount: 400,
 				FundingId: "fund_4", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_4", Blockhash: "bh_4", ProofSignature: "proof_4",
 				TransactionSignature: "sig_4", State: swap.StateCreated, CreatedAt: time.Now(),
@@ -350,7 +350,7 @@ func testGetAllByState(t *testing.T, s swap.Store) {
 
 				FromMint: "test_from_mint",
 				ToMint:   "test_to_mint",
-				Amount:   uint64(i + 1),
+				SwapAmount:   uint64(i + 1),
 
 				FundingId:     fmt.Sprintf("test_funding_id_%d", i),
 				FundingSource: swap.FundingSourceSubmitIntent,
@@ -419,7 +419,8 @@ func assertEquivalentRecords(t *testing.T, obj1, obj2 *swap.Record) {
 
 	assert.Equal(t, obj1.FromMint, obj2.FromMint)
 	assert.Equal(t, obj1.ToMint, obj2.ToMint)
-	assert.Equal(t, obj1.Amount, obj2.Amount)
+	assert.Equal(t, obj1.SwapAmount, obj2.SwapAmount)
+	assert.Equal(t, obj1.FeeAmount, obj2.FeeAmount)
 
 	assert.Equal(t, obj1.FundingId, obj2.FundingId)
 	assert.Equal(t, obj1.FundingSource, obj2.FundingSource)
