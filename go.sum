@@ -80,6 +80,8 @@ github.com/code-payments/code-vm-indexer v1.2.0 h1:rSHpBMiT9BKgmKcXg/VIoi/h0t7jN
 github.com/code-payments/code-vm-indexer v1.2.0/go.mod h1:vn91YN2qNqb+gGJeZe2+l+TNxVmEEiRHXXnIn2Y40h8=
 github.com/code-payments/ocp-protobuf-api v1.8.1 h1:IaCVADbbTUtZwf0Rk8Pf8PygsancuOXc+A3CcTG/74w=
 github.com/code-payments/ocp-protobuf-api v1.8.1/go.mod h1:tw6BooY5a8l6CtSZnKOruyKII0W04n89pcM4BizrgG8=
+github.com/code-payments/ocp-protobuf-api v1.9.0 h1:VpcOENVTmebpTENhpVaDbFfPPliK1zuMtjHzdhBQY2U=
+github.com/code-payments/ocp-protobuf-api v1.9.0/go.mod h1:tw6BooY5a8l6CtSZnKOruyKII0W04n89pcM4BizrgG8=
 github.com/containerd/continuity v0.0.0-20190827140505-75bee3e2ccb6 h1:NmTXa/uVnDyp0TY5MKi197+3HWcnYWfnHGyaFthlnGw=
 github.com/containerd/continuity v0.0.0-20190827140505-75bee3e2ccb6/go.mod h1:GL3xCUCBDV3CZiTSEKksMWbLE66hEyuu9qyDOOqM47Y=
 github.com/coreos/bbolt v1.3.2/go.mod h1:iRUV2dpdMOn7Bo10OQBFzIJO9kkE559Wcmn+qkEiiKk=

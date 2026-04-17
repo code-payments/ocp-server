@@ -98,7 +98,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	log = log.With(zap.String("to_mint", toMint.PublicKey().ToBase58()))
 
 	log = log.With(
-		zap.Uint64("amount", initiateReserveSwapReq.Amount),
+		zap.Uint64("amount", initiateReserveSwapReq.SwapAmount),
 		zap.String("funding_source", initiateReserveSwapReq.FundingSource.String()),
 		zap.String("funding_id", initiateReserveSwapReq.FundingId),
 	)
@@ -148,8 +148,8 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapValidationError("must swap between two different mints"))
 	}
 
-	if initiateReserveSwapReq.Amount == 0 {
-		return handleStatefulSwapError(streamer, NewSwapValidationError("amount must be positive"))
+	if initiateReserveSwapReq.SwapAmount == 0 {
+		return handleStatefulSwapError(streamer, NewSwapValidationError("swap amount must be positive"))
 	}
 
 	sourceVmConfig, err := common.GetVmConfigForMint(ctx, s.data, fromMint)
@@ -198,7 +198,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			log.With(zap.Error(err)).Warn("failure getting owner source timelock vault balance")
 			return handleStatefulSwapError(streamer, err)
 		}
-		if balance < initiateReserveSwapReq.Amount {
+		if balance < initiateReserveSwapReq.SwapAmount {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("insufficient balance"))
 		}
 	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
@@ -246,7 +246,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 
 		_, estimatedFees := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
 			CurrentSupplyInQuarks: liveReserveState.SupplyFromBonding,
-			SellAmountInQuarks:    initiateReserveSwapReq.Amount,
+			SellAmountInQuarks:    initiateReserveSwapReq.SwapAmount,
 			ValueMintDecimals:     uint8(common.CoreMintDecimals),
 			SellFeeBps:            currencyMetadataRecord.SellFeeBps,
 		})
@@ -259,6 +259,10 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	if !initializesMint {
 		if owner.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58() {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
+		}
+
+		if initiateReserveSwapReq.FeeAmount != 0 {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("fee amount must be 0"))
 		}
 
 		destinationVmConfig, err := common.GetVmConfigForMint(ctx, s.data, toMint)
@@ -336,7 +340,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, NewSwapDeniedError("not a user ocp account"))
 	}
 
-	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint, initiateReserveSwapReq.Amount, initializesMint)
+	allow, err := s.antispamGuard.AllowSwap(ctx, swap.FundingSource(initiateReserveSwapReq.FundingSource), owner, fromMint, toMint, initiateReserveSwapReq.SwapAmount, initializesMint)
 	if err != nil {
 		return handleStatefulSwapError(streamer, err)
 	} else if !allow {
@@ -373,7 +377,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			s.data,
 			owner,
 			toMint,
-			initiateReserveSwapReq.Amount,
+			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
 		)
 	} else if common.IsCoreMint(fromMint) {
@@ -382,7 +386,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			owner,
 			swapAuthority,
 			toMint,
-			initiateReserveSwapReq.Amount,
+			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
 		)
 	} else if common.IsCoreMint(toMint) {
@@ -391,7 +395,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			owner,
 			swapAuthority,
 			fromMint,
-			initiateReserveSwapReq.Amount,
+			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
 		)
 	} else {
@@ -401,7 +405,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			swapAuthority,
 			fromMint,
 			toMint,
-			initiateReserveSwapReq.Amount,
+			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
 		)
 	}
@@ -537,7 +541,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		Owner:                owner.PublicKey().ToBase58(),
 		FromMint:             fromMint.PublicKey().ToBase58(),
 		ToMint:               toMint.PublicKey().ToBase58(),
-		Amount:               initiateReserveSwapReq.Amount,
+		Amount:               initiateReserveSwapReq.SwapAmount,
 		FundingSource:        swap.FundingSource(initiateReserveSwapReq.FundingSource),
 		FundingId:            initiateReserveSwapReq.FundingId,
 		Nonce:                selectedNonce.Account.PublicKey().ToBase58(),
@@ -723,9 +727,10 @@ func toProtoSwap(record *swap.Record) (*transactionpb.SwapMetadata, error) {
 						Id:            &commonpb.SwapId{Value: decodedSwapId},
 						FromMint:      fromMint.ToProto(),
 						ToMint:        toMint.ToProto(),
-						Amount:        record.Amount,
+						SwapAmount:    record.Amount,
 						FundingSource: transactionpb.FundingSource(record.FundingSource),
 						FundingId:     record.FundingId,
+						FeeAmount:     0,
 					},
 				},
 			},
