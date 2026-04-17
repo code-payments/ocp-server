@@ -378,6 +378,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			owner,
 			toMint,
 			initiateReserveSwapReq.SwapAmount,
+			initiateReserveSwapReq.FeeAmount,
 			selectedNonce,
 		)
 	} else if common.IsCoreMint(fromMint) {

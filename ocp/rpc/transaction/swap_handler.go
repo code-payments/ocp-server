@@ -656,9 +656,10 @@ func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]sol
 }
 
 type ReserveCreateAndBuySwapHandler struct {
-	buyer  *common.Account
-	mint   *common.Account
-	amount uint64
+	buyer      *common.Account
+	mint       *common.Account
+	swapAmount uint64
+	feeAmount  uint64
 
 	alts             []solana.AddressLookupTable
 	selectedNonce    *transaction_util.Nonce
@@ -677,15 +678,16 @@ func NewReserveCreateAndBuySwapHandler(
 	data ocp_data.Provider,
 	buyer *common.Account,
 	mint *common.Account,
-	amount uint64,
+	swapAmount, feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
 ) (SwapHandler, error) {
 	var err error
 
 	h := &ReserveCreateAndBuySwapHandler{
-		buyer:  buyer,
-		mint:   mint,
-		amount: amount,
+		buyer:      buyer,
+		mint:       mint,
+		swapAmount: swapAmount,
+		feeAmount:  feeAmount,
 
 		selectedNonce:    selectedNonce,
 		computeUnitLimit: 300_000, // todo: optimize
@@ -753,6 +755,7 @@ func (h *ReserveCreateAndBuySwapHandler) GetServerParameters() *transactionpb.St
 				Seed:                 h.destinationCurrencyAccounts.Seed.ToProto(),
 				SellFeeBps:           currencycreator.DefaultSellFeeBps,
 				VmLockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
+				FeeDestination:       common.CoreMintFeesAccount.ToProto(),
 			},
 		},
 	}
@@ -840,18 +843,20 @@ func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) (
 		},
 	)
 
-	transferForSwapIxn := vm.NewTransferForSwapInstruction(
-		&vm.TransferForSwapInstructionAccounts{
-			VmAuthority: common.GetSubsidizer().PublicKey().ToBytes(),
-			Vm:          common.CoreMintVmAccount.PublicKey().ToBytes(),
-			Swapper:     h.buyer.PublicKey().ToBytes(),
-			SwapPda:     buyerVmSwapAccounts.Pda.PublicKey().ToBytes(),
-			SwapAta:     buyerVmSwapAccounts.Ata.PublicKey().ToBytes(),
-			Destination: temporaryCoreMintAta,
+	transferForSwapWithFeeIxn := vm.NewTransferForSwapWithFeeInstruction(
+		&vm.TransferForSwapWithFeeInstructionAccounts{
+			VmAuthority:     common.GetSubsidizer().PublicKey().ToBytes(),
+			Vm:              common.CoreMintVmAccount.PublicKey().ToBytes(),
+			Swapper:         h.buyer.PublicKey().ToBytes(),
+			SwapPda:         buyerVmSwapAccounts.Pda.PublicKey().ToBytes(),
+			SwapAta:         buyerVmSwapAccounts.Ata.PublicKey().ToBytes(),
+			SwapDestination: temporaryCoreMintAta,
+			FeeDestination:  common.CoreMintFeesAccount.PublicKey().ToBytes(),
 		},
-		&vm.TransferForSwapInstructionArgs{
-			Amount: h.amount,
-			Bump:   buyerVmSwapAccounts.PdaBump,
+		&vm.TransferForSwapWithFeeInstructionArgs{
+			SwapAmount: h.swapAmount,
+			FeeAmount:  h.feeAmount,
+			Bump:       buyerVmSwapAccounts.PdaBump,
 		},
 	)
 
@@ -867,7 +872,7 @@ func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) (
 			BuyerBase:   temporaryCoreMintAta,
 		},
 		&currencycreator.BuyTokensInstructionArgs{
-			InAmount:     h.amount,
+			InAmount:     h.swapAmount,
 			MinAmountOut: 0,
 		},
 	)
@@ -881,7 +886,7 @@ func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) (
 		initVmIxn,
 		createTemporaryCoreMintAtaIxn,
 		createVmDepositAtaIxn,
-		transferForSwapIxn,
+		transferForSwapWithFeeIxn,
 		buyIxn,
 		closeTemporaryCoreMintAta,
 	}, nil
