@@ -98,7 +98,8 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	log = log.With(zap.String("to_mint", toMint.PublicKey().ToBase58()))
 
 	log = log.With(
-		zap.Uint64("amount", initiateReserveSwapReq.SwapAmount),
+		zap.Uint64("swap_amount", initiateReserveSwapReq.SwapAmount),
+		zap.Uint64("fee_amount", initiateReserveSwapReq.FeeAmount),
 		zap.String("funding_source", initiateReserveSwapReq.FundingSource.String()),
 		zap.String("funding_id", initiateReserveSwapReq.FundingId),
 	)
@@ -198,7 +199,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 			log.With(zap.Error(err)).Warn("failure getting owner source timelock vault balance")
 			return handleStatefulSwapError(streamer, err)
 		}
-		if balance < initiateReserveSwapReq.SwapAmount {
+		if balance < initiateReserveSwapReq.SwapAmount+initiateReserveSwapReq.FeeAmount {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("insufficient balance"))
 		}
 	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
