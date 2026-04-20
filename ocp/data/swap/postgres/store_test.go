@@ -29,6 +29,7 @@ const (
 			from_mint TEXT NOT NULL,
 			to_mint TEXT NOT NULL,
 			amount BIGINT NULL CHECK (amount > 0),
+			fee_amount BIGINT NOT NULL DEFAULT 0,
 
 			funding_id TEXT NOT NULL UNIQUE,
 			funding_source INTEGER NOT NULL,

@@ -336,7 +336,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 		}
 
 		exchangeCurrency = currency_lib.USD
-		usdMarketValueWithoutFees, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.Amount, time.Now())
+		usdMarketValueWithoutFees, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.SwapAmount, time.Now())
 		if err != nil {
 			return 0, false, err
 		}
@@ -460,7 +460,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		}
 
 		currencyCode = currency_lib.USD
-		nativeAmount = float64(swapRecord.Amount) / float64(common.GetMintQuarksPerUnit(fromMint))
+		nativeAmount = float64(swapRecord.SwapAmount) / float64(common.GetMintQuarksPerUnit(fromMint))
 	default:
 		return errors.New("unsupported funding source")
 	}
@@ -564,7 +564,7 @@ func (p *runtime) validateIntentFunding(ctx context.Context, record *swap.Record
 	if intentRecord.IntentType != intent.SendPublicPayment {
 		return false, nil
 	}
-	if intentRecord.SendPublicPaymentMetadata.Quantity < record.Amount {
+	if intentRecord.SendPublicPaymentMetadata.Quantity < record.SwapAmount+record.FeeAmount {
 		return false, nil
 	}
 	if intentRecord.SendPublicPaymentMetadata.DestinationTokenAccount != swapAta.PublicKey().ToBase58() {
@@ -608,7 +608,7 @@ func (p *runtime) validateExternalWalletFunding(ctx context.Context, record *swa
 		return false, errors.Wrap(err, "error getting delta quarks from token balances")
 	}
 
-	if deltaQuarks < int64(record.Amount) {
+	if deltaQuarks < int64(record.SwapAmount+record.FeeAmount) {
 		return false, nil
 	}
 	return true, nil

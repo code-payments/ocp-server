@@ -66,6 +66,7 @@ func GetAltForCoreMint() solana.AddressLookupTable {
 			common.CoreMintVmOmnibusAccount.PublicKey().ToBytes(),
 			system.RentSysVar,
 			system.RecentBlockhashesSysVar,
+			common.CoreMintFeesAccount.PublicKey().ToBytes(),
 		},
 	}
 }

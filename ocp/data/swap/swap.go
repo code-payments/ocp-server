@@ -34,9 +34,10 @@ type Record struct {
 
 	Owner string
 
-	FromMint string
-	ToMint   string
-	Amount   uint64
+	FromMint   string
+	ToMint     string
+	SwapAmount uint64
+	FeeAmount  uint64
 
 	FundingId     string
 	FundingSource FundingSource
@@ -64,9 +65,10 @@ func (r *Record) Clone() Record {
 
 		Owner: r.Owner,
 
-		FromMint: r.FromMint,
-		ToMint:   r.ToMint,
-		Amount:   r.Amount,
+		FromMint:   r.FromMint,
+		ToMint:     r.ToMint,
+		SwapAmount: r.SwapAmount,
+		FeeAmount:  r.FeeAmount,
 
 		FundingId:     r.FundingId,
 		FundingSource: r.FundingSource,
@@ -96,7 +98,8 @@ func (r *Record) CopyTo(dst *Record) {
 
 	dst.FromMint = r.FromMint
 	dst.ToMint = r.ToMint
-	dst.Amount = r.Amount
+	dst.SwapAmount = r.SwapAmount
+	dst.FeeAmount = r.FeeAmount
 
 	dst.FundingId = r.FundingId
 	dst.FundingSource = r.FundingSource
@@ -133,8 +136,8 @@ func (r *Record) Validate() error {
 		return errors.New("destination mint is required")
 	}
 
-	if r.Amount == 0 {
-		return errors.New("amount is required")
+	if r.SwapAmount == 0 {
+		return errors.New("swap amount is required")
 	}
 
 	if len(r.FundingId) == 0 {

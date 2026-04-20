@@ -22,7 +22,8 @@ type model struct {
 	Owner                string        `db:"owner"`
 	FromMint             string        `db:"from_mint"`
 	ToMint               string        `db:"to_mint"`
-	Amount               uint64        `db:"amount"`
+	SwapAmount           uint64        `db:"amount"`
+	FeeAmount            uint64        `db:"fee_amount"`
 	FundingId            string        `db:"funding_id"`
 	FundingSource        uint8         `db:"funding_source"`
 	Nonce                string        `db:"nonce"`
@@ -50,7 +51,8 @@ func toModel(obj *swap.Record) (*model, error) {
 		Owner:                obj.Owner,
 		FromMint:             obj.FromMint,
 		ToMint:               obj.ToMint,
-		Amount:               obj.Amount,
+		SwapAmount:           obj.SwapAmount,
+		FeeAmount:            obj.FeeAmount,
 		FundingId:            obj.FundingId,
 		FundingSource:        uint8(obj.FundingSource),
 		Nonce:                obj.Nonce,
@@ -71,7 +73,8 @@ func fromModel(m *model) *swap.Record {
 		Owner:                m.Owner,
 		FromMint:             m.FromMint,
 		ToMint:               m.ToMint,
-		Amount:               m.Amount,
+		SwapAmount:           m.SwapAmount,
+		FeeAmount:            m.FeeAmount,
 		FundingId:            m.FundingId,
 		FundingSource:        swap.FundingSource(m.FundingSource),
 		Nonce:                m.Nonce,
@@ -88,16 +91,16 @@ func fromModel(m *model) *swap.Record {
 func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		query := `INSERT INTO ` + tableName + `
-			(swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14 + 1, $15)
+			(swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15 + 1, $16)
 
 			ON CONFLICT (swap_id)
 			DO UPDATE
-				SET transaction_blob = $12, state = $13, version = ` + tableName + `.version + 1
-				WHERE ` + tableName + `.swap_id = $1 AND ` + tableName + `.version = $14
+				SET transaction_blob = $13, state = $14, version = ` + tableName + `.version + 1
+				WHERE ` + tableName + `.swap_id = $1 AND ` + tableName + `.version = $15
 
 			RETURNING
-				id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at`
+				id, swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at`
 
 		err := tx.QueryRowxContext(
 			ctx,
@@ -106,7 +109,8 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.Owner,
 			m.FromMint,
 			m.ToMint,
-			m.Amount,
+			m.SwapAmount,
+			m.FeeAmount,
 			m.FundingId,
 			m.FundingSource,
 			m.Nonce,
@@ -128,7 +132,7 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 func dbGetById(ctx context.Context, db *sqlx.DB, id string) (*model, error) {
 	res := &model{}
 
-	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
 		FROM ` + tableName + `
 		WHERE swap_id = $1
 		LIMIT 1`
@@ -143,7 +147,7 @@ func dbGetById(ctx context.Context, db *sqlx.DB, id string) (*model, error) {
 func dbGetByFundingId(ctx context.Context, db *sqlx.DB, fundingId string) (*model, error) {
 	res := &model{}
 
-	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
 		FROM ` + tableName + `
 		WHERE funding_id = $1
 		LIMIT 1`
@@ -158,7 +162,7 @@ func dbGetByFundingId(ctx context.Context, db *sqlx.DB, fundingId string) (*mode
 func dbGetAllByOwnerAndState(ctx context.Context, db *sqlx.DB, owner string, state swap.State) ([]*model, error) {
 	res := []*model{}
 
-	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
 		FROM ` + tableName + `
 		WHERE owner = $1 AND state = $2
 		ORDER BY id ASC`
@@ -178,7 +182,7 @@ func dbGetAllByOwnerAndState(ctx context.Context, db *sqlx.DB, owner string, sta
 func dbGetAllByOwnerMintAndState(ctx context.Context, db *sqlx.DB, owner string, mint string, state swap.State) ([]*model, error) {
 	res := []*model{}
 
-	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+	query := `SELECT id, swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
 		FROM ` + tableName + `
 		WHERE owner = $1 AND state = $2 AND (from_mint = $3 OR to_mint = $3)
 		ORDER BY id ASC`
@@ -199,7 +203,7 @@ func dbGetAllByState(ctx context.Context, db *sqlx.DB, state swap.State, cursor 
 	res := []*model{}
 
 	query := `SELECT
-		id, swap_id, owner, from_mint, to_mint, amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
+		id, swap_id, owner, from_mint, to_mint, amount, fee_amount, funding_id, funding_source, nonce, blockhash, proof_signature, transaction_signature, transaction_blob, state, version, created_at
 		FROM ` + tableName + `
 		WHERE state = $1`
 
