@@ -584,7 +584,7 @@ func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyM
 
 func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, accounts *newCurrencyAccounts) error {
 	ixns := []solana.Instruction{
-		compute_budget.SetComputeUnitLimit(250_000),
+		compute_budget.SetComputeUnitLimit(350_000),
 		compute_budget.SetComputeUnitPrice(10_000),
 	}
 
