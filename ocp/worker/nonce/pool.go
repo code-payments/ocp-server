@@ -143,7 +143,12 @@ func (p *runtime) handle(ctx context.Context, record *nonce.Record) error {
 		err = p.handleClaimed(ctx, record)
 	}
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure handling nonce")
+		switch err {
+		case solana.ErrStaleData:
+			log.With(zap.Error(err)).Debug("failure handling nonce")
+		default:
+			log.With(zap.Error(err)).Warn("failure handling nonce")
+		}
 		return err
 	}
 	return nil
