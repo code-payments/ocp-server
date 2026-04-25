@@ -24,6 +24,8 @@ var (
 	sigTimeout      = time.Minute * 5
 	sigTimeoutCache = make(map[string]time.Time) // temporary hack
 	sigCacheMu      sync.Mutex
+
+	ErrStaleIndexerRpcData = errors.New("rpc returned stale account state")
 )
 
 func (p *runtime) markReleased(ctx context.Context, record *nonce.Record) error {
@@ -273,7 +275,7 @@ func (p *runtime) getBlockhashFromVmNonce(ctx context.Context, record *nonce.Rec
 	} else if resp.Result != indexerpb.GetVirtualDurableNonceResponse_OK {
 		return "", errors.Errorf("received rpc result %s", resp.Result.String())
 	} else if resp.Item.Slot <= slot {
-		return "", errors.New("rpc returned stale account state")
+		return "", ErrStaleIndexerRpcData
 	}
 	return base58.Encode(resp.Item.Account.Value.Value), nil
 }
