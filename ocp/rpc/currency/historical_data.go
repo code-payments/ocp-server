@@ -151,22 +151,15 @@ func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currenc
 		})
 	}
 
-	// Always include a latest data point based on getLatestHistoricalTime
-	// if it's newer than the last historical point
-	latestTime := getLatestHistoricalTime()
-	if len(data) == 0 || data[len(data)-1].Timestamp.AsTime().Before(latestTime) {
-		func() {
-			latestReserve, err := s.data.GetCurrencyReserveAtTime(ctx, mintAccount.PublicKey().ToBase58(), latestTime)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed to load latest currency reserve")
-				return
-			}
-
-			data = append(data, &currencypb.HistoricalMintData{
-				Timestamp: timestamppb.New(latestTime),
-				MarketCap: currency_util.CalculateMarketCap(latestReserve.SupplyFromBonding, latestExchangeRate),
-			})
-		}()
+	// Always include a latest data point
+	latestReserve, err := s.mintDataProvider.GetLiveReserveState(ctx, mintAccount)
+	if err == nil {
+		data = append(data, &currencypb.HistoricalMintData{
+			Timestamp: timestamppb.New(latestReserve.SignedState.ReserveState.Timestamp.AsTime()),
+			MarketCap: currency_util.CalculateMarketCap(latestReserve.SupplyFromBonding, latestExchangeRate),
+		})
+	} else {
+		log.With(zap.Error(err)).Warn("failed to load latest currency reserve")
 	}
 
 	if len(data) == 0 {
