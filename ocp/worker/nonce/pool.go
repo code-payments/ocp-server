@@ -144,7 +144,7 @@ func (p *runtime) handle(ctx context.Context, record *nonce.Record) error {
 	}
 	if err != nil {
 		switch err {
-		case solana.ErrStaleData:
+		case solana.ErrStaleData, ErrStaleIndexerRpcData:
 			log.With(zap.Error(err)).Debug("failure handling nonce")
 		default:
 			log.With(zap.Error(err)).Warn("failure handling nonce")
