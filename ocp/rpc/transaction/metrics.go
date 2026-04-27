@@ -7,6 +7,7 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 const (
@@ -38,7 +39,7 @@ func recordCriticalSubmitIntentFailure(ctx context.Context, intentRecord *intent
 		"error": err.Error(),
 	}
 
-	userAgent, err := client.GetUserAgent(ctx)
+	userAgent, err := client.GetUserAgent(ctx, rpc.UserAgentName)
 	if err == nil {
 		kvs["user_agent"] = userAgent.String()
 	}

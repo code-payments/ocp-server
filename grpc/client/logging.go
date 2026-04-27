@@ -7,8 +7,8 @@ import (
 )
 
 // InjectLoggingMetadata injects client metadata into a zap logger
-func InjectLoggingMetadata(ctx context.Context, log *zap.Logger) *zap.Logger {
-	userAgent, err := GetUserAgent(ctx)
+func InjectLoggingMetadata(ctx context.Context, log *zap.Logger, userAgentName string) *zap.Logger {
+	userAgent, err := GetUserAgent(ctx, userAgentName)
 	if err == nil {
 		log = log.With(zap.String("user_agent", userAgent.String()))
 	}

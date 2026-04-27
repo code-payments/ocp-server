@@ -12,11 +12,12 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsRequest) (*currencypb.GetMintsResponse, error) {
 	log := s.log.With(zap.String("method", "GetMints"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	resp := &currencypb.GetMintsResponse{
 		Result:            currencypb.GetMintsResponse_OK,
@@ -47,7 +48,7 @@ func (s *currencyServer) GetMints(ctx context.Context, req *currencypb.GetMintsR
 
 func (s *currencyServer) UpdateMetadata(ctx context.Context, req *currencypb.UpdateMetadataRequest) (*currencypb.UpdateMetadataResponse, error) {
 	log := s.log.With(zap.String("method", "UpdateMetadata"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	ownerAccount, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {

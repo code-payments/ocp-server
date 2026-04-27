@@ -24,6 +24,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/protoutil"
@@ -38,7 +39,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 	defer cancel()
 
 	log := s.log.With(zap.String("method", "StatefulSwap"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	if s.conf.disableSwaps.Get(ctx) {
 		return handleStatefulSwapError(streamer, status.Error(codes.Unavailable, "temporarily unavailable"))
@@ -600,7 +601,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 
 func (s *transactionServer) GetSwap(ctx context.Context, req *transactionpb.GetSwapRequest) (*transactionpb.GetSwapResponse, error) {
 	log := s.log.With(zap.String("method", "GetSwap"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
@@ -648,7 +649,7 @@ func (s *transactionServer) GetSwap(ctx context.Context, req *transactionpb.GetS
 
 func (s *transactionServer) GetPendingSwaps(ctx context.Context, req *transactionpb.GetPendingSwapsRequest) (*transactionpb.GetPendingSwapsResponse, error) {
 	log := s.log.With(zap.String("method", "GetPendingSwaps"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {

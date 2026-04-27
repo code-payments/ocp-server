@@ -113,7 +113,7 @@ func errorTraceResultCodeHandler(trace metrics.Trace, resultCode string) {
 
 // UnaryServerInterceptor creates a unary server interceptor that uses the
 // generic metrics.Provider interface.
-func UnaryServerInterceptor(provider metrics.Provider) grpc_core.UnaryServerInterceptor {
+func UnaryServerInterceptor(provider metrics.Provider, userAgentName string) grpc_core.UnaryServerInterceptor {
 	if provider == nil {
 		return func(ctx context.Context, req interface{}, info *grpc_core.UnaryServerInfo, handler grpc_core.UnaryHandler) (interface{}, error) {
 			return handler(ctx, req)
@@ -131,7 +131,7 @@ func UnaryServerInterceptor(provider metrics.Provider) grpc_core.UnaryServerInte
 		ctx = metrics.NewContext(ctx, trace)
 
 		includeParsedFullMethodName(trace, info.FullMethod)
-		includeClientMetadata(ctx, trace)
+		includeClientMetadata(ctx, trace, userAgentName)
 
 		resp, err := handler(ctx, req)
 		includeGRPCStatusCode(trace, err)
@@ -148,7 +148,7 @@ func UnaryServerInterceptor(provider metrics.Provider) grpc_core.UnaryServerInte
 
 // StreamServerInterceptor creates a stream server interceptor that uses the
 // generic metrics.Provider interface.
-func StreamServerInterceptor(provider metrics.Provider) grpc_core.StreamServerInterceptor {
+func StreamServerInterceptor(provider metrics.Provider, userAgentName string) grpc_core.StreamServerInterceptor {
 	if provider == nil {
 		return func(srv interface{}, ss grpc_core.ServerStream, info *grpc_core.StreamServerInfo, handler grpc_core.StreamHandler) error {
 			return handler(srv, ss)
@@ -166,7 +166,7 @@ func StreamServerInterceptor(provider metrics.Provider) grpc_core.StreamServerIn
 		ctx = metrics.NewContext(ctx, trace)
 
 		includeParsedFullMethodName(trace, info.FullMethod)
-		includeClientMetadata(ctx, trace)
+		includeClientMetadata(ctx, trace, userAgentName)
 
 		err := handler(srv, newWrappedStream(ctx, trace, ss))
 		includeGRPCStatusCode(trace, err)
@@ -327,8 +327,8 @@ func includeParsedFullMethodName(trace metrics.Trace, fullMethodName string) {
 	trace.AddAttribute(grpcRequestMethodAttributeKey, methodName)
 }
 
-func includeClientMetadata(ctx context.Context, trace metrics.Trace) {
-	userAgent, err := client.GetUserAgent(ctx)
+func includeClientMetadata(ctx context.Context, trace metrics.Trace, userAgentName string) {
+	userAgent, err := client.GetUserAgent(ctx, userAgentName)
 	if err == nil {
 		trace.AddAttribute(clientUserAgentAttributeKey, userAgent.String())
 	}

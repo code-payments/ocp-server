@@ -31,6 +31,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/messaging"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 const (
@@ -124,7 +125,7 @@ func (s *server) OpenMessageStreamWithKeepAlive(streamer messagingpb.Messaging_O
 		zap.String("method", "OpenMessageStreamWithKeepAlive"),
 		zap.String("rendezvous_key", streamKey),
 	)
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(streamKey)
 	if err != nil {
@@ -338,7 +339,7 @@ func (s *server) OpenMessageStream(req *messagingpb.OpenMessageStreamRequest, st
 		zap.String("method", "OpenMessageStream"),
 		zap.String("rendezvous_key", streamKey),
 	)
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(streamKey)
 	if err != nil {
@@ -496,7 +497,7 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 		zap.String("method", "PollMessages"),
 		zap.String("rendezvous_key", base58.Encode(req.RendezvousKey.Value)),
 	)
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(base58.Encode(req.RendezvousKey.Value))
 	if err != nil {
@@ -552,7 +553,7 @@ func (s *server) AckMessages(ctx context.Context, req *messagingpb.AckMessagesRe
 		zap.String("method", "AckMessages"),
 		zap.Int("acks", len(req.MessageIds)),
 	)
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	account := base58.Encode(req.RendezvousKey.Value)
 
@@ -583,7 +584,7 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 		zap.String("method", "SendMessage"),
 		zap.String("rendezvous_key", streamKey),
 	)
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	rendezvousAccount, err := common.NewAccountFromPublicKeyString(streamKey)
 	if err != nil {

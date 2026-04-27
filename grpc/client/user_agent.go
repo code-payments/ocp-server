@@ -13,31 +13,32 @@ import (
 
 const (
 	UserAgentHeaderName = "user-agent"
-)
 
-var (
-	userAgentPattern = fmt.Sprintf("OpenCodeProtocol/(iOS|Android)/%s", versionPattern)
-	userAgentRegex   = regexp.MustCompile(userAgentPattern)
+	DefaultUserAgentName = "OpenCodeProtocol"
 )
 
 type UserAgent struct {
+	Name       string
 	DeviceType DeviceType
 	Version    Version
 }
 
 func (ua *UserAgent) String() string {
-	return fmt.Sprintf("OpenCodeProtocol/%s/%s", ua.DeviceType.String(), ua.Version.String())
+	return fmt.Sprintf("%s/%s/%s", ua.Name, ua.DeviceType.String(), ua.Version.String())
 }
 
-// GetUserAgent gets the Code client user agent value from headers in the provided
+// GetUserAgent gets the client user agent value from headers in the provided
 // context
-func GetUserAgent(ctx context.Context) (*UserAgent, error) {
+func GetUserAgent(ctx context.Context, name string) (*UserAgent, error) {
 	headerValue, err := headers.GetASCIIHeaderByName(ctx, UserAgentHeaderName)
 	if err != nil {
 		return nil, errors.Wrap(err, "user agent header not present")
 	}
 
 	headerValue = strings.TrimSpace(headerValue)
+
+	userAgentPattern := fmt.Sprintf("%s/(iOS|Android)/%s", name, versionPattern)
+	userAgentRegex := regexp.MustCompile(userAgentPattern)
 
 	matches := userAgentRegex.FindAllStringSubmatch(headerValue, -1)
 	if len(matches) != 1 {
@@ -58,6 +59,7 @@ func GetUserAgent(ctx context.Context) (*UserAgent, error) {
 	}
 
 	return &UserAgent{
+		Name:       name,
 		DeviceType: deviceType,
 		Version:    *version,
 	}, nil

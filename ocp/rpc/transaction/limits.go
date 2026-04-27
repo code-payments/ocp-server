@@ -16,11 +16,12 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.GetLimitsRequest) (*transactionpb.GetLimitsResponse, error) {
 	log := s.log.With(zap.String("method", "GetLimits"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	ownerAccount, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {

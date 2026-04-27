@@ -23,7 +23,7 @@ func TestGetUserAgent_HappyPath(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, headers.SetASCIIHeader(ctx, UserAgentHeaderName, headerValue))
 
-		userAgent, err := GetUserAgent(ctx)
+		userAgent, err := GetUserAgent(ctx, "OpenCodeProtocol")
 		require.NoError(t, err)
 
 		if strings.Contains(headerValue, DeviceTypeIOS.String()) {
@@ -58,13 +58,14 @@ func TestGetUserAgent_ParseError(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, headers.SetASCIIHeader(ctx, UserAgentHeaderName, headerValue))
 
-		_, err = GetUserAgent(ctx)
+		_, err = GetUserAgent(ctx, "OpenCodeProtocol")
 		assert.Error(t, err)
 	}
 }
 
 func TestUserAgent_StringValue(t *testing.T) {
 	ua := UserAgent{
+		Name:       "OpenCodeProtocol",
 		DeviceType: DeviceTypeIOS,
 		Version: Version{
 			Major: 1,

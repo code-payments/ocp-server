@@ -12,6 +12,7 @@ import (
 
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 var reservedCurrencyNames = []string{
@@ -20,7 +21,7 @@ var reservedCurrencyNames = []string{
 
 func (s *currencyServer) CheckAvailability(ctx context.Context, req *currencypb.CheckAvailabilityRequest) (*currencypb.CheckAvailabilityResponse, error) {
 	log := s.log.With(zap.String("method", "CheckAvailability"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	name := strings.TrimSpace(req.Name)
 

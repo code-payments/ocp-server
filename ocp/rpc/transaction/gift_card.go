@@ -16,12 +16,13 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 	account_worker "github.com/code-payments/ocp-server/ocp/worker/account"
 )
 
 func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb.VoidGiftCardRequest) (*transactionpb.VoidGiftCardResponse, error) {
 	log := s.log.With(zap.String("method", "VoidGiftCard"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
