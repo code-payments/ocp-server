@@ -541,6 +541,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 
 	record := &swap.Record{
 		SwapId:               swapId,
+		Kind:                 swap.KindReserve,
 		Owner:                owner.PublicKey().ToBase58(),
 		FromMint:             fromMint.PublicKey().ToBase58(),
 		ToMint:               toMint.PublicKey().ToBase58(),
