@@ -15,6 +15,7 @@ import (
 
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 	"github.com/code-payments/ocp-server/protoutil"
 )
 
@@ -29,7 +30,7 @@ func (s *currencyServer) StreamLiveMintData(
 	ctx := streamer.Context()
 
 	log := s.log.With(zap.String("method", "StreamLiveMintData"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	// Wait for the initial request to get the list of mints
 	req, err := protoutil.BoundedReceive[currencypb.StreamLiveMintDataRequest](ctx, streamer, streamInitialRecvTimeout)

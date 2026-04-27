@@ -28,6 +28,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/protoutil"
@@ -42,7 +43,7 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	defer cancel()
 
 	log := s.log.With(zap.String("method", "SubmitIntent"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	if s.conf.disableSubmitIntent.Get(ctx) {
 		return handleSubmitIntentError(ctx, streamer, nil, status.Error(codes.Unavailable, "temporarily unavailable"))
@@ -743,7 +744,7 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 		zap.String("method", "GetIntentMetadata"),
 		zap.String("intent", intentId),
 	)
-	client.InjectLoggingMetadata(ctx, log)
+	client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	var signer *common.Account
 	var err error

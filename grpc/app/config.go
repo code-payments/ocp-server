@@ -52,6 +52,9 @@ type BaseConfig struct {
 	// Metrics configuration across many providers
 	NewRelicLicenseKey string `mapstructure:"new_relic_license_key"`
 
+	// Name used in the user-agent header
+	UserAgentName string
+
 	// Arbitrary configuration that the service can define / implement.
 	//
 	// Users should use mapstructure.Decode for ServiceConfig.
@@ -75,6 +78,8 @@ var defaultConfig = BaseConfig{
 
 	EnableMemoryLeakCron:   false,
 	MemoryLeakCronSchedule: "0 5 * * *",
+
+	UserAgentName: "OpenCodeProtocol",
 }
 
 func init() {

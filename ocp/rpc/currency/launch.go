@@ -19,6 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/solana/system"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -27,7 +28,7 @@ import (
 
 func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchRequest) (*currencypb.LaunchResponse, error) {
 	log := s.log.With(zap.String("method", "Launch"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	ownerAccount, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {

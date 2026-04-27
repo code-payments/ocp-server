@@ -22,6 +22,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 const iconSize = 64
@@ -35,7 +36,7 @@ var (
 
 func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateIconRequest) (*currencypb.UpdateIconResponse, error) {
 	log := s.log.With(zap.String("method", "UpdateIcon"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	ownerAccount, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {

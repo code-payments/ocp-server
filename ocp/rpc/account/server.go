@@ -24,6 +24,7 @@ import (
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 	account_worker "github.com/code-payments/ocp-server/ocp/worker/account"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 )
@@ -57,7 +58,7 @@ func NewAccountServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider 
 
 func (s *server) IsOcpAccount(ctx context.Context, req *accountpb.IsOcpAccountRequest) (*accountpb.IsOcpAccountResponse, error) {
 	log := s.log.With(zap.String("method", "IsOcpAccount"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {
@@ -108,7 +109,7 @@ func (s *server) IsOcpAccount(ctx context.Context, req *accountpb.IsOcpAccountRe
 
 func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTokenAccountInfosRequest) (*accountpb.GetTokenAccountInfosResponse, error) {
 	log := s.log.With(zap.String("method", "GetTokenAccountInfos"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	owner, err := common.NewAccountFromProto(req.Owner)
 	if err != nil {

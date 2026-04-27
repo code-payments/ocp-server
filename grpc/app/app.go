@@ -237,15 +237,15 @@ func Run(app App, options ...Option) error {
 	// headers since it relies on certain header values being present.
 	defaultUnaryServerInterceptors := []grpc.UnaryServerInterceptor{
 		headers.UnaryServerInterceptor(),
-		grpc_metrics.UnaryServerInterceptor(metricsProvider),
+		grpc_metrics.UnaryServerInterceptor(metricsProvider, config.UserAgentName),
 		validation.UnaryServerInterceptor(log),
-		client.MinVersionUnaryServerInterceptor(),
+		client.MinVersionUnaryServerInterceptor(config.UserAgentName),
 	}
 	defaultStreamServerInterceptors := []grpc.StreamServerInterceptor{
 		headers.StreamServerInterceptor(),
-		grpc_metrics.StreamServerInterceptor(metricsProvider),
+		grpc_metrics.StreamServerInterceptor(metricsProvider, config.UserAgentName),
 		validation.StreamServerInterceptor(log),
-		client.MinVersionStreamServerInterceptor(),
+		client.MinVersionStreamServerInterceptor(config.UserAgentName),
 	}
 
 	opts := opts{

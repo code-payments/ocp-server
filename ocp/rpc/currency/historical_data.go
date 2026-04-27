@@ -19,6 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
 const (
@@ -27,7 +28,7 @@ const (
 
 func (s *currencyServer) GetHistoricalMintData(ctx context.Context, req *currencypb.GetHistoricalMintDataRequest) (*currencypb.GetHistoricalMintDataResponse, error) {
 	log := s.log.With(zap.String("method", "GetHistoricalMintData"))
-	log = client.InjectLoggingMetadata(ctx, log)
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
 
 	mintAccount, err := common.NewAccountFromProto(req.Address)
 	if err != nil {
