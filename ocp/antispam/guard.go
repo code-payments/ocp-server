@@ -75,11 +75,11 @@ func (g *Guard) AllowDistribution(ctx context.Context, owner *common.Account, is
 	return allow, nil
 }
 
-func (g *Guard) AllowSwap(ctx context.Context, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account, swapAmount, feeAmount uint64, initializesMint bool) (bool, error) {
+func (g *Guard) AllowSwap(ctx context.Context, kind swap.Kind, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account, swapAmount, feeAmount uint64, initializesMint bool) (bool, error) {
 	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "AllowSwap")
 	defer tracer.End()
 
-	allow, reason, err := g.integration.AllowSwap(ctx, fundingSource, owner, fromMint, toMint, swapAmount, feeAmount, initializesMint)
+	allow, reason, err := g.integration.AllowSwap(ctx, kind, fundingSource, owner, fromMint, toMint, swapAmount, feeAmount, initializesMint)
 	if err != nil {
 		return false, err
 	}
