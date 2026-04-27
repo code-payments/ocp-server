@@ -53,7 +53,7 @@ type BaseConfig struct {
 	NewRelicLicenseKey string `mapstructure:"new_relic_license_key"`
 
 	// Name used in the user-agent header
-	UserAgentName string
+	UserAgentName string `mapstructure:"user_agent_name"`
 
 	// Arbitrary configuration that the service can define / implement.
 	//
