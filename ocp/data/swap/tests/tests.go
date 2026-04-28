@@ -15,7 +15,8 @@ import (
 
 func RunTests(t *testing.T, s swap.Store, teardown func()) {
 	for _, tf := range []func(t *testing.T, s swap.Store){
-		testRoundTrip,
+		testReserveRoundTrip,
+		testStablecoinRoundTrip,
 		testUpdateHappyPath,
 		testUpdateStaleRecord,
 		testGetAllByOwnerAndState,
@@ -27,8 +28,8 @@ func RunTests(t *testing.T, s swap.Store, teardown func()) {
 	}
 }
 
-func testRoundTrip(t *testing.T, s swap.Store) {
-	t.Run("testRoundTrip", func(t *testing.T) {
+func testReserveRoundTrip(t *testing.T, s swap.Store) {
+	t.Run("testReserveRoundTrip", func(t *testing.T) {
 		ctx := context.Background()
 
 		actual, err := s.GetById(ctx, "test_swap_id")
@@ -44,11 +45,85 @@ func testRoundTrip(t *testing.T, s swap.Store) {
 		expected := &swap.Record{
 			SwapId: "test_swap_id",
 
+			Kind: swap.KindReserve,
+
 			Owner: "test_owner",
 
-			FromMint: "test_from_mint",
-			ToMint:   "test_to_mint",
-			SwapAmount:   12345,
+			FromMint:   "test_from_mint",
+			ToMint:     "test_to_mint",
+			SwapAmount: 12345,
+
+			FundingId:     "test_funding_id",
+			FundingSource: swap.FundingSourceSubmitIntent,
+
+			Nonce:     "test_nonce",
+			Blockhash: "test_blockhash",
+
+			ProofSignature: "test_proof_signature",
+
+			TransactionSignature: "test_transaction_signature",
+			TransactionBlob:      []byte("test_transaction_blob"),
+
+			State: swap.StateFinalized,
+
+			CreatedAt: time.Now(),
+		}
+		cloned := expected.Clone()
+		err = s.Save(ctx, expected)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, expected.Id)
+		assert.EqualValues(t, 1, expected.Version)
+
+		actual, err = s.GetById(ctx, "test_swap_id")
+		require.NoError(t, err)
+		assertEquivalentRecords(t, &cloned, actual)
+
+		actual, err = s.GetByFundingId(ctx, "test_funding_id")
+		require.NoError(t, err)
+		assertEquivalentRecords(t, &cloned, actual)
+	})
+}
+
+func testStablecoinRoundTrip(t *testing.T, s swap.Store) {
+	t.Run("testStablecoinRoundTrip", func(t *testing.T) {
+		ctx := context.Background()
+
+		actual, err := s.GetById(ctx, "test_swap_id")
+		require.Error(t, err)
+		assert.Equal(t, swap.ErrNotFound, err)
+		assert.Nil(t, actual)
+
+		// DestinationOwner is required for stablecoin swaps
+		invalid := &swap.Record{
+			SwapId:               "test_swap_id",
+			Kind:                 swap.KindStablecoin,
+			Owner:                "test_owner",
+			FromMint:             "test_from_mint",
+			ToMint:               "test_to_mint",
+			SwapAmount:           12345,
+			FundingId:            "test_funding_id",
+			FundingSource:        swap.FundingSourceSubmitIntent,
+			Nonce:                "test_nonce",
+			Blockhash:            "test_blockhash",
+			ProofSignature:       "test_proof_signature",
+			TransactionSignature: "test_transaction_signature",
+			State:                swap.StateCreated,
+			CreatedAt:            time.Now(),
+		}
+		require.Error(t, s.Save(ctx, invalid))
+
+		expected := &swap.Record{
+			SwapId: "test_swap_id",
+
+			Kind: swap.KindStablecoin,
+
+			Owner:            "test_owner",
+			DestinationOwner: "test_destination_owner",
+
+			FromMint:   "test_from_mint",
+			ToMint:     "test_to_mint",
+			SwapAmount: 12345,
+			FeeAmount:  100,
 
 			FundingId:     "test_funding_id",
 			FundingSource: swap.FundingSourceSubmitIntent,
@@ -93,11 +168,13 @@ func testUpdateHappyPath(t *testing.T, s swap.Store) {
 		expected := &swap.Record{
 			SwapId: "test_swap_id",
 
+			Kind: swap.KindReserve,
+
 			Owner: "test_owner",
 
-			FromMint: "test_from_mint",
-			ToMint:   "test_to_mint",
-			SwapAmount:   12345,
+			FromMint:   "test_from_mint",
+			ToMint:     "test_to_mint",
+			SwapAmount: 12345,
 
 			FundingId:     "test_funding_id",
 			FundingSource: swap.FundingSourceSubmitIntent,
@@ -140,11 +217,13 @@ func testUpdateStaleRecord(t *testing.T, s swap.Store) {
 		expected := &swap.Record{
 			SwapId: "test_swap_id",
 
+			Kind: swap.KindReserve,
+
 			Owner: "test_owner",
 
-			FromMint: "test_from_mint",
-			ToMint:   "test_to_mint",
-			SwapAmount:   12345,
+			FromMint:   "test_from_mint",
+			ToMint:     "test_to_mint",
+			SwapAmount: 12345,
 
 			FundingId:     "test_funding_id",
 			FundingSource: swap.FundingSourceSubmitIntent,
@@ -198,11 +277,13 @@ func testGetAllByOwnerAndState(t *testing.T, s swap.Store) {
 			record := &swap.Record{
 				SwapId: fmt.Sprintf("test_swap_id_%d", i),
 
+				Kind: swap.KindReserve,
+
 				Owner: fmt.Sprintf("test_owner_%d", i%2),
 
-				FromMint: fmt.Sprintf("test_from_mint_%d", i),
-				ToMint:   fmt.Sprintf("test_to_mint_%d", i),
-				SwapAmount:   uint64(i + 1),
+				FromMint:   fmt.Sprintf("test_from_mint_%d", i),
+				ToMint:     fmt.Sprintf("test_to_mint_%d", i),
+				SwapAmount: uint64(i + 1),
 
 				FundingId:     fmt.Sprintf("test_funding_id_%d", i),
 				FundingSource: swap.FundingSourceSubmitIntent,
@@ -258,35 +339,35 @@ func testGetAllByOwnerMintAndState(t *testing.T, s swap.Store) {
 		// Create swaps with different owners, mints, and states
 		records := []*swap.Record{
 			{ // owner_a buying mint_x
-				SwapId: "swap_0", Owner: "owner_a",
+				SwapId: "swap_0", Kind: swap.KindReserve, Owner: "owner_a",
 				FromMint: "core_mint", ToMint: "mint_x", SwapAmount: 100,
 				FundingId: "fund_0", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_0", Blockhash: "bh_0", ProofSignature: "proof_0",
 				TransactionSignature: "sig_0", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_a selling mint_x
-				SwapId: "swap_1", Owner: "owner_a",
+				SwapId: "swap_1", Kind: swap.KindReserve, Owner: "owner_a",
 				FromMint: "mint_x", ToMint: "core_mint", SwapAmount: 50,
 				FundingId: "fund_1", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_1", Blockhash: "bh_1", ProofSignature: "proof_1",
 				TransactionSignature: "sig_1", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_a buying mint_y (different mint)
-				SwapId: "swap_2", Owner: "owner_a",
+				SwapId: "swap_2", Kind: swap.KindReserve, Owner: "owner_a",
 				FromMint: "core_mint", ToMint: "mint_y", SwapAmount: 200,
 				FundingId: "fund_2", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_2", Blockhash: "bh_2", ProofSignature: "proof_2",
 				TransactionSignature: "sig_2", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_b buying mint_x (different owner)
-				SwapId: "swap_3", Owner: "owner_b",
+				SwapId: "swap_3", Kind: swap.KindReserve, Owner: "owner_b",
 				FromMint: "core_mint", ToMint: "mint_x", SwapAmount: 300,
 				FundingId: "fund_3", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_3", Blockhash: "bh_3", ProofSignature: "proof_3",
 				TransactionSignature: "sig_3", State: swap.StateFinalized, CreatedAt: time.Now(),
 			},
 			{ // owner_a buying mint_x but not finalized
-				SwapId: "swap_4", Owner: "owner_a",
+				SwapId: "swap_4", Kind: swap.KindReserve, Owner: "owner_a",
 				FromMint: "core_mint", ToMint: "mint_x", SwapAmount: 400,
 				FundingId: "fund_4", FundingSource: swap.FundingSourceSubmitIntent,
 				Nonce: "nonce_4", Blockhash: "bh_4", ProofSignature: "proof_4",
@@ -346,11 +427,13 @@ func testGetAllByState(t *testing.T, s swap.Store) {
 			record := &swap.Record{
 				SwapId: fmt.Sprintf("test_swap_id_%d", i),
 
+				Kind: swap.KindReserve,
+
 				Owner: fmt.Sprintf("test_owner_%d", i%3),
 
-				FromMint: "test_from_mint",
-				ToMint:   "test_to_mint",
-				SwapAmount:   uint64(i + 1),
+				FromMint:   "test_from_mint",
+				ToMint:     "test_to_mint",
+				SwapAmount: uint64(i + 1),
 
 				FundingId:     fmt.Sprintf("test_funding_id_%d", i),
 				FundingSource: swap.FundingSourceSubmitIntent,
@@ -415,7 +498,10 @@ func testGetAllByState(t *testing.T, s swap.Store) {
 func assertEquivalentRecords(t *testing.T, obj1, obj2 *swap.Record) {
 	assert.Equal(t, obj1.SwapId, obj2.SwapId)
 
+	assert.Equal(t, obj1.Kind, obj2.Kind)
+
 	assert.Equal(t, obj1.Owner, obj2.Owner)
+	assert.Equal(t, obj1.DestinationOwner, obj2.DestinationOwner)
 
 	assert.Equal(t, obj1.FromMint, obj2.FromMint)
 	assert.Equal(t, obj1.ToMint, obj2.ToMint)

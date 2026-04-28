@@ -24,7 +24,10 @@ const (
 
 			swap_id TEXT NOT NULL UNIQUE,
 
+			kind INTEGER NOT NULL DEFAULT 1,
+
 			owner TEXT NOT NULL,
+			destination_owner TEXT NOT NULL DEFAULT '',
 
 			from_mint TEXT NOT NULL,
 			to_mint TEXT NOT NULL,

@@ -891,3 +891,165 @@ func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) (
 		closeTemporaryCoreMintAta,
 	}, nil
 }
+
+type CoinbaseStableSwapperSwapHandler struct {
+	data ocp_data.Provider
+
+	owner            *common.Account
+	swapAuthority    *common.Account
+	destinationOwner *common.Account
+	fromMint         *common.Account
+	toMint           *common.Account
+	swapAmount       uint64
+	feeAmount        uint64
+
+	alts             []solana.AddressLookupTable
+	selectedNonce    *transaction_util.Nonce
+	computeUnitLimit uint32
+	computeUnitPrice uint64
+	memoValue        string
+
+	feeDestination   *common.Account
+	coinbaseAccounts *transaction_util.CoinbaseSwapAccounts
+}
+
+func NewCoinbaseStableSwapperSwapHandler(
+	data ocp_data.Provider,
+	owner *common.Account,
+	swapAuthority *common.Account,
+	destinationOwner *common.Account,
+	fromMint *common.Account,
+	toMint *common.Account,
+	swapAmount uint64,
+	feeAmount uint64,
+	selectedNonce *transaction_util.Nonce,
+) SwapHandler {
+	return &CoinbaseStableSwapperSwapHandler{
+		data: data,
+
+		owner:            owner,
+		swapAuthority:    swapAuthority,
+		destinationOwner: destinationOwner,
+		fromMint:         fromMint,
+		toMint:           toMint,
+		swapAmount:       swapAmount,
+		feeAmount:        feeAmount,
+
+		selectedNonce:    selectedNonce,
+		computeUnitLimit: 150_000,
+		computeUnitPrice: 10_000,
+		memoValue:        "coinbase_stable_swapper_v0",
+		feeDestination:   common.CoreMintFeesAccount,
+	}
+}
+
+func (h *CoinbaseStableSwapperSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	h.alts = []solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}
+	return h.alts, nil
+}
+
+func (h *CoinbaseStableSwapperSwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	feeRecipient, _ := common.NewAccountFromPublicKeyBytes(h.coinbaseAccounts.FeeRecipient)
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_Stablecoin{
+			Stablecoin: &transactionpb.StatefulSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter{
+				Payer:            common.GetSubsidizer().ToProto(),
+				Nonce:            h.selectedNonce.Account.ToProto(),
+				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+				Alts:             transaction_util.ToProtoAlts(h.alts),
+				ComputeUnitLimit: h.computeUnitLimit,
+				ComputeUnitPrice: h.computeUnitPrice,
+				MemoValue:        h.memoValue,
+				FeeDestination:   h.feeDestination.ToProto(),
+				PoolFeeRecipient: feeRecipient.ToProto(),
+			},
+		},
+	}
+}
+
+func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, h.data, h.fromMint)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceTimelockAccounts, err := h.owner.GetTimelockAccounts(sourceVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	coinbaseAccounts, err := transaction_util.GetCoinbaseSwapAccounts(
+		ctx,
+		h.data,
+		h.fromMint.PublicKey().ToBytes(),
+		h.toMint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	h.coinbaseAccounts = coinbaseAccounts
+
+	createSwapAuthorityFromMintAtaIxn, swapAuthorityFromMintAta, err := token.CreateAssociatedTokenAccountIdempotent(
+		common.GetSubsidizer().PublicKey().ToBytes(),
+		h.swapAuthority.PublicKey().ToBytes(),
+		h.fromMint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	createDestinationOwnerToMintAtaIxn, destinationOwnerToMintAta, err := token.CreateAssociatedTokenAccountIdempotent(
+		common.GetSubsidizer().PublicKey().ToBytes(),
+		h.destinationOwner.PublicKey().ToBytes(),
+		h.toMint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	transferForSwapWithFeeIxn := vm.NewTransferForSwapWithFeeInstruction(
+		&vm.TransferForSwapWithFeeInstructionAccounts{
+			VmAuthority:     common.GetSubsidizer().PublicKey().ToBytes(),
+			Vm:              sourceVmConfig.Vm.PublicKey().ToBytes(),
+			Swapper:         h.owner.PublicKey().ToBytes(),
+			SwapPda:         sourceTimelockAccounts.VmSwapAccounts.Pda.PublicKey().ToBytes(),
+			SwapAta:         sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
+			SwapDestination: swapAuthorityFromMintAta,
+			FeeDestination:  h.feeDestination.PublicKey().ToBytes(),
+		},
+		&vm.TransferForSwapWithFeeInstructionArgs{
+			SwapAmount: h.swapAmount,
+			FeeAmount:  h.feeAmount,
+			Bump:       sourceTimelockAccounts.VmSwapAccounts.PdaBump,
+		},
+	)
+
+	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
+		coinbaseAccounts,
+		h.swapAuthority.PublicKey().ToBytes(),
+		h.fromMint.PublicKey().ToBytes(),
+		h.toMint.PublicKey().ToBytes(),
+		swapAuthorityFromMintAta,
+		destinationOwnerToMintAta,
+		h.swapAmount,
+		h.swapAmount,
+	)
+
+	closeSwapAuthorityFromMintAtaIxn := token.CloseAccount(
+		swapAuthorityFromMintAta,
+		common.GetSubsidizer().PublicKey().ToBytes(),
+		h.swapAuthority.PublicKey().ToBytes(),
+	)
+
+	return []solana.Instruction{
+		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
+		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
+		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+		memo.Instruction(h.memoValue),
+		createSwapAuthorityFromMintAtaIxn,
+		createDestinationOwnerToMintAtaIxn,
+		transferForSwapWithFeeIxn,
+		coinbaseSwapIxn,
+		closeSwapAuthorityFromMintAtaIxn,
+	}, nil
+}

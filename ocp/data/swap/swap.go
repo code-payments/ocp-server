@@ -27,12 +27,23 @@ const (
 	FundingSourceExternalWallet
 )
 
+type Kind uint8
+
+const (
+	KindUnknown Kind = iota
+	KindReserve
+	KindStablecoin
+)
+
 type Record struct {
 	Id uint64
 
 	SwapId string
 
-	Owner string
+	Kind Kind
+
+	Owner            string
+	DestinationOwner string
 
 	FromMint   string
 	ToMint     string
@@ -63,7 +74,10 @@ func (r *Record) Clone() Record {
 
 		SwapId: r.SwapId,
 
-		Owner: r.Owner,
+		Kind: r.Kind,
+
+		Owner:            r.Owner,
+		DestinationOwner: r.DestinationOwner,
 
 		FromMint:   r.FromMint,
 		ToMint:     r.ToMint,
@@ -94,7 +108,10 @@ func (r *Record) CopyTo(dst *Record) {
 
 	dst.SwapId = r.SwapId
 
+	dst.Kind = r.Kind
+
 	dst.Owner = r.Owner
+	dst.DestinationOwner = r.DestinationOwner
 
 	dst.FromMint = r.FromMint
 	dst.ToMint = r.ToMint
@@ -124,8 +141,16 @@ func (r *Record) Validate() error {
 		return errors.New("swap id is requried")
 	}
 
+	if r.Kind == KindUnknown {
+		return errors.New("kind is required")
+	}
+
 	if len(r.Owner) == 0 {
 		return errors.New("owner is required")
+	}
+
+	if r.Kind == KindStablecoin && len(r.DestinationOwner) == 0 {
+		return errors.New("destination owner is required for stablecoin swaps")
 	}
 
 	if len(r.FromMint) == 0 {
@@ -185,6 +210,16 @@ func (s State) String() string {
 		return "cancelling"
 	case StateCancelled:
 		return "cancelled"
+	}
+	return "unknown"
+}
+
+func (k Kind) String() string {
+	switch k {
+	case KindReserve:
+		return "reserve"
+	case KindStablecoin:
+		return "stablecoin"
 	}
 	return "unknown"
 }

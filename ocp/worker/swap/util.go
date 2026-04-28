@@ -25,6 +25,7 @@ import (
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/token"
 )
 
 func (p *runtime) validateSwapState(record *swap.Record, states ...swap.State) error {
@@ -68,7 +69,7 @@ func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record
 	}
 
 	var destinationCurrencyMetadataRecord *currency.MetadataRecord
-	if !common.IsCoreMint(toMint) {
+	if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
 		if err != nil {
 			return err
@@ -90,7 +91,7 @@ func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record
 			return err
 		}
 
-		if !common.IsCoreMint(toMint) {
+		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 			if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateCompletingInitialization
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
@@ -113,7 +114,7 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 	}
 
 	var destinationCurrencyMetadataRecord *currency.MetadataRecord
-	if !common.IsCoreMint(toMint) {
+	if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
 		if err != nil {
 			return err
@@ -135,7 +136,7 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 			return err
 		}
 
-		if !common.IsCoreMint(toMint) {
+		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 			if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
@@ -158,7 +159,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 	}
 
 	var destinationCurrencyMetadataRecord *currency.MetadataRecord
-	if !common.IsCoreMint(toMint) {
+	if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
 		if err != nil {
 			return err
@@ -183,7 +184,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 			}
 		}
 
-		if !common.IsCoreMint(toMint) {
+		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 			if destinationCurrencyMetadataRecord.State == currency.MetadataStateFundingAuthority {
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
@@ -223,6 +224,21 @@ func (p *runtime) submitTransaction(ctx context.Context, record *swap.Record) er
 }
 
 func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, bool, error) {
+	switch swapRecord.Kind {
+	case swap.KindReserve:
+		return p.maybeUpdateBalancesForFinalizedReserveSwap(ctx, swapRecord, tokenBalances)
+	case swap.KindStablecoin:
+		return p.getStablecoinSwapQuarksBought(swapRecord, tokenBalances)
+	default:
+		return 0, false, errors.New("unsupported swap kind")
+	}
+}
+
+func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, bool, error) {
+	if swapRecord.Kind != swap.KindReserve {
+		return 0, false, errors.New("swap is not a reserve swap")
+	}
+
 	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
 		return 0, false, err
@@ -407,7 +423,47 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 	return uint64(deltaQuarksIntoOmnibus), false, nil
 }
 
+func (p *runtime) getStablecoinSwapQuarksBought(swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, bool, error) {
+	if swapRecord.Kind != swap.KindStablecoin {
+		return 0, false, errors.New("swap is not a stablecoin swap")
+	}
+
+	destinationOwner, err := common.NewAccountFromPublicKeyString(swapRecord.DestinationOwner)
+	if err != nil {
+		return 0, false, errors.Wrap(err, "error parsing destination owner")
+	}
+
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return 0, false, errors.Wrap(err, "error parsing destination mint")
+	}
+
+	destinationAtaPubkey, err := token.GetAssociatedAccount(destinationOwner.PublicKey().ToBytes(), toMint.PublicKey().ToBytes())
+	if err != nil {
+		return 0, false, errors.Wrap(err, "error deriving destination ata")
+	}
+
+	destinationAta, err := common.NewAccountFromPublicKeyBytes(destinationAtaPubkey)
+	if err != nil {
+		return 0, false, err
+	}
+
+	deltaQuarks, err := transaction_util.GetDeltaQuarksFromTokenBalances(destinationAta, tokenBalances)
+	if err != nil {
+		return 0, false, errors.Wrap(err, "error getting delta quarks into destination ata")
+	}
+	if deltaQuarks <= 0 {
+		return 0, false, errors.New("delta quarks into destination ata is not positive")
+	}
+
+	return uint64(deltaQuarks), false, nil
+}
+
 func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Record, isMintInit bool) error {
+	if swapRecord.Kind != swap.KindReserve {
+		return nil
+	}
+
 	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
 		return err
@@ -615,6 +671,10 @@ func (p *runtime) validateExternalWalletFunding(ctx context.Context, record *swa
 }
 
 func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record *swap.Record) error {
+	if record.Kind != swap.KindReserve {
+		return nil
+	}
+
 	toMint, err := common.NewAccountFromPublicKeyString(record.ToMint)
 	if err != nil {
 		return err
@@ -651,6 +711,10 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 }
 
 func (p *runtime) validateDestinationCurrencyReadyForSwap(ctx context.Context, swapRecord *swap.Record) (bool, error) {
+	if swapRecord.Kind != swap.KindReserve {
+		return true, nil
+	}
+
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return false, err
@@ -673,6 +737,10 @@ func (p *runtime) validateDestinationCurrencyReadyForSwap(ctx context.Context, s
 }
 
 func (p *runtime) updateLiveReserveStateForFinalizedSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) error {
+	if swapRecord.Kind != swap.KindReserve {
+		return nil
+	}
+
 	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
 	if err != nil {
 		return err
