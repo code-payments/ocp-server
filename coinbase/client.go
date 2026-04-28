@@ -3,7 +3,6 @@ package coinbase
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -18,12 +17,9 @@ import (
 const (
 	metricsStructName = "coinbase.client"
 
-	// DefaultHost is the host serving the Onramp v1 transaction-status API.
-	// Override via Client.Host for staging or to pin to a different region.
-	DefaultHost = "api.developer.coinbase.com"
-
-	defaultPageSize = 100
-	maxPages        = 50 // hard cap to avoid runaway pagination
+	// DefaultHost is the host serving the Onramp API. Override via
+	// Client.Host for staging or to pin to a different region.
+	DefaultHost = "api.cdp.coinbase.com"
 )
 
 // Client talks to the Coinbase Developer Platform Onramp API. Construct via
@@ -55,77 +51,29 @@ func NewClient(auth *Authenticator) *Client {
 	}
 }
 
-// GetUserTransactions returns every Onramp transaction Coinbase has recorded
-// for the given partnerUserRef under the authenticated CDP project.
-// Pagination is handled internally.
-func (c *Client) GetUserTransactions(ctx context.Context, partnerUserRef string) ([]*Transaction, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "GetUserTransactions")
-	defer tracer.End()
-
-	if partnerUserRef == "" {
-		return nil, errors.New("partner user ref is required")
-	}
-
-	var all []*Transaction
-	var pageKey string
-	for range maxPages {
-		path := fmt.Sprintf("/onramp/v1/buy/user/%s/transactions", url.PathEscape(partnerUserRef))
-		query := url.Values{}
-		query.Set("page_size", fmt.Sprintf("%d", defaultPageSize))
-		if pageKey != "" {
-			query.Set("page_key", pageKey)
-		}
-
-		var resp transactionsResponse
-		if err := c.get(ctx, path, query, &resp); err != nil {
-			tracer.OnError(err)
-			return nil, err
-		}
-
-		for i := range resp.Transactions {
-			all = append(all, resp.Transactions[i].toTransaction())
-		}
-
-		if resp.NextPageKey == "" {
-			return all, nil
-		}
-		pageKey = resp.NextPageKey
-	}
-	err := errors.Errorf("page cap (%d) reached for partner user ref %q", maxPages, partnerUserRef)
-	tracer.OnError(err)
-	return nil, err
-}
-
-// GetUserTransactionByOrderID looks up a single transaction by order ID
-// within the partnerUserRef's namespace. Returns ErrTransactionNotFound if
-// the order isn't found. The orderID alone is not queryable — callers must
-// pair it with the partnerUserRef the order was created under.
-func (c *Client) GetUserTransactionByOrderID(ctx context.Context, partnerUserRef, orderID string) (*Transaction, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "GetUserTransactionByOrderID")
+// GetOrder returns the Onramp order with the given order ID. Returns
+// ErrOrderNotFound if the order isn't present in the authenticated CDP
+// project.
+func (c *Client) GetOrder(ctx context.Context, orderID string) (*Order, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsStructName, "GetOrder")
 	defer tracer.End()
 
 	if orderID == "" {
 		return nil, errors.New("order id is required")
 	}
 
-	txns, err := c.GetUserTransactions(ctx, partnerUserRef)
-	if err != nil {
+	path := "/platform/v2/onramp/orders/" + url.PathEscape(orderID)
+
+	var resp orderResponse
+	if err := c.get(ctx, path, &resp); err != nil {
 		tracer.OnError(err)
 		return nil, err
 	}
-	for _, t := range txns {
-		if t.OrderID == orderID {
-			return t, nil
-		}
-	}
-	return nil, ErrTransactionNotFound
+	return resp.Order.toOrder(), nil
 }
 
-func (c *Client) get(ctx context.Context, path string, query url.Values, out any) error {
+func (c *Client) get(ctx context.Context, path string, out any) error {
 	fullURL := "https://" + c.Host + path
-	if len(query) > 0 {
-		fullURL += "?" + query.Encode()
-	}
 
 	var lastErr error
 	_, err := c.retrier.Retry(func() error {
@@ -153,7 +101,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusNotFound {
-			lastErr = ErrTransactionNotFound
+			lastErr = ErrOrderNotFound
 			return nil // do not retry
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -178,46 +126,58 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	return lastErr
 }
 
-// transactionsResponse mirrors the JSON shape of the v1 transactions
-// endpoint. Field names match Coinbase's snake_case payload.
-type transactionsResponse struct {
-	Transactions []transactionPayload `json:"transactions"`
-	NextPageKey  string               `json:"next_page_key"`
-	TotalCount   string               `json:"total_count"`
+// orderResponse mirrors the JSON envelope of the v2 order endpoint.
+type orderResponse struct {
+	Order orderPayload `json:"order"`
 }
 
-type transactionPayload struct {
-	Status           string         `json:"status"`
-	TxHash           string         `json:"tx_hash"`
-	WalletAddress    string         `json:"wallet_address"`
-	PurchaseAmount   amountPayload  `json:"purchase_amount"`
-	PurchaseCurrency string         `json:"purchase_currency"`
-	PaymentTotal     *amountPayload `json:"payment_total,omitempty"`
-	PartnerUserRef   string         `json:"partner_user_ref"`
-	PartnerUserID    string         `json:"partner_user_id"` // legacy field name
-	UserID           string         `json:"user_id"`
-	TransactionID    string         `json:"transaction_id"` // == orderId UUID
-	CreatedAt        time.Time      `json:"created_at"`
+type orderPayload struct {
+	OrderID            string       `json:"orderId"`
+	Status             string       `json:"status"`
+	PaymentTotal       string       `json:"paymentTotal"`
+	PaymentSubtotal    string       `json:"paymentSubtotal"`
+	PaymentCurrency    string       `json:"paymentCurrency"`
+	PaymentMethod      string       `json:"paymentMethod"`
+	PurchaseAmount     string       `json:"purchaseAmount"`
+	PurchaseCurrency   string       `json:"purchaseCurrency"`
+	Fees               []feePayload `json:"fees"`
+	ExchangeRate       string       `json:"exchangeRate"`
+	DestinationAddress string       `json:"destinationAddress"`
+	DestinationNetwork string       `json:"destinationNetwork"`
+	TxHash             string       `json:"txHash"`
+	PartnerUserRef     string       `json:"partnerUserRef"`
+	CreatedAt          time.Time    `json:"createdAt"`
+	UpdatedAt          time.Time    `json:"updatedAt"`
 }
 
-type amountPayload struct {
-	Value    string `json:"value"`
+type feePayload struct {
+	Type     string `json:"type"`
+	Amount   string `json:"amount"`
 	Currency string `json:"currency"`
 }
 
-func (p transactionPayload) toTransaction() *Transaction {
-	ref := p.PartnerUserRef
-	if ref == "" {
-		ref = p.PartnerUserID
+func (p orderPayload) toOrder() *Order {
+	fees := make([]Fee, 0, len(p.Fees))
+	for _, f := range p.Fees {
+		fees = append(fees, Fee{
+			Type:   FeeType(f.Type),
+			Amount: Amount{Value: f.Amount, Currency: f.Currency},
+		})
 	}
-	return &Transaction{
-		OrderID:         p.TransactionID,
-		PartnerUserRef:  ref,
-		Status:          TransactionStatus(p.Status),
-		TxHash:          p.TxHash,
-		WalletAddress:   p.WalletAddress,
-		PurchaseAmount:  Amount{Value: p.PurchaseAmount.Value, Currency: p.PurchaseAmount.Currency},
-		PurchaseAssetID: p.PurchaseCurrency,
-		CreatedAt:       p.CreatedAt,
+	return &Order{
+		OrderID:            p.OrderID,
+		Status:             OrderStatus(p.Status),
+		PaymentTotal:       Amount{Value: p.PaymentTotal, Currency: p.PaymentCurrency},
+		PaymentSubtotal:    Amount{Value: p.PaymentSubtotal, Currency: p.PaymentCurrency},
+		PaymentMethod:      PaymentMethod(p.PaymentMethod),
+		PurchaseAmount:     Amount{Value: p.PurchaseAmount, Currency: p.PurchaseCurrency},
+		Fees:               fees,
+		ExchangeRate:       p.ExchangeRate,
+		DestinationAddress: p.DestinationAddress,
+		DestinationNetwork: p.DestinationNetwork,
+		TxHash:             p.TxHash,
+		PartnerUserRef:     p.PartnerUserRef,
+		CreatedAt:          p.CreatedAt,
+		UpdatedAt:          p.UpdatedAt,
 	}
 }
