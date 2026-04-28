@@ -97,6 +97,43 @@ func GetCoinbaseSwapAccounts(ctx context.Context, data ocp_data.Provider, fromMi
 	}, nil
 }
 
+// GetCoinbaseSwapDestinationLiquidity returns the balance of the Coinbase
+// Stable Swapper's token vault for the destination mint, which represents the
+// available liquidity for swaps targeting that mint.
+func GetCoinbaseSwapDestinationLiquidity(ctx context.Context, data ocp_data.Provider, toMint ed25519.PublicKey) (uint64, error) {
+	pool, _, err := coinbase_stable_swapper.GetPoolAddress()
+	if err != nil {
+		return 0, errors.Wrap(err, "error getting coinbase pool address")
+	}
+
+	outVault, _, err := coinbase_stable_swapper.GetTokenVaultAddress(&coinbase_stable_swapper.GetTokenVaultAddressArgs{
+		Pool: pool,
+		Mint: toMint,
+	})
+	if err != nil {
+		return 0, errors.Wrap(err, "error getting out vault address")
+	}
+
+	outVaultTokenAccount, _, err := coinbase_stable_swapper.GetVaultTokenAccountAddress(&coinbase_stable_swapper.GetVaultTokenAccountAddressArgs{
+		Vault: outVault,
+	})
+	if err != nil {
+		return 0, errors.Wrap(err, "error getting out vault token account address")
+	}
+
+	info, err := data.GetBlockchainTokenAccountInfo(
+		ctx,
+		base58.Encode(outVaultTokenAccount),
+		base58.Encode(toMint),
+		solana.CommitmentProcessed,
+	)
+	if err != nil {
+		return 0, errors.Wrap(err, "error getting out vault token account info")
+	}
+
+	return info.Amount, nil
+}
+
 // MakeCoinbaseSwapInstruction builds a CoinbaseStableSwapper::Swap instruction.
 func MakeCoinbaseSwapInstruction(
 	accounts *CoinbaseSwapAccounts,

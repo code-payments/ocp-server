@@ -793,6 +793,15 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		return handleStatefulSwapError(streamer, err)
 	}
 
+	destinationLiquidity, err := transaction_util.GetCoinbaseSwapDestinationLiquidity(ctx, s.data, toMint.PublicKey().ToBytes())
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting coinbase destination liquidity")
+		return handleStatefulSwapError(streamer, err)
+	}
+	if destinationLiquidity < 4*initiateStablecoinSwapReq.SwapAmount/3 {
+		return handleStatefulSwapError(streamer, NewSwapDeniedError("insufficient coinbase stable swapper destination liquidity"))
+	}
+
 	//
 	// Section: Antispam
 	//
