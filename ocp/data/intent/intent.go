@@ -64,7 +64,8 @@ type ExternalDepositMetadata struct {
 	NativeAmount     float64
 	UsdMarketValue   float64
 
-	IsSwapBuy bool
+	IsSwapBuy  bool
+	IsReturned bool
 }
 
 type SendPublicPaymentMetadata struct {
@@ -288,7 +289,8 @@ func (m *ExternalDepositMetadata) Clone() ExternalDepositMetadata {
 		NativeAmount:     m.NativeAmount,
 		UsdMarketValue:   m.UsdMarketValue,
 
-		IsSwapBuy: m.IsSwapBuy,
+		IsSwapBuy:  m.IsSwapBuy,
+		IsReturned: m.IsReturned,
 	}
 }
 
@@ -302,6 +304,7 @@ func (m *ExternalDepositMetadata) CopyTo(dst *ExternalDepositMetadata) {
 	dst.UsdMarketValue = m.UsdMarketValue
 
 	dst.IsSwapBuy = m.IsSwapBuy
+	dst.IsReturned = m.IsReturned
 }
 
 func (m *ExternalDepositMetadata) Validate() error {

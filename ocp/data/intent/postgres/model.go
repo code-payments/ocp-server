@@ -91,6 +91,7 @@ func toIntentModel(obj *intent.Record) (*intentModel, error) {
 		m.OriginalUsdMarketValue = obj.ExternalDepositMetadata.UsdMarketValue
 
 		m.IsSwap = obj.ExternalDepositMetadata.IsSwapBuy
+		m.IsReturned = obj.ExternalDepositMetadata.IsReturned
 	case intent.SendPublicPayment:
 		m.DestinationOwnerAccount = obj.SendPublicPaymentMetadata.DestinationOwnerAccount
 		m.DestinationTokenAccount = obj.SendPublicPaymentMetadata.DestinationTokenAccount
@@ -626,8 +627,8 @@ func dbGetUsdCostBasisBatch(ctx context.Context, db *sqlx.DB, mint string, owner
 	}
 
 	type Row struct {
-		Owner      string  `db:"owner"`
-		CostBasis  float64 `db:"cost_basis"`
+		Owner     string  `db:"owner"`
+		CostBasis float64 `db:"cost_basis"`
 	}
 	rows := []*Row{}
 
