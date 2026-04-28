@@ -677,7 +677,7 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 
 	verifiedMetadata := &transactionpb.VerifiedSwapMetadata{
 		Kind: &transactionpb.VerifiedSwapMetadata_Stablecoin{
-			Stablecoin: &transactionpb.VerifiedCoinbaseStableSwapperClientParameters{
+			Stablecoin: &transactionpb.VerifiedCoinbaseStableSwapperSwapMetadata{
 				ClientParameters: initiateStablecoinSwapReq,
 			},
 		},
@@ -1149,7 +1149,7 @@ func toProtoSwap(record *swap.Record) (*transactionpb.SwapMetadata, error) {
 		}
 		verifiedMetadata = &transactionpb.VerifiedSwapMetadata{
 			Kind: &transactionpb.VerifiedSwapMetadata_Stablecoin{
-				Stablecoin: &transactionpb.VerifiedCoinbaseStableSwapperClientParameters{
+				Stablecoin: &transactionpb.VerifiedCoinbaseStableSwapperSwapMetadata{
 					ClientParameters: &transactionpb.StatefulSwapRequest_Initiate_CoinbaseStableSwapperClientParameters{
 						Id:               &commonpb.SwapId{Value: decodedSwapId},
 						FromMint:         fromMint.ToProto(),
