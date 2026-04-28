@@ -30,6 +30,7 @@ import (
 	"github.com/code-payments/ocp-server/protoutil"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/usdc"
 )
 
@@ -778,6 +779,18 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 
 	if owner.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58() {
 		return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
+	}
+
+	destinationOwnerAccountInfo, _, err := s.data.GetBlockchainAccountInfo(ctx, destinationOwner.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	switch err {
+	case nil:
+		if bytes.Equal(destinationOwnerAccountInfo.Owner, token.ProgramKey) {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("destination owner is a token account"))
+		}
+	case solana.ErrNoAccountInfo:
+	default:
+		log.With(zap.Error(err)).Warn("failure getting destination owner blockchain account info")
+		return handleStatefulSwapError(streamer, err)
 	}
 
 	//
