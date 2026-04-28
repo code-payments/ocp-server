@@ -938,7 +938,7 @@ func NewCoinbaseStableSwapperSwapHandler(
 		selectedNonce:    selectedNonce,
 		computeUnitLimit: 200_000,
 		computeUnitPrice: 10_000,
-		memoValue:        "stable_swap_v0",
+		memoValue:        "coinbase_stable_swapper_v0",
 		feeDestination:   common.CoreMintFeesAccount,
 	}
 }
