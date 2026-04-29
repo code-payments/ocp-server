@@ -42,6 +42,9 @@ func (s *store) Save(_ context.Context, data *swap.Record) error {
 
 		data.Version++
 
+		item.Nonce = data.Nonce
+		item.Blockhash = data.Blockhash
+		item.TransactionSignature = data.TransactionSignature
 		item.TransactionBlob = data.TransactionBlob
 		item.State = data.State
 		item.Version = data.Version

@@ -207,6 +207,29 @@ func testUpdateHappyPath(t *testing.T, s swap.Store) {
 		actual, err = s.GetById(ctx, "test_swap_id")
 		require.NoError(t, err)
 		assertEquivalentRecords(t, expected, actual)
+
+		expected.Nonce = "rotated_nonce"
+		expected.Blockhash = "rotated_blockhash"
+		expected.TransactionSignature = "rotated_transaction_signature"
+		expected.TransactionBlob = []byte("rotated_transaction_blob")
+		expected.State = swap.StateCancelling
+		mutatedProof := expected.ProofSignature + "_should_be_ignored"
+		expected.ProofSignature = mutatedProof
+
+		err = s.Save(ctx, expected)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, expected.Id)
+		assert.EqualValues(t, 3, expected.Version)
+
+		actual, err = s.GetById(ctx, "test_swap_id")
+		require.NoError(t, err)
+		assert.Equal(t, "rotated_nonce", actual.Nonce)
+		assert.Equal(t, "rotated_blockhash", actual.Blockhash)
+		assert.Equal(t, "rotated_transaction_signature", actual.TransactionSignature)
+		assert.Equal(t, []byte("rotated_transaction_blob"), actual.TransactionBlob)
+		assert.Equal(t, swap.StateCancelling, actual.State)
+		assert.Equal(t, "test_proof_signature", actual.ProofSignature)
+		assert.NotEqual(t, mutatedProof, actual.ProofSignature)
 	})
 }
 

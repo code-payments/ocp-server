@@ -167,7 +167,8 @@ func fromIntentModel(obj *intentModel) *intent.Record {
 			NativeAmount:     obj.NativeAmount,
 			UsdMarketValue:   obj.UsdMarketValue,
 
-			IsSwapBuy: obj.IsSwap,
+			IsSwapBuy:  obj.IsSwap,
+			IsReturned: obj.IsReturned,
 		}
 
 		if len(record.ExternalDepositMetadata.ExchangeCurrency) == 0 {

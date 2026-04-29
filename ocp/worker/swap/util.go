@@ -24,8 +24,11 @@ import (
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
+	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/system"
 	"github.com/code-payments/ocp-server/solana/token"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func (p *runtime) validateSwapState(record *swap.Record, states ...swap.State) error {
@@ -119,14 +122,19 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 		if err != nil {
 			return err
 		}
-		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateExecutingInitialPurchase, currency.MetadataStateAvailable)
+		err = p.validateCurrencyMetadataState(
+			destinationCurrencyMetadataRecord,
+			currency.MetadataStateFundingAuthority,
+			currency.MetadataStateExecutingInitialPurchase,
+			currency.MetadataStateAvailable,
+		)
 		if err != nil {
 			return err
 		}
 	}
 
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(swapRecord, swap.StateSubmitting)
+		err := p.validateSwapState(swapRecord, swap.StateSubmitting, swap.StateCancelling)
 		if err != nil {
 			return err
 		}
@@ -137,7 +145,8 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 		}
 
 		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
-			if destinationCurrencyMetadataRecord.State == currency.MetadataStateExecutingInitialPurchase {
+			switch destinationCurrencyMetadataRecord.State {
+			case currency.MetadataStateFundingAuthority, currency.MetadataStateExecutingInitialPurchase:
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 				if err != nil {
@@ -152,7 +161,133 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 	})
 }
 
-func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record) error {
+func (p *runtime) autoRecoverSwapFunds(ctx context.Context, record *swap.Record) error {
+	if err := p.ensureSwapSourceIsInitialized(ctx, record, false); err != nil {
+		return errors.Wrap(err, "error ensuring swap source is initialized")
+	}
+
+	selectedNonce, err := p.solanaNoncePool.GetNonce(ctx)
+	if err != nil {
+		return errors.Wrap(err, "error allocating nonce for cancel swap")
+	}
+	defer selectedNonce.ReleaseIfNotReserved(ctx)
+
+	cancelTxn, err := p.buildCancelSwapTransaction(ctx, record, selectedNonce)
+	if err != nil {
+		return errors.Wrap(err, "error building cancel swap transaction")
+	}
+
+	return p.markSwapCancelling(
+		ctx,
+		record,
+		selectedNonce,
+		cancelTxn,
+	)
+}
+
+func (p *runtime) buildCancelSwapTransaction(
+	ctx context.Context,
+	record *swap.Record,
+	selectedNonce *transaction_util.Nonce,
+) (*solana.Transaction, error) {
+	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing owner")
+	}
+
+	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing from mint")
+	}
+
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting vm config for source mint")
+	}
+
+	sourceTimelockAccounts, err := owner.GetTimelockAccounts(sourceVmConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting source timelock accounts")
+	}
+
+	memoryAccount, memoryIndex, err := vm_util.GetVirtualTimelockAccountLocationInMemory(ctx, p.data, sourceTimelockAccounts.Vault, false)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting source vta memory location")
+	}
+
+	subsidizer := common.GetSubsidizer()
+
+	cancelInstr := vm.NewCancelSwapInstruction(
+		&vm.CancelSwapInstructionAccounts{
+			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
+			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
+			VmMemory:    memoryAccount.PublicKey().ToBytes(),
+			Swapper:     owner.PublicKey().ToBytes(),
+			SwapPda:     sourceTimelockAccounts.VmSwapAccounts.Pda.PublicKey().ToBytes(),
+			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
+			VmOmnibus:   sourceVmConfig.Omnibus.PublicKey().ToBytes(),
+		},
+		&vm.CancelSwapInstructionArgs{
+			AccountIndex: memoryIndex,
+			Amount:       record.SwapAmount + record.FeeAmount,
+			Bump:         sourceTimelockAccounts.VmSwapAccounts.PdaBump,
+		},
+	)
+
+	instructions := []solana.Instruction{
+		system.AdvanceNonce(selectedNonce.Account.PublicKey().ToBytes(), subsidizer.PublicKey().ToBytes()),
+		compute_budget.SetComputeUnitLimit(75_000),
+		compute_budget.SetComputeUnitPrice(10_000),
+		cancelInstr,
+	}
+
+	txn := solana.NewLegacyTransaction(subsidizer.PublicKey().ToBytes(), instructions...)
+	txn.SetBlockhash(selectedNonce.Blockhash)
+
+	if err := txn.Sign(
+		subsidizer.PrivateKey().ToBytes(),
+		sourceVmConfig.Authority.PrivateKey().ToBytes(),
+	); err != nil {
+		return nil, errors.Wrap(err, "error signing cancel swap transaction")
+	}
+
+	return &txn, nil
+}
+
+func (p *runtime) markSwapCancelling(
+	ctx context.Context,
+	swapRecord *swap.Record,
+	cancelNonce *transaction_util.Nonce,
+	cancelTxn *solana.Transaction,
+) error {
+	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		err := p.validateSwapState(swapRecord, swap.StateSubmitting)
+		if err != nil {
+			return err
+		}
+
+		err = p.markNonceReleasedDueToSubmittedTransaction(ctx, swapRecord)
+		if err != nil {
+			return err
+		}
+
+		cancelTransactionSignature := base58.Encode(cancelTxn.Signature())
+
+		err = cancelNonce.MarkReservedWithSignature(ctx, cancelTransactionSignature)
+		if err != nil {
+			return err
+		}
+
+		swapRecord.Nonce = cancelNonce.Account.PublicKey().ToBase58()
+		swapRecord.Blockhash = base58.Encode(cancelNonce.Blockhash[:])
+		swapRecord.TransactionSignature = cancelTransactionSignature
+		swapRecord.TransactionBlob = cancelTxn.Marshal()
+		swapRecord.State = swap.StateCancelling
+		return p.data.SaveSwap(ctx, swapRecord)
+	})
+}
+
+func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record, cancellationTxn *solana.ConfirmedTransaction) error {
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return err
@@ -164,14 +299,28 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 		if err != nil {
 			return err
 		}
-		err = p.validateCurrencyMetadataState(destinationCurrencyMetadataRecord, currency.MetadataStateFundingAuthority, currency.MetadataStateAvailable)
+		err = p.validateCurrencyMetadataState(
+			destinationCurrencyMetadataRecord,
+			currency.MetadataStateFundingAuthority,
+			currency.MetadataStateExecutingInitialPurchase,
+			currency.MetadataStateAvailable,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	var refundIntentRecord *intent.Record
+	var refundDepositRecord *deposit.Record
+	if swapRecord.State == swap.StateCancelling {
+		refundIntentRecord, refundDepositRecord, err = p.buildRefundRecordsForCancelledSwap(ctx, swapRecord, cancellationTxn)
 		if err != nil {
 			return err
 		}
 	}
 
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		err := p.validateSwapState(swapRecord, swap.StateCreated, swap.StateFunding, swap.StateFunded)
+		err := p.validateSwapState(swapRecord, swap.StateCreated, swap.StateFunding, swap.StateFunded, swap.StateCancelling)
 		if err != nil {
 			return err
 		}
@@ -182,10 +331,26 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 			if err != nil {
 				return err
 			}
+		case swap.StateCancelling:
+			err = p.markNonceReleasedDueToSubmittedTransaction(ctx, swapRecord)
+			if err != nil {
+				return err
+			}
+
+			err = p.data.SaveIntent(ctx, refundIntentRecord)
+			if err != nil {
+				return err
+			}
+
+			err = p.data.SaveExternalDeposit(ctx, refundDepositRecord)
+			if err != nil {
+				return err
+			}
 		}
 
 		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
-			if destinationCurrencyMetadataRecord.State == currency.MetadataStateFundingAuthority {
+			switch destinationCurrencyMetadataRecord.State {
+			case currency.MetadataStateFundingAuthority, currency.MetadataStateExecutingInitialPurchase:
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 				if err != nil {
@@ -198,6 +363,101 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 		swapRecord.State = swap.StateCancelled
 		return p.data.SaveSwap(ctx, swapRecord)
 	})
+}
+
+func (p *runtime) buildRefundRecordsForCancelledSwap(ctx context.Context, swapRecord *swap.Record, cancellationTxn *solana.ConfirmedTransaction) (*intent.Record, *deposit.Record, error) {
+	if cancellationTxn == nil {
+		return nil, nil, errors.New("cancellation transaction is required for refund records")
+	}
+
+	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ownerSourceTimelockVault, err := owner.ToTimelockVault(sourceVmConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	quantity := swapRecord.SwapAmount + swapRecord.FeeAmount
+
+	var exchangeCurrency currency_lib.Code
+	var nativeAmount, usdMarketValue float64
+	var isReturned bool
+	switch swapRecord.FundingSource {
+	case swap.FundingSourceSubmitIntent:
+		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
+		if err != nil {
+			return nil, nil, err
+		}
+		if fundingIntentRecord.IntentType != intent.SendPublicPayment {
+			return nil, nil, errors.New("unexpected intent type")
+		}
+		exchangeCurrency = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
+		nativeAmount = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
+		usdMarketValue = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
+		isReturned = true
+	case swap.FundingSourceExternalWallet:
+		if !common.IsCoreMint(fromMint) {
+			return nil, nil, errors.New("unexpected source mint")
+		}
+		exchangeCurrency = currency_lib.USD
+		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, quantity, time.Now())
+		if err != nil {
+			return nil, nil, err
+		}
+		nativeAmount = usdMarketValue
+	default:
+		return nil, nil, errors.New("unsupported funding source")
+	}
+
+	exchangeRate := currency_util.CalculateExchangeRate(fromMint, quantity, nativeAmount)
+
+	intentRecord := &intent.Record{
+		IntentId:   getSwapDepositIntentID(swapRecord.TransactionSignature, ownerSourceTimelockVault),
+		IntentType: intent.ExternalDeposit,
+
+		MintAccount: fromMint.PublicKey().ToBase58(),
+
+		InitiatorOwnerAccount: owner.PublicKey().ToBase58(),
+
+		ExternalDepositMetadata: &intent.ExternalDepositMetadata{
+			DestinationTokenAccount: ownerSourceTimelockVault.PublicKey().ToBase58(),
+			Quantity:                quantity,
+			ExchangeCurrency:        exchangeCurrency,
+			ExchangeRate:            exchangeRate,
+			NativeAmount:            nativeAmount,
+			UsdMarketValue:          usdMarketValue,
+			IsReturned:              isReturned,
+		},
+
+		State:     intent.StateConfirmed,
+		CreatedAt: time.Now(),
+	}
+
+	depositRecord := &deposit.Record{
+		Signature:   swapRecord.TransactionSignature,
+		Destination: ownerSourceTimelockVault.PublicKey().ToBase58(),
+		Amount:      quantity,
+
+		Slot:              cancellationTxn.Slot,
+		ConfirmationState: transaction.ConfirmationFinalized,
+
+		CreatedAt: time.Now(),
+	}
+
+	return intentRecord, depositRecord, nil
 }
 
 func (p *runtime) submitTransaction(ctx context.Context, record *swap.Record) error {
@@ -708,6 +968,30 @@ func (p *runtime) ensureSwapDestinationIsInitialized(ctx context.Context, record
 	}
 
 	return vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, p.data, destinationTimelockVault, true)
+}
+
+func (p *runtime) ensureSwapSourceIsInitialized(ctx context.Context, record *swap.Record, waitForInitialization bool) error {
+	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+	if err != nil {
+		return err
+	}
+
+	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
+	if err != nil {
+		return err
+	}
+
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
+	if err != nil {
+		return err
+	}
+
+	sourceTimelockVault, err := owner.ToTimelockVault(sourceVmConfig)
+	if err != nil {
+		return err
+	}
+
+	return vm_util.EnsureVirtualTimelockAccountIsInitialized(ctx, p.data, sourceTimelockVault, waitForInitialization)
 }
 
 func (p *runtime) validateDestinationCurrencyReadyForSwap(ctx context.Context, swapRecord *swap.Record) (bool, error) {
