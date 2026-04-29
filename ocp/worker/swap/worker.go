@@ -90,6 +90,8 @@ func (p *runtime) handle(ctx context.Context, record *swap.Record) error {
 		err = p.handleStateFunded(ctx, record)
 	case swap.StateSubmitting:
 		err = p.handleStateSubmitting(ctx, record)
+	case swap.StateCancelling:
+		err = p.handleStateCancelling(ctx, record)
 	}
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure processing swap")
@@ -106,7 +108,7 @@ func (p *runtime) handleStateCreated(ctx context.Context, record *swap.Record) e
 	// Cancel the swap if the client hasn't submitted the intent to fund the swap
 	// within a reasonable amount of time
 	if time.Since(record.CreatedAt) > p.conf.clientTimeoutToFund.Get(ctx) {
-		return p.markSwapCancelled(ctx, record)
+		return p.markSwapCancelled(ctx, record, nil)
 	}
 
 	return nil
@@ -129,8 +131,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 		case intent.StateConfirmed:
 			return p.markSwapFunded(ctx, record)
 		case intent.StateFailed:
-			// todo: Recovery flow to put back source funds into the source VM
-			return errors.New("funding intent failed")
+			return p.markSwapCancelled(ctx, record, nil)
 		default:
 			return nil
 		}
@@ -144,7 +145,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 
 		if finalizedTxn != nil {
 			if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
-				return p.markSwapCancelled(ctx, record)
+				return p.markSwapCancelled(ctx, record, nil)
 			}
 			return p.markSwapFunded(ctx, record)
 		}
@@ -152,7 +153,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 		// Cancel the swap if the external wallet funding transaction hasn't been
 		// finalized within a reasonable amount of time
 		if time.Since(record.CreatedAt) > p.conf.externalWalletFinalizationTimeout.Get(ctx) {
-			return p.markSwapCancelled(ctx, record)
+			return p.markSwapCancelled(ctx, record, nil)
 		}
 
 		return nil
@@ -185,7 +186,7 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 
 	if !isValid {
 		// todo: Return funds if the amount was wrong
-		return p.markSwapCancelled(ctx, record)
+		return p.markSwapCancelled(ctx, record, nil)
 	}
 
 	err = p.ensureSwapDestinationIsInitialized(ctx, record)
@@ -220,8 +221,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 
 	if finalizedTxn != nil {
 		if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
-			// todo: Recovery flow to put back source funds into the source VM
-			return p.markSwapFailed(ctx, record)
+			return p.autoRecoverSwapFunds(ctx, record)
 		} else {
 			tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, record.TransactionSignature)
 			if err != nil {
@@ -252,6 +252,30 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 	}
 
 	// Otherwise, continually retry submitting the transaction
+
+	return p.submitTransaction(ctx, record)
+}
+
+func (p *runtime) handleStateCancelling(ctx context.Context, record *swap.Record) error {
+	if err := p.validateSwapState(record, swap.StateCancelling); err != nil {
+		return err
+	}
+
+	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature, solana.CommitmentFinalized)
+	if err != nil && err != solana.ErrSignatureNotFound {
+		return errors.Wrap(err, "error getting finalized cancel transaction")
+	}
+
+	if finalizedTxn != nil {
+		if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
+			return p.markSwapFailed(ctx, record)
+		}
+		return p.markSwapCancelled(ctx, record, finalizedTxn)
+	}
+
+	if err := p.ensureSwapSourceIsInitialized(ctx, record, true); err != nil {
+		return errors.Wrap(err, "error ensuring swap source is initialized")
+	}
 
 	return p.submitTransaction(ctx, record)
 }

@@ -102,7 +102,7 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 
 			ON CONFLICT (swap_id)
 			DO UPDATE
-				SET transaction_blob = $15, state = $16, version = ` + tableName + `.version + 1
+				SET nonce = $11, blockhash = $12, transaction_signature = $14, transaction_blob = $15, state = $16, version = ` + tableName + `.version + 1
 				WHERE ` + tableName + `.swap_id = $1 AND ` + tableName + `.version = $17
 
 			RETURNING

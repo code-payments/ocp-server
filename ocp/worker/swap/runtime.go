@@ -10,8 +10,10 @@ import (
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/integration"
+	"github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
 
@@ -21,17 +23,29 @@ type runtime struct {
 	data            ocp_data.Provider
 	vmIndexerClient indexerpb.IndexerClient
 	integration     integration.Swap
+	solanaNoncePool *transaction.LocalNoncePool
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, vmIndexerClient indexerpb.IndexerClient, integration integration.Swap, configProvider ConfigProvider) worker.Runtime {
+func New(
+	log *zap.Logger,
+	data ocp_data.Provider,
+	vmIndexerClient indexerpb.IndexerClient,
+	integration integration.Swap,
+	solanaNoncePool *transaction.LocalNoncePool,
+	configProvider ConfigProvider,
+) (worker.Runtime, error) {
+	if err := solanaNoncePool.Validate(nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeOnDemandTransaction); err != nil {
+		return nil, err
+	}
+
 	return &runtime{
 		log:             log,
 		conf:            configProvider(),
 		data:            data,
 		vmIndexerClient: vmIndexerClient,
 		integration:     integration,
-	}
-
+		solanaNoncePool: solanaNoncePool,
+	}, nil
 }
 
 func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
@@ -40,6 +54,7 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		swap.StateFunding,
 		swap.StateFunded,
 		swap.StateSubmitting,
+		swap.StateCancelling,
 	} {
 		go func(state swap.State) {
 
