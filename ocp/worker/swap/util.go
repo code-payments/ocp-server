@@ -234,11 +234,26 @@ func (p *runtime) buildCancelSwapTransaction(
 		},
 	)
 
+	closeInstr := vm.NewCloseSwapAccountIfEmptyInstruction(
+		&vm.CloseSwapAccountIfEmptyInstructionAccounts{
+			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
+			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
+			Swapper:     owner.PublicKey().ToBytes(),
+			SwapPda:     sourceTimelockAccounts.VmSwapAccounts.Pda.PublicKey().ToBytes(),
+			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
+			Destination: subsidizer.PublicKey().ToBytes(),
+		},
+		&vm.CloseSwapAccountIfEmptyInstructionArgs{
+			Bump: sourceTimelockAccounts.VmSwapAccounts.PdaBump,
+		},
+	)
+
 	instructions := []solana.Instruction{
 		system.AdvanceNonce(selectedNonce.Account.PublicKey().ToBytes(), subsidizer.PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(75_000),
+		compute_budget.SetComputeUnitLimit(80_000),
 		compute_budget.SetComputeUnitPrice(10_000),
 		cancelInstr,
+		closeInstr,
 	}
 
 	txn := solana.NewLegacyTransaction(subsidizer.PublicKey().ToBytes(), instructions...)
