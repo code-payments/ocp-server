@@ -25,6 +25,7 @@ const (
 	FundingSourceUnknown = iota
 	FundingSourceSubmitIntent
 	FundingSourceExternalWallet
+	FundingSourceCoinbaseOnramp
 )
 
 type Kind uint8

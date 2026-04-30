@@ -9,6 +9,7 @@ import (
 
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
+	"github.com/code-payments/ocp-server/coinbase"
 	"github.com/code-payments/ocp-server/ocp/aml"
 	"github.com/code-payments/ocp-server/ocp/antispam"
 	auth_util "github.com/code-payments/ocp-server/ocp/auth"
@@ -35,6 +36,8 @@ type transactionServer struct {
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
 
+	coinbaseClient *coinbase.Client
+
 	nodeID     string
 	noncePools []*transaction.LocalNoncePool
 
@@ -53,6 +56,7 @@ func NewTransactionServer(
 	submitIntentIntegration integration.SubmitIntent,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
+	coinbaseClient *coinbase.Client,
 	nodeID string,
 	noncePools []*transaction.LocalNoncePool,
 	configProvider ConfigProvider,
@@ -99,6 +103,8 @@ func NewTransactionServer(
 
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
+
+		coinbaseClient: coinbaseClient,
 
 		nodeID:     nodeID,
 		noncePools: noncePools,

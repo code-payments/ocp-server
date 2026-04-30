@@ -423,7 +423,7 @@ func (p *runtime) buildRefundRecordsForCancelledSwap(ctx context.Context, swapRe
 		nativeAmount = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
 		usdMarketValue = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
 		isReturned = true
-	case swap.FundingSourceExternalWallet:
+	case swap.FundingSourceExternalWallet, swap.FundingSourceCoinbaseOnramp:
 		if !common.IsCoreMint(fromMint) {
 			return nil, nil, errors.New("unexpected source mint")
 		}
@@ -621,7 +621,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 				return 0, false, err
 			}
 		}
-	case swap.FundingSourceExternalWallet:
+	case swap.FundingSourceExternalWallet, swap.FundingSourceCoinbaseOnramp:
 		if !common.IsCoreMint(fromMint) {
 			return 0, false, errors.New("unexpected source mint")
 		}
@@ -781,7 +781,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 
 		currencyCode = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
 		nativeAmount = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
-	case swap.FundingSourceExternalWallet:
+	case swap.FundingSourceExternalWallet, swap.FundingSourceCoinbaseOnramp:
 		if !common.IsCoreMint(fromMint) {
 			return errors.New("unexpected source mint")
 		}
@@ -930,6 +930,55 @@ func (p *runtime) validateExternalWalletFunding(ctx context.Context, record *swa
 	}
 
 	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, record.FundingId)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting token balances")
+	}
+
+	deltaQuarks, err := transaction_util.GetDeltaQuarksFromTokenBalances(swapAta, tokenBalances)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting delta quarks from token balances")
+	}
+
+	if deltaQuarks < int64(record.SwapAmount+record.FeeAmount) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (p *runtime) validateCoinbaseOnrampFunding(ctx context.Context, record *swap.Record) (bool, error) {
+	if record.FundingSource != swap.FundingSourceCoinbaseOnramp {
+		return false, errors.New("invalid funding source")
+	}
+
+	owner, err := common.NewAccountFromPublicKeyString(record.Owner)
+	if err != nil {
+		return false, errors.Wrap(err, "error parsing owner")
+	}
+
+	fromMint, err := common.NewAccountFromPublicKeyString(record.FromMint)
+	if err != nil {
+		return false, errors.Wrap(err, "error parsing from mint")
+	}
+
+	sourceVmConfig, err := common.GetVmConfigForMint(ctx, p.data, fromMint)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting vm config for source mint")
+	}
+
+	swapAta, err := owner.ToVmSwapAta(sourceVmConfig)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting swap ata")
+	}
+
+	order, err := p.coinbaseClient.GetOrder(ctx, record.FundingId)
+	if err != nil {
+		return false, errors.Wrap(err, "error getting coinbase order")
+	}
+	if order.TxHash == "" {
+		return false, errors.New("coinbase order has no on-chain transaction")
+	}
+
+	tokenBalances, err := p.data.GetBlockchainTransactionTokenBalances(ctx, order.TxHash)
 	if err != nil {
 		return false, errors.Wrap(err, "error getting token balances")
 	}

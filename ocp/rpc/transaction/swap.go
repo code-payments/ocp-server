@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/mr-tron/base58/base58"
@@ -16,6 +18,7 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
+	"github.com/code-payments/ocp-server/coinbase"
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
@@ -234,6 +237,40 @@ func (s *transactionServer) handleReserveStatefulSwap(
 
 		if !common.IsCoreMint(fromMint) {
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("source mint must be core mint"))
+		}
+	case transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP:
+		if !common.IsCoreMint(fromMint) {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("source mint must be core mint"))
+		}
+
+		order, err := s.coinbaseClient.GetOrder(ctx, initiateReserveSwapReq.FundingId)
+		if err == coinbase.ErrOrderNotFound {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order not found"))
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting coinbase order")
+			return handleStatefulSwapError(streamer, err)
+		}
+		if order.Status == coinbase.OrderStatusFailed {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order is in a failed state"))
+		}
+
+		if !strings.EqualFold(order.PurchaseAmount.Currency, common.CoreMintSymbol) {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order is not for the core mint"))
+		}
+		if order.PartnerUserRef != owner.PublicKey().ToBase58() {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("coinbase order partner user ref does not match owner"))
+		}
+		if order.DestinationAddress != sourceTimelockAccountRecord.SwapPdaAddress {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order destination address is not the owner's swap pda"))
+		}
+
+		orderQuarks, err := decimalToQuarks(order.PurchaseAmount.Value, common.CoreMintDecimals)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("invalid coinbase order purchase amount")
+			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order purchase amount is invalid"))
+		}
+		if orderQuarks != initiateReserveSwapReq.SwapAmount+initiateReserveSwapReq.FeeAmount {
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("coinbase order purchase amount does not match swap amount"))
 		}
 	default:
 		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateReserveSwapReq.FundingSource))
@@ -555,7 +592,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 	switch initiateReserveSwapReq.FundingSource {
 	case transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT:
 		initialState = swap.StateCreated
-	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
+	case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET, transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP:
 		initialState = swap.StateFunding
 	default:
 		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateReserveSwapReq.FundingSource))
@@ -1194,4 +1231,24 @@ func toProtoSwap(record *swap.Record) (*transactionpb.SwapMetadata, error) {
 		State:            transactionpb.SwapMetadata_State(record.State),
 		Signature:        &commonpb.Signature{Value: decodedSignature},
 	}, nil
+}
+
+func decimalToQuarks(value string, decimals int) (uint64, error) {
+	rat, ok := new(big.Rat).SetString(value)
+	if !ok {
+		return 0, errors.Errorf("invalid decimal value: %s", value)
+	}
+	if rat.Sign() < 0 {
+		return 0, errors.New("amount is negative")
+	}
+	multiplier := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	scaled := new(big.Rat).Mul(rat, new(big.Rat).SetInt(multiplier))
+	if !scaled.IsInt() {
+		return 0, errors.New("amount has more precision than mint decimals")
+	}
+	quarks := scaled.Num()
+	if !quarks.IsUint64() {
+		return 0, errors.New("amount overflows uint64")
+	}
+	return quarks.Uint64(), nil
 }

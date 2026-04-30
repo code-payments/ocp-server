@@ -9,6 +9,7 @@ import (
 
 	indexerpb "github.com/code-payments/code-vm-indexer/generated/indexer/v1"
 
+	"github.com/code-payments/ocp-server/coinbase"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
@@ -24,6 +25,7 @@ type runtime struct {
 	vmIndexerClient indexerpb.IndexerClient
 	integration     integration.Swap
 	solanaNoncePool *transaction.LocalNoncePool
+	coinbaseClient  *coinbase.Client
 }
 
 func New(
@@ -32,6 +34,7 @@ func New(
 	vmIndexerClient indexerpb.IndexerClient,
 	integration integration.Swap,
 	solanaNoncePool *transaction.LocalNoncePool,
+	coinbaseClient *coinbase.Client,
 	configProvider ConfigProvider,
 ) (worker.Runtime, error) {
 	if err := solanaNoncePool.Validate(nonce.EnvironmentSolana, nonce.EnvironmentInstanceSolanaMainnet, nonce.PurposeOnDemandTransaction); err != nil {
@@ -45,6 +48,7 @@ func New(
 		vmIndexerClient: vmIndexerClient,
 		integration:     integration,
 		solanaNoncePool: solanaNoncePool,
+		coinbaseClient:  coinbaseClient,
 	}, nil
 }
 
