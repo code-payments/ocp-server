@@ -777,6 +777,12 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 				return NewIntentValidationError("payments to external destinations must be withdrawals")
 			}
 
+			// A fee payment funds creation of the destination ATA, so the destination
+			// owner must be provided to validate the ATA derivation.
+			if simResult.HasAnyFeePayments() && metadata.DestinationOwner == nil {
+				return NewIntentValidationErrorf("destination owner account is required when paying %s fee", transactionpb.FeePaymentAction_CREATE_ON_SEND_WITHDRAWAL.String())
+			}
+
 			// Ensure the destination is the intent mint ATA for the client-provided owner,
 			// if provided. We'll check later if this is absolutely required.
 			var isDestinationOwnerVmSwapPda bool
