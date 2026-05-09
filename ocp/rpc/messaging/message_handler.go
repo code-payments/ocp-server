@@ -75,6 +75,114 @@ func (h *RequestToGrabBillMessageHandler) GetAdditionalContext(ctx context.Conte
 	return nil, nil
 }
 
+type RequestToReceiveBillMessageHandler struct {
+	data             ocp_data.Provider
+	mintDataProvider *currency_util.MintDataProvider
+}
+
+func NewRequestToReceiveBillMessageHandler(data ocp_data.Provider, mintDataProvider *currency_util.MintDataProvider) MessageHandler {
+	return &RequestToReceiveBillMessageHandler{
+		data:             data,
+		mintDataProvider: mintDataProvider,
+	}
+}
+
+func (h *RequestToReceiveBillMessageHandler) Validate(ctx context.Context, rendezvous *common.Account, untypedMessage *messagingpb.Message) error {
+	typedMessage := untypedMessage.GetRequestToReceiveBill()
+	if typedMessage == nil {
+		return errors.New("invalid message type")
+	}
+
+	//
+	// Part 1: Requestor account must be a primary account
+	//
+
+	requestorAccount, err := common.NewAccountFromProto(typedMessage.RequestorAccount)
+	if err != nil {
+		return err
+	}
+
+	accountInfoRecord, err := h.data.GetAccountInfoByTokenAddress(ctx, requestorAccount.PublicKey().ToBase58())
+	if err == account.ErrAccountInfoNotFound || (err == nil && accountInfoRecord.AccountType != commonpb.AccountType_PRIMARY) {
+		return newMessageValidationError("requestor account must be a primary account")
+	} else if err != nil {
+		return err
+	}
+
+	//
+	// Part 2: Mint account must be the Core Mint or a Launchpad Currency
+	//
+
+	mintAccount, err := common.NewAccountFromProto(typedMessage.Mint)
+	if err != nil {
+		return err
+	}
+
+	isSupportedMint, err := common.IsSupportedMint(ctx, h.data, mintAccount)
+	if err != nil {
+		return err
+	} else if !isSupportedMint {
+		return newMessageValidationError("mint account must be the core mint or a launchpad currency")
+	}
+
+	//
+	// Part 3: Validate additional fees, if provided
+	//
+
+	var totalFeeBps uint32
+	for _, fee := range typedMessage.AdditionalFees {
+		if fee.Destination == nil {
+			return newMessageValidationError("fee destination is required")
+		}
+
+		if fee.FeeBps == 0 || fee.FeeBps > 5000 {
+			return newMessageValidationError("fee_bps must be between 1 and 5000")
+		}
+
+		_, err := common.NewAccountFromProto(fee.Destination)
+		if err != nil {
+			return newMessageValidationError("invalid fee destination account")
+		}
+
+		totalFeeBps += fee.FeeBps
+	}
+
+	if totalFeeBps > 5000 {
+		return newMessageValidationError("total fees cannot exceed 5000 bps")
+	}
+
+	return nil
+}
+
+func (h *RequestToReceiveBillMessageHandler) OnSuccess(ctx context.Context) error {
+	return nil
+}
+
+func (h *RequestToReceiveBillMessageHandler) GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error) {
+	typedMessage := message.GetRequestToReceiveBill()
+	if typedMessage == nil {
+		return nil, errors.New("invalid message type")
+	}
+
+	mintAccount, err := common.NewAccountFromProto(typedMessage.Mint)
+	if err != nil {
+		return nil, err
+	}
+
+	mintMetadata, err := h.mintDataProvider.GetProtoMint(ctx, mintAccount)
+	if err != nil {
+		return nil, err
+	}
+
+	return &messagingpb.AdditionalServerContext{
+		Type: &messagingpb.AdditionalServerContext_RequestToReceiveBill{
+			RequestToReceiveBill: &messagingpb.RequestToReceiveBillServerContext{
+				MintMetadata: mintMetadata,
+			},
+		},
+	}, nil
+}
+
 // todo: This message type needs tests
 type RequestToGiveBillMessageHandler struct {
 	data             ocp_data.Provider

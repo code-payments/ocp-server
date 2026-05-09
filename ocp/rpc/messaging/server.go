@@ -654,6 +654,10 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 		log = log.With(zap.String("message_type", "request_to_give_bill"))
 		messageHandler = NewRequestToGiveBillMessageHandler(s.data, s.mintDataProvider)
 
+	case *messagingpb.Message_RequestToReceiveBill:
+		log = log.With(zap.String("message_type", "request_to_receive_bill"))
+		messageHandler = NewRequestToReceiveBillMessageHandler(s.data, s.mintDataProvider)
+
 	default:
 		return nil, status.Error(codes.InvalidArgument, "message.kind must be set")
 	}
@@ -800,6 +804,8 @@ func (s *server) injectAdditionalContext(ctx context.Context, message *messaging
 		messageHandler = NewRequestToGrabBillMessageHandler(s.data)
 	case *messagingpb.Message_RequestToGiveBill:
 		messageHandler = NewRequestToGiveBillMessageHandler(s.data, s.mintDataProvider)
+	case *messagingpb.Message_RequestToReceiveBill:
+		messageHandler = NewRequestToReceiveBillMessageHandler(s.data, s.mintDataProvider)
 	default:
 		return nil
 	}
