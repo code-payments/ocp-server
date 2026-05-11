@@ -20,7 +20,7 @@ const (
 	defaultExternalWalletFinalizationTimeout       = 30 * time.Second
 
 	CoinbaseOnrampFinalizationTimeoutConfigEnvName = envConfigPrefix + "COINBASE_ONRAMP_FINALIZATION_TIMEOUT"
-	defaultCoinbaseOnrampFinalizationTimeout       = 15 * time.Minute
+	defaultCoinbaseOnrampFinalizationTimeout       = 5 * time.Minute
 )
 
 type conf struct {
