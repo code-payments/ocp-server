@@ -116,6 +116,13 @@ func (p *runtime) handleStateCreated(ctx context.Context, record *swap.Record) e
 }
 
 func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) error {
+	log := p.log.With(
+		zap.String("method", "handleStateFunding"),
+		zap.String("swap_id", record.SwapId),
+		zap.String("funding_id", record.FundingId),
+		zap.String("owner", record.Owner),
+	)
+
 	if err := p.validateSwapState(record, swap.StateFunding); err != nil {
 		return err
 	}
@@ -167,28 +174,36 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 			return errors.Wrap(err, "error getting coinbase order")
 		}
 
-		if order.Status == coinbase.OrderStatusFailed {
-			return p.markSwapCancelled(ctx, record, nil)
-		}
-
-		if order.TxHash != "" {
-			finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, order.TxHash, solana.CommitmentFinalized)
-			if err != nil && err != solana.ErrSignatureNotFound {
-				return errors.Wrap(err, "error getting finalized coinbase funding transaction")
-			}
-
-			if finalizedTxn != nil {
-				if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
-					return p.markSwapCancelled(ctx, record, nil)
+		switch order.Status {
+		case coinbase.OrderStatusProcessing, coinbase.OrderStatusCompleted:
+			if order.TxHash != "" {
+				finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, order.TxHash, solana.CommitmentFinalized)
+				if err != nil && err != solana.ErrSignatureNotFound {
+					return errors.Wrap(err, "error getting finalized coinbase funding transaction")
 				}
-				return p.markSwapFunded(ctx, record)
-			}
-		}
 
-		// Cancel the swap if the Coinbase onramp funding hasn't been finalized
-		// within a reasonable amount of time
-		if time.Since(record.CreatedAt) > p.conf.coinbaseOnrampFinalizationTimeout.Get(ctx) {
+				if finalizedTxn != nil {
+					if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
+						return p.markSwapCancelled(ctx, record, nil)
+					}
+					return p.markSwapFunded(ctx, record)
+				}
+			}
+
+			if time.Since(record.CreatedAt) > 2*p.conf.coinbaseOnrampOrderTimeout.Get(ctx) {
+				log.With(
+					zap.String("txn", order.TxHash),
+					zap.String("order_status", string(order.Status)),
+				).Info("funding transaction for coinbase order is not finalizing")
+			}
+		case coinbase.OrderStatusFailed:
 			return p.markSwapCancelled(ctx, record, nil)
+		default:
+			// Cancel the swap if the Coinbase onramp funding hasn't been finalized
+			// within a reasonable amount of time
+			if time.Since(record.CreatedAt) > p.conf.coinbaseOnrampOrderTimeout.Get(ctx) {
+				return p.markSwapCancelled(ctx, record, nil)
+			}
 		}
 
 		return nil
