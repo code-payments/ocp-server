@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxDiscoveredCurrencies         = 100
+	maxDiscoveredCurrencies         = 1000
 	newDiscoveredCurrenciesAgeLimit = 7 * 24 * time.Hour // 1 week
 )
 
