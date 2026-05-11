@@ -199,8 +199,9 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 		case coinbase.OrderStatusFailed:
 			return p.markSwapCancelled(ctx, record, nil)
 		default:
-			// Cancel the swap if the Coinbase onramp funding hasn't been finalized
-			// within a reasonable amount of time
+			// Cancel the swap if the Coinbase onramp order hasn't been completed
+			// within a reasonable amount of time. Timeout should be greater than
+			// that enforced on client to avoid lost funds.
 			if time.Since(record.CreatedAt) > p.conf.coinbaseOnrampOrderTimeout.Get(ctx) {
 				return p.markSwapCancelled(ctx, record, nil)
 			}
