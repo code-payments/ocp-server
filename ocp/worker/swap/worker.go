@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	"github.com/code-payments/ocp-server/coinbase"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
@@ -115,6 +116,13 @@ func (p *runtime) handleStateCreated(ctx context.Context, record *swap.Record) e
 }
 
 func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) error {
+	log := p.log.With(
+		zap.String("method", "handleStateFunding"),
+		zap.String("swap_id", record.SwapId),
+		zap.String("funding_id", record.FundingId),
+		zap.String("owner", record.Owner),
+	)
+
 	if err := p.validateSwapState(record, swap.StateFunding); err != nil {
 		return err
 	}
@@ -157,6 +165,49 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 		}
 
 		return nil
+	case swap.FundingSourceCoinbaseOnramp:
+		// Look up the Coinbase order. The funding ID is the Coinbase order ID,
+		// and the order's TxHash holds the on-chain settlement signature once
+		// Coinbase has broadcast the transaction.
+		order, err := p.coinbaseClient.GetOrder(ctx, record.FundingId)
+		if err != nil {
+			return errors.Wrap(err, "error getting coinbase order")
+		}
+
+		switch order.Status {
+		case coinbase.OrderStatusProcessing, coinbase.OrderStatusCompleted:
+			if order.TxHash != "" {
+				finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, order.TxHash, solana.CommitmentFinalized)
+				if err != nil && err != solana.ErrSignatureNotFound {
+					return errors.Wrap(err, "error getting finalized coinbase funding transaction")
+				}
+
+				if finalizedTxn != nil {
+					if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
+						return p.markSwapCancelled(ctx, record, nil)
+					}
+					return p.markSwapFunded(ctx, record)
+				}
+			}
+
+			if time.Since(record.CreatedAt) > 2*p.conf.coinbaseOnrampOrderTimeout.Get(ctx) {
+				log.With(
+					zap.String("txn", order.TxHash),
+					zap.String("order_status", string(order.Status)),
+				).Info("funding transaction for coinbase order is not finalizing")
+			}
+		case coinbase.OrderStatusFailed:
+			return p.markSwapCancelled(ctx, record, nil)
+		default:
+			// Cancel the swap if the Coinbase onramp order hasn't been completed
+			// within a reasonable amount of time. Timeout should be greater than
+			// that enforced on client to avoid lost funds.
+			if time.Since(record.CreatedAt) > p.conf.coinbaseOnrampOrderTimeout.Get(ctx) {
+				return p.markSwapCancelled(ctx, record, nil)
+			}
+		}
+
+		return nil
 	default:
 		return errors.New("unsupported funding source")
 	}
@@ -179,6 +230,11 @@ func (p *runtime) handleStateFunded(ctx context.Context, record *swap.Record) er
 		isValid, err = p.validateExternalWalletFunding(ctx, record)
 		if err != nil {
 			return errors.Wrap(err, "error validating external wallet funding")
+		}
+	case swap.FundingSourceCoinbaseOnramp:
+		isValid, err = p.validateCoinbaseOnrampFunding(ctx, record)
+		if err != nil {
+			return errors.Wrap(err, "error validating coinbase onramp funding")
 		}
 	default:
 		return errors.New("unsupported funding source")

@@ -34,6 +34,10 @@ const (
 	FeeTypeExchange FeeType = "FEE_TYPE_EXCHANGE"
 )
 
+const (
+	NetworkSolana = "solana"
+)
+
 // Order is a Coinbase Onramp order as returned by the v2 API.
 type Order struct {
 	OrderID            string // UUID assigned by Coinbase

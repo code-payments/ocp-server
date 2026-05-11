@@ -18,12 +18,16 @@ const (
 
 	ExternalWalletFinalizationTimeoutConfigEnvName = envConfigPrefix + "EXTERNAL_WALLET_FINALIZATION_TIMEOUT"
 	defaultExternalWalletFinalizationTimeout       = 30 * time.Second
+
+	CoinbaseOnrampOrderTimeoutConfigEnvName = envConfigPrefix + "COINBASE_ONRAMP_ORDER_TIMEOUT"
+	defaultCoinbaseOnrampOrderTimeout       = 5 * time.Minute
 )
 
 type conf struct {
 	batchSize                         config.Uint64
 	clientTimeoutToFund               config.Duration
 	externalWalletFinalizationTimeout config.Duration
+	coinbaseOnrampOrderTimeout        config.Duration
 }
 
 // ConfigProvider defines how config values are pulled
@@ -36,6 +40,7 @@ func WithEnvConfigs() ConfigProvider {
 			batchSize:                         env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
 			clientTimeoutToFund:               env.NewDurationConfig(ClientTimeoutToFundConfigEnvName, defaultClientTimeoutToFund),
 			externalWalletFinalizationTimeout: env.NewDurationConfig(ExternalWalletFinalizationTimeoutConfigEnvName, defaultExternalWalletFinalizationTimeout),
+			coinbaseOnrampOrderTimeout:        env.NewDurationConfig(CoinbaseOnrampOrderTimeoutConfigEnvName, defaultCoinbaseOnrampOrderTimeout),
 		}
 	}
 }
