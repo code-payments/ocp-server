@@ -300,6 +300,6 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.PredefinedRange, 
 func getLatestHistoricalTime() time.Time {
 	secondsInUpdateInterval := int64(timePerHistoricalUpdate / time.Second)
 	queryTimeUnix := time.Now().Unix()
-	queryTimeUnix = queryTimeUnix - (queryTimeUnix % secondsInUpdateInterval)
+	queryTimeUnix = queryTimeUnix - (queryTimeUnix % secondsInUpdateInterval) + secondsInUpdateInterval
 	return time.Unix(queryTimeUnix, 0)
 }
