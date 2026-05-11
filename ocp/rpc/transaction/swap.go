@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mr-tron/base58/base58"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -243,6 +244,10 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("source mint must be core mint"))
 		}
 
+		if _, err := uuid.Parse(initiateReserveSwapReq.FundingId); err != nil {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("funding id is not a uuid"))
+		}
+
 		order, err := s.coinbaseClient.GetOrder(ctx, initiateReserveSwapReq.FundingId)
 		if err == coinbase.ErrOrderNotFound {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order not found"))
@@ -254,6 +259,9 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order is in a failed state"))
 		}
 
+		if !strings.EqualFold(order.DestinationNetwork, coinbase.NetworkSolana) {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order destination network is not solana"))
+		}
 		if !strings.EqualFold(order.PurchaseAmount.Currency, common.CoreMintSymbol) {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("coinbase order is not for the core mint"))
 		}
