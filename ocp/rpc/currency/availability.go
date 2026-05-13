@@ -17,6 +17,7 @@ import (
 
 var reservedCurrencyNames = []string{
 	common.CoreMintName,
+	common.CoreMintSymbol,
 }
 
 func (s *currencyServer) CheckAvailability(ctx context.Context, req *currencypb.CheckAvailabilityRequest) (*currencypb.CheckAvailabilityResponse, error) {
