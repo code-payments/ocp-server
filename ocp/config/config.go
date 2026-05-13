@@ -16,7 +16,7 @@ const (
 	CoreMintDecimals        = usdf.Decimals
 	CoreMintName            = "USD on Flipcash"
 	CoreMintSymbol          = "USDF"
-	CoreMintDescription     = "A currency friends use to settle up after a night out. Simple, fast, and made for shared moments."
+	CoreMintDescription     = "USDF is a fully backed digital dollar created in partnership with Coinbase. USDF can be used to buy currencies on Flipcash, or can be withdrawn to any other crypto wallet that supports the Solana blockchain. USDF can also be sold, allowing you to move your funds into a traditional bank account."
 
 	SubsidizerPublicKey = "cash11ndAmdKFEnG2wrQQ5Zqvr1kN9htxxLyoPLYFUV"
 
