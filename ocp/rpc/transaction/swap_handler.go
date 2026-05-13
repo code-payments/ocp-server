@@ -70,7 +70,7 @@ func NewReserveBuySwapHandler(
 		amount:          amount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 150_000,
+		computeUnitLimit: 120_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_v0",
 	}
@@ -258,7 +258,7 @@ func NewReserveSellSwapHandler(
 		amount:          amount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 175_000,
+		computeUnitLimit: 145_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "sell_v0",
 	}
@@ -936,7 +936,7 @@ func NewCoinbaseStableSwapperSwapHandler(
 		feeAmount:        feeAmount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 150_000,
+		computeUnitLimit: 120_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "coinbase_stable_swapper_v0",
 		feeDestination:   common.CoreMintFeesAccount,
