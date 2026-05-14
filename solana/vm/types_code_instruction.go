@@ -29,6 +29,7 @@ const (
 	CodeInstructionCancelSwap
 	CodeInstructionCloseSwapAccountIfEmpty
 	CodeInstructionTransferForSwapWithFee
+	CodeInstructionCloseDepositAccountIfEmpty
 )
 
 func putCodeInstruction(dst []byte, v CodeInstruction, offset *int) {
