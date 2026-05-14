@@ -3,6 +3,7 @@ package currency
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
+	"github.com/code-payments/ocp-server/usdc"
 )
 
 // LiveExchangeRateData represents live exchange rate data with its pre-signed response
@@ -367,6 +369,16 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 				LockDurationInDays: uint32(timelock_token.DefaultNumDaysLocked),
 			},
 			CreatedAt: timestamppb.New(time.Time{}),
+		}
+	case usdc.Mint:
+		protoMetadata = &currencypb.Mint{
+			Address:     mint.ToProto(),
+			Decimals:    uint32(usdc.Decimals),
+			Name:        usdc.Name,
+			Symbol:      usdc.Symbol,
+			Description: " ",
+			ImageUrl:    fmt.Sprintf("%s/%s/icon.png", config.CurrencyAssetsBaseUrl, usdc.Mint),
+			CreatedAt:   timestamppb.New(time.Time{}),
 		}
 	default:
 		var err error

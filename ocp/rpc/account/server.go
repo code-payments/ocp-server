@@ -23,10 +23,12 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 	account_worker "github.com/code-payments/ocp-server/ocp/worker/account"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
+	"github.com/code-payments/ocp-server/usdc"
 )
 
 var (
@@ -166,6 +168,7 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 	}
 
 	var hasGiftCardAccount bool
+	var hasPrimaryAccount bool
 	var allRecords []*common.AccountRecords
 	for _, recordsByType := range allRecordsByMintAndType {
 		for _, batchRecords := range recordsByType {
@@ -173,9 +176,23 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 				if records.General.AccountType == commonpb.AccountType_REMOTE_SEND_GIFT_CARD {
 					hasGiftCardAccount = true
 				}
+				if records.General.AccountType == commonpb.AccountType_PRIMARY {
+					hasPrimaryAccount = true
+				}
 				allRecords = append(allRecords, records)
 			}
 		}
+	}
+
+	// Owners with a PRIMARY account also expose their external USDC associated
+	// token account so clients can observe the off-L2 USDC balance.
+	if hasPrimaryAccount {
+		usdcAtaRecords, err := buildUsdcAtaRecords(owner)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure building usdc ata records")
+			return nil, status.Error(codes.Internal, "")
+		}
+		allRecords = append(allRecords, usdcAtaRecords)
 	}
 
 	// Filter account records based on client request
@@ -487,7 +504,14 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 	var liveReserveState *currencypb.VerifiedLaunchpadCurrencyReserveState
 	switch records.General.AccountType {
 	case commonpb.AccountType_SWAP, commonpb.AccountType_ASSOCIATED_TOKEN_ACCOUNT:
-		// Unused account types, which likely don't have any mint metadata ATM.
+		// Well-known mints we know we have metadata for
+		switch mintAccount.PublicKey().ToBase58() {
+		case usdc.Mint:
+			mintMetadata, err = s.mintDataProvider.GetProtoMint(ctx, mintAccount)
+			if err != nil {
+				return nil, err
+			}
+		}
 	default:
 		mintMetadata, err = s.mintDataProvider.GetProtoMint(ctx, mintAccount)
 		if err != nil {
@@ -574,6 +598,28 @@ func (s *server) addRequestingOwnerMetadata(ctx context.Context, resp *accountpb
 	}
 
 	return cloned, nil
+}
+
+func buildUsdcAtaRecords(owner *common.Account) (*common.AccountRecords, error) {
+	usdcMint, err := common.NewAccountFromPublicKeyString(usdc.Mint)
+	if err != nil {
+		return nil, err
+	}
+
+	ata, err := owner.ToAssociatedTokenAccount(usdcMint)
+	if err != nil {
+		return nil, err
+	}
+
+	return &common.AccountRecords{
+		General: &account.Record{
+			OwnerAccount:     owner.PublicKey().ToBase58(),
+			AuthorityAccount: owner.PublicKey().ToBase58(),
+			TokenAccount:     ata.PublicKey().ToBase58(),
+			MintAccount:      usdcMint.PublicKey().ToBase58(),
+			AccountType:      commonpb.AccountType_ASSOCIATED_TOKEN_ACCOUNT,
+		},
+	}, nil
 }
 
 func (s *server) updateCachedResponse(resp *accountpb.GetTokenAccountInfosResponse) {

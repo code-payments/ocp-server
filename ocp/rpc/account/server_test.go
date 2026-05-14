@@ -32,6 +32,7 @@ import (
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/testutil"
+	"github.com/code-payments/ocp-server/usdc"
 )
 
 type testEnv struct {
@@ -187,7 +188,29 @@ func TestGetTokenAccountInfos_UserAccounts_HappyPath(t *testing.T) {
 	resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 	require.NoError(t, err)
 	assert.Equal(t, accountpb.GetTokenAccountInfosResponse_OK, resp.Result)
-	assert.Len(t, resp.TokenAccountInfos, 5)
+	assert.Len(t, resp.TokenAccountInfos, 6)
+
+	usdcMint, err := common.NewAccountFromPublicKeyString(usdc.Mint)
+	require.NoError(t, err)
+	usdcAta, err := ownerAccount.ToAssociatedTokenAccount(usdcMint)
+	require.NoError(t, err)
+	usdcAtaInfo, ok := resp.TokenAccountInfos[usdcAta.PublicKey().ToBase58()]
+	require.True(t, ok)
+	assert.Equal(t, commonpb.AccountType_ASSOCIATED_TOKEN_ACCOUNT, usdcAtaInfo.AccountType)
+	assert.Equal(t, ownerAccount.PublicKey().ToBytes(), usdcAtaInfo.Owner.Value)
+	assert.Equal(t, ownerAccount.PublicKey().ToBytes(), usdcAtaInfo.Authority.Value)
+	assert.Equal(t, usdcMint.PublicKey().ToBytes(), usdcAtaInfo.Mint.Value)
+	assert.Equal(t, accountpb.TokenAccountInfo_BALANCE_SOURCE_BLOCKCHAIN, usdcAtaInfo.BalanceSource)
+	assert.Equal(t, accountpb.TokenAccountInfo_MANAGEMENT_STATE_NONE, usdcAtaInfo.ManagementState)
+	assert.Equal(t, accountpb.TokenAccountInfo_BLOCKCHAIN_STATE_UNKNOWN, usdcAtaInfo.BlockchainState)
+	require.NotNil(t, usdcAtaInfo.MintMetadata)
+	assert.Equal(t, usdcMint.PublicKey().ToBytes(), usdcAtaInfo.MintMetadata.Address.Value)
+	assert.EqualValues(t, usdc.Decimals, usdcAtaInfo.MintMetadata.Decimals)
+	assert.Equal(t, usdc.Name, usdcAtaInfo.MintMetadata.Name)
+	assert.Equal(t, usdc.Symbol, usdcAtaInfo.MintMetadata.Symbol)
+	assert.Nil(t, usdcAtaInfo.MintMetadata.VmMetadata)
+	assert.Nil(t, usdcAtaInfo.MintMetadata.LaunchpadMetadata)
+	assert.Nil(t, usdcAtaInfo.LiveReserveState)
 
 	for _, tc := range []struct {
 		authority *common.Account
@@ -606,7 +629,7 @@ func TestGetTokenAccountInfos_BlockchainState(t *testing.T) {
 		resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 		require.NoError(t, err)
 		assert.Equal(t, accountpb.GetTokenAccountInfosResponse_OK, resp.Result)
-		assert.Len(t, resp.TokenAccountInfos, 1)
+		assert.Len(t, resp.TokenAccountInfos, 2)
 
 		accountInfo, ok := resp.TokenAccountInfos[accountRecords.Timelock.VaultAddress]
 		require.True(t, ok)
@@ -674,7 +697,7 @@ func TestGetTokenAccountInfos_ManagementState(t *testing.T) {
 		resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 		require.NoError(t, err)
 		assert.Equal(t, accountpb.GetTokenAccountInfosResponse_OK, resp.Result)
-		assert.Len(t, resp.TokenAccountInfos, 1)
+		assert.Len(t, resp.TokenAccountInfos, 2)
 
 		accountInfo, ok := resp.TokenAccountInfos[accountRecords.Timelock.VaultAddress]
 		require.True(t, ok)
