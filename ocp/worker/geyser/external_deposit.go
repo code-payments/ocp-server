@@ -31,7 +31,7 @@ import (
 	"github.com/code-payments/ocp-server/solana"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
-	"github.com/code-payments/ocp-server/solana/memo"
+	"github.com/code-payments/ocp-server/solana/memov2"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
 
@@ -117,9 +117,9 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 	// Do not close the VM deposit ATA, since the real-time handler won't pick it up
 	txn := solana.NewLegacyTransaction(
 		vmConfig.Authority.PublicKey().ToBytes(),
-		memo.Instruction(codeVmDepositMemoValue),
+		memov2.Instruction(codeVmDepositMemoValue),
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(40_000),
+		compute_budget.SetComputeUnitLimit(45_000),
 		vm.NewDepositFromPdaInstruction(
 			&vm.DepositFromPdaInstructionAccounts{
 				VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
