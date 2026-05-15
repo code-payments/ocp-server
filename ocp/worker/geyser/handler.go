@@ -116,6 +116,11 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		if err != nil {
 			return errors.Wrap(err, "error depositing into the vm")
 		}
+	} else {
+		err = closeVmDepositAccount(ctx, h.data, userAuthorityAccount, mintAccount)
+		if err != nil {
+			return errors.Wrap(err, "error closing deposit account")
+		}
 	}
 
 	return nil
