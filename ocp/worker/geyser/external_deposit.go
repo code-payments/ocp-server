@@ -114,11 +114,12 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		return errors.Wrap(err, "error getting vta location in memory")
 	}
 
+	// Do not close the VM deposit ATA, since the real-time handler won't pick it up
 	txn := solana.NewLegacyTransaction(
 		vmConfig.Authority.PublicKey().ToBytes(),
 		memo.Instruction(codeVmDepositMemoValue),
-		compute_budget.SetComputeUnitPrice(1_000),
-		compute_budget.SetComputeUnitLimit(50_000),
+		compute_budget.SetComputeUnitPrice(10_000),
+		compute_budget.SetComputeUnitLimit(40_000),
 		vm.NewDepositFromPdaInstruction(
 			&vm.DepositFromPdaInstructionAccounts{
 				VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
@@ -417,6 +418,53 @@ func markDepositsAsSynced(ctx context.Context, data ocp_data.Provider, userAutho
 	err = data.UpdateAccountInfo(ctx, accountInfoRecord)
 	if err != nil {
 		return errors.Wrap(err, "error updating account info record")
+	}
+	return nil
+}
+
+func closeVmDepositAccount(ctx context.Context, data ocp_data.Provider, userAuthority, mint *common.Account) error {
+	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
+	if err != nil {
+		return errors.Wrap(err, "error getting vm config")
+	}
+
+	timelockAccounts, err := userAuthority.GetTimelockAccounts(vmConfig)
+	if err != nil {
+		return errors.Wrap(err, "error getting timelock accounts")
+	}
+
+	txn := solana.NewLegacyTransaction(
+		vmConfig.Authority.PublicKey().ToBytes(),
+		compute_budget.SetComputeUnitPrice(10_000),
+		compute_budget.SetComputeUnitLimit(25_000),
+		vm.NewCloseDepositAccountIfEmptyInstruction(
+			&vm.CloseDepositAccountIfEmptyInstructionAccounts{
+				VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
+				Vm:          vmConfig.Vm.PublicKey().ToBytes(),
+				Depositor:   timelockAccounts.VaultOwner.PublicKey().ToBytes(),
+				DepositPda:  timelockAccounts.VmDepositAccounts.Pda.PublicKey().ToBytes(),
+				DepositAta:  timelockAccounts.VmDepositAccounts.Ata.PublicKey().ToBytes(),
+				Destination: common.GetSubsidizer().PublicKey().ToBytes(),
+			},
+			&vm.CloseDepositAccountIfEmptyInstructionArgs{
+				Bump: timelockAccounts.VmDepositAccounts.PdaBump,
+			},
+		),
+	)
+
+	bh, err := data.GetBlockchainLatestBlockhash(ctx)
+	if err != nil {
+		return errors.Wrap(err, "error getting latest blockhash")
+	}
+	txn.SetBlockhash(bh)
+
+	err = txn.Sign(vmConfig.Authority.PrivateKey().ToBytes())
+	if err != nil {
+		return errors.Wrap(err, "error signing transaction")
+	}
+
+	if _, err = data.SubmitBlockchainTransaction(ctx, &txn); err != nil {
+		return errors.Wrap(err, "error submitting transaction to the blockchain")
 	}
 	return nil
 }
