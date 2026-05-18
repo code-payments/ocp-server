@@ -48,12 +48,12 @@ func GetUserAgent(ctx context.Context, name string) (*UserAgent, error) {
 	userAgentValue := matches[0][0]
 	parts := strings.Split(userAgentValue, "/")
 
-	deviceType := deviceTypeFromString(parts[1])
+	deviceType := deviceTypeFromString(parts[len(parts)-2])
 	if deviceType == DeviceTypeUnknown {
 		return nil, errors.New("unhandled client type")
 	}
 
-	version, err := ParseVersion(parts[2])
+	version, err := ParseVersion(parts[len(parts)-1])
 	if err != nil {
 		return nil, err
 	}
