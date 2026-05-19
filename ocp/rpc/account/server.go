@@ -354,6 +354,14 @@ func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.
 		if err != nil {
 			return nil, err
 		}
+
+		// Hide USDC ATA dust so clients don't get into perpetual deposit flow loops
+		if accountRecords.General.AccountType == commonpb.AccountType_ASSOCIATED_TOKEN_ACCOUNT &&
+			accountRecords.General.MintAccount == usdc.Mint &&
+			quarks < 10000 {
+			quarks = 0
+		}
+
 		var protoBalanceSource accountpb.TokenAccountInfo_BalanceSource
 		switch balanceSource {
 		case balance.BlockchainSource:
