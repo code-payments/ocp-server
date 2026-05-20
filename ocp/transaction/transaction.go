@@ -60,7 +60,7 @@ func MakeOpenAccountTransaction(
 
 	instructions := []solana.Instruction{
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(50_000),
+		compute_budget.SetComputeUnitLimit(100_000),
 		initializeInstruction,
 	}
 	return MakeNoncedTransaction(nonce, instructions...)
