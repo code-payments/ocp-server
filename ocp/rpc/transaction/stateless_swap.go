@@ -355,6 +355,11 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 	// Section: Submission
 	//
 
+	err = s.swapIntegration.OnSwapSubmitted(ctx, owner, fromMint, toMint)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to notify user of swap processing")
+	}
+
 	if initiateReq.WaitForFinalization {
 		if err := transaction_util.SubmitAndWaitForFinalization(ctx, s.data, &txn); err != nil {
 			if err == transaction_util.ErrTransactionFailed {

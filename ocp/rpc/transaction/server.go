@@ -32,6 +32,7 @@ type transactionServer struct {
 	auth *auth_util.RPCSignatureVerifier
 
 	submitIntentIntegration integration.SubmitIntent
+	swapIntegration         integration.Swap
 
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -54,6 +55,7 @@ func NewTransactionServer(
 	data ocp_data.Provider,
 	mintDataProvider *currency_util.MintDataProvider,
 	submitIntentIntegration integration.SubmitIntent,
+	swapIntegration integration.Swap,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 	coinbaseClient *coinbase.Client,
@@ -100,6 +102,7 @@ func NewTransactionServer(
 		auth: auth_util.NewRPCSignatureVerifier(log, data),
 
 		submitIntentIntegration: submitIntentIntegration,
+		swapIntegration:         swapIntegration,
 
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
