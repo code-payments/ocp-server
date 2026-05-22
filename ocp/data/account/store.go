@@ -13,6 +13,10 @@ var (
 	ErrAccountInfoNotFound = errors.New("account info not found")
 	ErrAccountInfoExists   = errors.New("account info already exists")
 	ErrInvalidAccountInfo  = errors.New("invalid account info")
+
+	ErrBalanceNotInitialized     = errors.New("account balance not initialized")
+	ErrBalanceAlreadyInitialized = errors.New("account balance already initialized")
+	ErrNegativeBalance           = errors.New("account balance cannot be negative")
 )
 
 type Store interface {
@@ -66,4 +70,35 @@ type Store interface {
 	// CountRequiringAutoReturnCheck counts the number of account info objects where
 	// RequiresAutoReturnCheck is true
 	CountRequiringAutoReturnCheck(ctx context.Context) (uint64, error)
+
+	// GetBalanceForUpdate reads the account's stored balance and takes a row-level
+	// lock on the account that is held until the surrounding transaction commits.
+	// It is the serialization point shared by every balance writer and the
+	// initializer, and must be called within a transaction.
+	//
+	// A nil balance with a nil error means the balance has not been initialized
+	// yet, in which case callers must fall back to computing it from actions and
+	// external deposits. ErrAccountInfoNotFound is returned when no account row
+	// exists.
+	GetBalanceForUpdate(ctx context.Context, tokenAccount string) (*uint64, error)
+
+	// ApplyBalanceDelta atomically adds delta, which may be negative, to the
+	// account's stored balance. The caller must hold the lock from a prior
+	// GetBalanceForUpdate within the same transaction.
+	//
+	// ErrBalanceNotInitialized is returned if the balance has not been
+	// initialized. ErrNegativeBalance is returned if the delta would drive the
+	// balance below zero.
+	ApplyBalanceDelta(ctx context.Context, tokenAccount string, delta int64) error
+
+	// InitializeBalance sets the stored balance for an account whose balance has
+	// not been initialized yet. The caller must hold the lock from a prior
+	// GetBalanceForUpdate within the same transaction.
+	//
+	// ErrBalanceAlreadyInitialized is returned if the balance is already set.
+	InitializeBalance(ctx context.Context, tokenAccount string, balance uint64) error
+
+	// GetRequiringBalanceInitialization gets account info objects whose balance
+	// has not been initialized yet (legacy pre-migration rows), up to limit.
+	GetRequiringBalanceInitialization(ctx context.Context, limit uint64) ([]*Record, error)
 }

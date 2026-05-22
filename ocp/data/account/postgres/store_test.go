@@ -1,12 +1,16 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
 
 	"github.com/ory/dockertest/v3"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/account/tests"
@@ -18,6 +22,7 @@ import (
 
 var (
 	testStore account.Store
+	testDB    *sql.DB
 	teardown  func()
 )
 
@@ -40,11 +45,14 @@ const (
 
 		requires_auto_return_check BOOL NOT NULL,
 
+		balance BIGINT,
+
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 
 		CONSTRAINT ocp__core_accountinfov2__uniq__token_account UNIQUE (token_account),
 		CONSTRAINT ocp__core_accountinfov2__uniq__authority_account__and__mint_account UNIQUE (authority_account, mint_account),
-		CONSTRAINT ocp__core_accountinfov2__uniq__owner_account__and__mint_account__and__account_type__and__index UNIQUE(owner_account, mint_account, account_type, index)
+		CONSTRAINT ocp__core_accountinfov2__uniq__owner_account__and__mint_account__and__account_type__and__index UNIQUE(owner_account, mint_account, account_type, index),
+		CONSTRAINT ocp__core_accountinfov2__check__balance_nonnegative CHECK (balance IS NULL OR balance >= 0)
 	);
 	`
 
@@ -78,6 +86,7 @@ func TestMain(m *testing.M) {
 	}
 
 	testStore = New(db)
+	testDB = db
 	teardown = func() {
 		if pc := recover(); pc != nil {
 			cleanUpFunc()
@@ -98,6 +107,26 @@ func TestMain(m *testing.M) {
 
 func TestAccountPostgresStore(t *testing.T) {
 	tests.RunTests(t, testStore, teardown)
+}
+
+func TestLegacyUninitializedBalance(t *testing.T) {
+	ctx := context.Background()
+
+	record := &account.Record{
+		OwnerAccount:     "legacy_owner",
+		AuthorityAccount: "legacy_owner",
+		TokenAccount:     "legacy_token",
+		MintAccount:      "mint",
+		AccountType:      commonpb.AccountType_PRIMARY,
+	}
+	require.NoError(t, testStore.Put(ctx, record))
+
+	// Simulate a legacy pre-migration row, created before the balance column
+	// existed, by clearing its stored balance.
+	_, err := testDB.Exec("UPDATE ocp__core_accountinfo SET balance = NULL WHERE token_account = $1", record.TokenAccount)
+	require.NoError(t, err)
+
+	tests.RunUninitializedBalanceTests(t, testStore, record.TokenAccount)
 }
 
 func createTestTables(log *zap.Logger, db *sql.DB) error {

@@ -6,6 +6,8 @@ import (
 	"github.com/pkg/errors"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
+	"github.com/code-payments/ocp-server/pointer"
 )
 
 var AllAccountTypes = []commonpb.AccountType{
@@ -31,6 +33,13 @@ type Record struct {
 
 	RequiresAutoReturnCheck bool
 
+	// Balance is the account's cached balance, denominated in quarks of its mint
+	// (MintAccount). A nil value means the balance has not been initialized yet,
+	// in which case callers must fall back to computing it from actions and
+	// external deposits. It is mutated only via the dedicated balance store
+	// methods, never through Update.
+	Balance *uint64
+
 	CreatedAt time.Time
 }
 
@@ -46,6 +55,7 @@ func (r *Record) Clone() Record {
 		RequiresDepositSync:     r.RequiresDepositSync,
 		DepositsLastSyncedAt:    r.DepositsLastSyncedAt,
 		RequiresAutoReturnCheck: r.RequiresAutoReturnCheck,
+		Balance:                 pointer.Uint64Copy(r.Balance),
 		CreatedAt:               r.CreatedAt,
 	}
 }
@@ -61,6 +71,7 @@ func (r *Record) CopyTo(dst *Record) {
 	dst.RequiresDepositSync = r.RequiresDepositSync
 	dst.DepositsLastSyncedAt = r.DepositsLastSyncedAt
 	dst.RequiresAutoReturnCheck = r.RequiresAutoReturnCheck
+	dst.Balance = pointer.Uint64Copy(r.Balance)
 	dst.CreatedAt = r.CreatedAt
 }
 

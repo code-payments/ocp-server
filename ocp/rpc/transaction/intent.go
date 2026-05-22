@@ -636,20 +636,23 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 			return err
 		}
 
-		// Save all actions
-		err = s.data.PutAllActions(ctx, actionRecords...)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failure saving action records")
-			return err
-		}
-
-		// Save additional state related to each action
+		// Save additional state related to each action. This runs before the
+		// actions are saved so records the actions depend on (e.g. account info
+		// rows for newly-opened accounts) exist by the time PutAllActions
+		// dual-writes balances.
 		for _, actionHandler := range actionHandlers {
 			err = actionHandler.OnCommitToDB(ctx)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failure executing action db commit callback handler")
 				return err
 			}
+		}
+
+		// Save all actions
+		err = s.data.PutAllActions(ctx, actionRecords...)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure saving action records")
+			return err
 		}
 
 		// Save all fulfillment records

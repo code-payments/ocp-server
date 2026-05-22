@@ -40,6 +40,13 @@ func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 		}
 	}()
 
+	go func() {
+		err := p.balanceBackfillWorker(ctx, interval)
+		if err != nil && err != context.Canceled {
+			p.log.With(zap.Error(err)).Warn("balance backfill loop terminated unexpectedly")
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

@@ -178,3 +178,32 @@ func (s *store) GetPrioritizedRequiringAutoReturnCheck(ctx context.Context, minA
 func (s *store) CountRequiringAutoReturnCheck(ctx context.Context) (uint64, error) {
 	return dbCountRequiringAutoReturnCheck(ctx, s.db)
 }
+
+// GetBalanceForUpdate implements account.Store.GetBalanceForUpdate
+func (s *store) GetBalanceForUpdate(ctx context.Context, tokenAccount string) (*uint64, error) {
+	return dbGetBalanceForUpdate(ctx, s.db, tokenAccount)
+}
+
+// ApplyBalanceDelta implements account.Store.ApplyBalanceDelta
+func (s *store) ApplyBalanceDelta(ctx context.Context, tokenAccount string, delta int64) error {
+	return dbApplyBalanceDelta(ctx, s.db, tokenAccount, delta)
+}
+
+// InitializeBalance implements account.Store.InitializeBalance
+func (s *store) InitializeBalance(ctx context.Context, tokenAccount string, balance uint64) error {
+	return dbInitializeBalance(ctx, s.db, tokenAccount, balance)
+}
+
+// GetRequiringBalanceInitialization implements account.Store.GetRequiringBalanceInitialization
+func (s *store) GetRequiringBalanceInitialization(ctx context.Context, limit uint64) ([]*account.Record, error) {
+	models, err := dbGetRequiringBalanceInitialization(ctx, s.db, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]*account.Record, len(models))
+	for i, model := range models {
+		res[i] = fromModel(model)
+	}
+	return res, nil
+}

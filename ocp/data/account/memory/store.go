@@ -9,6 +9,7 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/ocp/data/account"
+	"github.com/code-payments/ocp-server/pointer"
 )
 
 type store struct {
@@ -165,6 +166,12 @@ func (s *store) Put(_ context.Context, data *account.Record) error {
 		return err
 	}
 
+	// A newly created account has no history, so its balance is always zero.
+	// Reject any attempt to create one with a pre-existing balance.
+	if data.Balance != nil && *data.Balance != 0 {
+		return account.ErrInvalidAccountInfo
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -199,6 +206,8 @@ func (s *store) Put(_ context.Context, data *account.Record) error {
 	if data.CreatedAt.IsZero() {
 		data.CreatedAt = time.Now()
 	}
+	// A newly created account has no history; default its balance to zero.
+	data.Balance = pointer.Uint64(0)
 
 	cloned := data.Clone()
 	s.records = append(s.records, &cloned)
@@ -457,6 +466,78 @@ func (s *store) CountRequiringAutoReturnCheck(ctx context.Context) (uint64, erro
 
 	items := s.findByRequiringAutoReturnCheck(true)
 	return uint64(len(items)), nil
+}
+
+// GetBalanceForUpdate implements account.Store.GetBalanceForUpdate
+func (s *store) GetBalanceForUpdate(_ context.Context, tokenAccount string) (*uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item := s.findByTokenAddress(tokenAccount)
+	if item == nil {
+		return nil, account.ErrAccountInfoNotFound
+	}
+	return pointer.Uint64Copy(item.Balance), nil
+}
+
+// ApplyBalanceDelta implements account.Store.ApplyBalanceDelta
+func (s *store) ApplyBalanceDelta(_ context.Context, tokenAccount string, delta int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item := s.findByTokenAddress(tokenAccount)
+	if item == nil || item.Balance == nil {
+		return account.ErrBalanceNotInitialized
+	}
+
+	updated := int64(*item.Balance) + delta
+	if updated < 0 {
+		return account.ErrNegativeBalance
+	}
+
+	value := uint64(updated)
+	item.Balance = &value
+	return nil
+}
+
+// InitializeBalance implements account.Store.InitializeBalance
+func (s *store) InitializeBalance(_ context.Context, tokenAccount string, balance uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item := s.findByTokenAddress(tokenAccount)
+	if item == nil || item.Balance != nil {
+		return account.ErrBalanceAlreadyInitialized
+	}
+
+	value := balance
+	item.Balance = &value
+	return nil
+}
+
+// GetRequiringBalanceInitialization implements account.Store.GetRequiringBalanceInitialization
+func (s *store) GetRequiringBalanceInitialization(_ context.Context, limit uint64) ([]*account.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var items []*account.Record
+	for _, item := range s.records {
+		if item.Balance == nil {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return nil, account.ErrAccountInfoNotFound
+	}
+
+	sorted := ById(items)
+	sort.Sort(sorted)
+
+	res := cloneRecords(sorted)
+	if len(res) > int(limit) {
+		return res[:limit], nil
+	}
+	return res, nil
 }
 
 func cloneRecords(items []*account.Record) []*account.Record {

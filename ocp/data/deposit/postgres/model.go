@@ -64,31 +64,33 @@ func fromModel(obj *model) *deposit.Record {
 }
 
 func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
-	query := `INSERT INTO ` + tableName + `
-		(signature, destination, amount, slot, confirmation_state, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		query := `INSERT INTO ` + tableName + `
+			(signature, destination, amount, slot, confirmation_state, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
 
-		ON CONFLICT(signature, destination)
-		DO UPDATE
-			SET slot = $4, confirmation_state = $5
-			WHERE ` + tableName + `.signature = $1 AND ` + tableName + `.destination = $2
+			ON CONFLICT(signature, destination)
+			DO UPDATE
+				SET slot = $4, confirmation_state = $5
+				WHERE ` + tableName + `.signature = $1 AND ` + tableName + `.destination = $2
 
-		RETURNING id, signature, destination, amount, slot, confirmation_state, created_at`
+			RETURNING id, signature, destination, amount, slot, confirmation_state, created_at`
 
-	if m.CreatedAt.IsZero() {
-		m.CreatedAt = time.Now()
-	}
+		if m.CreatedAt.IsZero() {
+			m.CreatedAt = time.Now()
+		}
 
-	return db.QueryRowxContext(
-		ctx,
-		query,
-		m.Signature,
-		m.Destination,
-		m.Amount,
-		m.Slot,
-		m.ConfirmationState,
-		m.CreatedAt,
-	).StructScan(m)
+		return tx.QueryRowxContext(
+			ctx,
+			query,
+			m.Signature,
+			m.Destination,
+			m.Amount,
+			m.Slot,
+			m.ConfirmationState,
+			m.CreatedAt,
+		).StructScan(m)
+	})
 }
 
 func dbGet(ctx context.Context, db *sqlx.DB, signature, account string) (*model, error) {
@@ -113,7 +115,7 @@ func dbGetQuarkAmount(ctx context.Context, db *sqlx.DB, account string) (uint64,
 	`
 
 	err := pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
-		return db.GetContext(ctx, &res, query, account, transaction.ConfirmationFinalized)
+		return tx.GetContext(ctx, &res, query, account, transaction.ConfirmationFinalized)
 	})
 	if err != nil {
 		return 0, err

@@ -104,6 +104,11 @@ func ExecuteInTx(ctx context.Context, db *sqlx.DB, isolation sql.IsolationLevel,
 	return nil
 }
 
+// IsInTx reports whether ctx carries a transaction opened by ExecuteTxWithinCtx.
+func IsInTx(ctx context.Context) bool {
+	return ctx.Value(txStructContextKey) != nil
+}
+
 func getTxFromCtx(ctx context.Context, desiredIsolation sql.IsolationLevel) (*sqlx.Tx, error) {
 	txFromCtx := ctx.Value(txStructContextKey)
 	if txFromCtx == nil {

@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/ocp/data/account"
+	"github.com/code-payments/ocp-server/pointer"
 )
 
 func RunTests(t *testing.T, s account.Store, teardown func()) {
@@ -26,6 +28,9 @@ func RunTests(t *testing.T, s account.Store, teardown func()) {
 		testGetByMintAndType,
 		testDepositSyncMethods,
 		testAutoReturnCheckMethods,
+		testBalanceLifecycle,
+		testBalanceConcurrentDeltas,
+		testBalanceInsertGuard,
 	} {
 		tf(t, s)
 		teardown()
@@ -705,6 +710,196 @@ func testAutoReturnCheckMethods(t *testing.T, s account.Store) {
 			assertEquivalentRecords(t, records[6-i], actual)
 		}
 	})
+}
+
+func testBalanceLifecycle(t *testing.T, s account.Store) {
+	t.Run("testBalanceLifecycle", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Balance operations on an account that doesn't exist.
+		_, err := s.GetBalanceForUpdate(ctx, "token")
+		assert.Equal(t, account.ErrAccountInfoNotFound, err)
+
+		record := &account.Record{
+			OwnerAccount:     "owner",
+			AuthorityAccount: "owner",
+			TokenAccount:     "token",
+			MintAccount:      "mint",
+			AccountType:      commonpb.AccountType_PRIMARY,
+		}
+		require.NoError(t, s.Put(ctx, record))
+
+		// A newly created account starts with an initialized zero balance.
+		balance, err := s.GetBalanceForUpdate(ctx, "token")
+		require.NoError(t, err)
+		require.NotNil(t, balance)
+		assert.EqualValues(t, 0, *balance)
+
+		// It is already initialized, so it cannot be initialized again.
+		assert.Equal(t, account.ErrBalanceAlreadyInitialized, s.InitializeBalance(ctx, "token", 500))
+
+		// Positive and negative deltas are applied atomically.
+		require.NoError(t, s.ApplyBalanceDelta(ctx, "token", 500))
+		require.NoError(t, s.ApplyBalanceDelta(ctx, "token", 250))
+		require.NoError(t, s.ApplyBalanceDelta(ctx, "token", -300))
+
+		balance, err = s.GetBalanceForUpdate(ctx, "token")
+		require.NoError(t, err)
+		require.NotNil(t, balance)
+		assert.EqualValues(t, 450, *balance)
+
+		// A delta that would drive the balance below zero is rejected, and the
+		// balance is left unchanged.
+		assert.Equal(t, account.ErrNegativeBalance, s.ApplyBalanceDelta(ctx, "token", -451))
+
+		balance, err = s.GetBalanceForUpdate(ctx, "token")
+		require.NoError(t, err)
+		require.NotNil(t, balance)
+		assert.EqualValues(t, 450, *balance)
+
+		// A delta bringing the balance to exactly zero is allowed.
+		require.NoError(t, s.ApplyBalanceDelta(ctx, "token", -450))
+
+		// The stored balance is visible through the regular getter.
+		actual, err := s.GetByTokenAddress(ctx, "token")
+		require.NoError(t, err)
+		require.NotNil(t, actual.Balance)
+		assert.EqualValues(t, 0, *actual.Balance)
+
+		// Per the store contract a caller checks GetBalanceForUpdate first, so
+		// these are unreachable in practice, but a missing account still
+		// resolves to the same 0-row result as an un/already-initialized one.
+		assert.Equal(t, account.ErrBalanceNotInitialized, s.ApplyBalanceDelta(ctx, "missing", 1))
+		assert.Equal(t, account.ErrBalanceAlreadyInitialized, s.InitializeBalance(ctx, "missing", 1))
+	})
+}
+
+func testBalanceConcurrentDeltas(t *testing.T, s account.Store) {
+	t.Run("testBalanceConcurrentDeltas", func(t *testing.T) {
+		ctx := context.Background()
+
+		record := &account.Record{
+			OwnerAccount:     "owner",
+			AuthorityAccount: "owner",
+			TokenAccount:     "token",
+			MintAccount:      "mint",
+			AccountType:      commonpb.AccountType_PRIMARY,
+		}
+		require.NoError(t, s.Put(ctx, record))
+
+		// The account starts at a zero balance. Concurrent deltas must not lose
+		// updates: each is serialized by the account's row lock (postgres) or
+		// the store mutex (memory).
+		const workers = 20
+		const perWorker = 25
+
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for i := 0; i < workers; i++ {
+			go func() {
+				defer wg.Done()
+				for j := 0; j < perWorker; j++ {
+					assert.NoError(t, s.ApplyBalanceDelta(ctx, "token", 1))
+				}
+			}()
+		}
+		wg.Wait()
+
+		balance, err := s.GetBalanceForUpdate(ctx, "token")
+		require.NoError(t, err)
+		require.NotNil(t, balance)
+		assert.EqualValues(t, workers*perWorker, *balance)
+	})
+}
+
+func testBalanceInsertGuard(t *testing.T, s account.Store) {
+	t.Run("testBalanceInsertGuard", func(t *testing.T) {
+		ctx := context.Background()
+
+		// A new account cannot be created with a pre-existing non-zero balance.
+		nonZero := &account.Record{
+			OwnerAccount:     "owner_nonzero",
+			AuthorityAccount: "owner_nonzero",
+			TokenAccount:     "token_nonzero",
+			MintAccount:      "mint",
+			AccountType:      commonpb.AccountType_PRIMARY,
+			Balance:          pointer.Uint64(100),
+		}
+		assert.Equal(t, account.ErrInvalidAccountInfo, s.Put(ctx, nonZero))
+
+		_, err := s.GetByTokenAddress(ctx, "token_nonzero")
+		assert.Equal(t, account.ErrAccountInfoNotFound, err)
+
+		// An explicit zero balance on insert is allowed.
+		zero := &account.Record{
+			OwnerAccount:     "owner_zero",
+			AuthorityAccount: "owner_zero",
+			TokenAccount:     "token_zero",
+			MintAccount:      "mint",
+			AccountType:      commonpb.AccountType_PRIMARY,
+			Balance:          pointer.Uint64(0),
+		}
+		require.NoError(t, s.Put(ctx, zero))
+
+		actual, err := s.GetByTokenAddress(ctx, "token_zero")
+		require.NoError(t, err)
+		require.NotNil(t, actual.Balance)
+		assert.EqualValues(t, 0, *actual.Balance)
+
+		// An unset balance on insert is defaulted to zero — a new account has
+		// no history.
+		unset := &account.Record{
+			OwnerAccount:     "owner_unset",
+			AuthorityAccount: "owner_unset",
+			TokenAccount:     "token_unset",
+			MintAccount:      "mint",
+			AccountType:      commonpb.AccountType_PRIMARY,
+		}
+		require.NoError(t, s.Put(ctx, unset))
+		require.NotNil(t, unset.Balance)
+		assert.EqualValues(t, 0, *unset.Balance)
+
+		actual, err = s.GetByTokenAddress(ctx, "token_unset")
+		require.NoError(t, err)
+		require.NotNil(t, actual.Balance)
+		assert.EqualValues(t, 0, *actual.Balance)
+	})
+}
+
+// RunUninitializedBalanceTests verifies the balance methods against an account
+// whose stored balance is NULL — a legacy, pre-migration row. The Store no
+// longer produces that state (new accounts are created with a zero balance),
+// so the caller must clear tokenAccount's balance by implementation-specific
+// means before calling this.
+func RunUninitializedBalanceTests(t *testing.T, s account.Store, tokenAccount string) {
+	ctx := context.Background()
+
+	// An uninitialized balance reads back as nil.
+	balance, err := s.GetBalanceForUpdate(ctx, tokenAccount)
+	require.NoError(t, err)
+	assert.Nil(t, balance)
+
+	// A delta cannot be applied before the balance is initialized.
+	assert.Equal(t, account.ErrBalanceNotInitialized, s.ApplyBalanceDelta(ctx, tokenAccount, 100))
+
+	// Initialize the balance.
+	require.NoError(t, s.InitializeBalance(ctx, tokenAccount, 777))
+
+	balance, err = s.GetBalanceForUpdate(ctx, tokenAccount)
+	require.NoError(t, err)
+	require.NotNil(t, balance)
+	assert.EqualValues(t, 777, *balance)
+
+	// The balance cannot be initialized twice.
+	assert.Equal(t, account.ErrBalanceAlreadyInitialized, s.InitializeBalance(ctx, tokenAccount, 999))
+
+	// Once initialized, deltas apply normally.
+	require.NoError(t, s.ApplyBalanceDelta(ctx, tokenAccount, -77))
+
+	balance, err = s.GetBalanceForUpdate(ctx, tokenAccount)
+	require.NoError(t, err)
+	require.NotNil(t, balance)
+	assert.EqualValues(t, 700, *balance)
 }
 
 func assertEquivalentRecords(t *testing.T, obj1, obj2 *account.Record) {

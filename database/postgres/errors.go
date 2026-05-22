@@ -48,3 +48,18 @@ func IsUniqueViolation(err error) bool {
 
 	return false
 }
+
+func IsCheckViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == pgerrcode.CheckViolation {
+			return true
+		}
+	}
+
+	return false
+}

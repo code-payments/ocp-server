@@ -3,7 +3,9 @@ package data
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -106,6 +108,10 @@ type DatabaseData interface {
 	GetPrioritizedAccountInfosRequiringAutoReturnCheck(ctx context.Context, maxAge time.Duration, limit uint64) ([]*account.Record, error)
 	GetAccountInfoCountRequiringDepositSync(ctx context.Context) (uint64, error)
 	GetAccountInfoCountRequiringAutoReturnCheck(ctx context.Context) (uint64, error)
+	GetAccountBalanceForUpdate(ctx context.Context, tokenAccount string) (*uint64, error)
+	ApplyAccountBalanceDelta(ctx context.Context, tokenAccount string, delta int64) error
+	InitializeAccountBalance(ctx context.Context, tokenAccount string, balance uint64) error
+	GetAccountInfosRequiringBalanceInitialization(ctx context.Context, limit uint64) ([]*account.Record, error)
 
 	// Actions
 	// --------------------------------------------------------------------------------
@@ -424,14 +430,148 @@ func (dp *DatabaseProvider) GetAccountInfoCountRequiringDepositSync(ctx context.
 func (dp *DatabaseProvider) GetAccountInfoCountRequiringAutoReturnCheck(ctx context.Context) (uint64, error) {
 	return dp.accounts.CountRequiringAutoReturnCheck(ctx)
 }
+func (dp *DatabaseProvider) GetAccountBalanceForUpdate(ctx context.Context, tokenAccount string) (*uint64, error) {
+	return dp.accounts.GetBalanceForUpdate(ctx, tokenAccount)
+}
+func (dp *DatabaseProvider) ApplyAccountBalanceDelta(ctx context.Context, tokenAccount string, delta int64) error {
+	return dp.accounts.ApplyBalanceDelta(ctx, tokenAccount, delta)
+}
+func (dp *DatabaseProvider) InitializeAccountBalance(ctx context.Context, tokenAccount string, balance uint64) error {
+	return dp.accounts.InitializeBalance(ctx, tokenAccount, balance)
+}
+func (dp *DatabaseProvider) GetAccountInfosRequiringBalanceInitialization(ctx context.Context, limit uint64) ([]*account.Record, error) {
+	return dp.accounts.GetRequiringBalanceInitialization(ctx, limit)
+}
 
 // Actions
 // --------------------------------------------------------------------------------
-func (dp *DatabaseProvider) PutAllActions(ctx context.Context, records ...*action.Record) error {
-	return dp.actions.PutAll(ctx, records...)
+
+// actionBalanceContribution returns the quark amount an action contributes to a
+// balance: a non-revoked action with a quantity credits its destination and
+// debits its source by this amount.
+func actionBalanceContribution(record *action.Record) uint64 {
+	if record.State == action.StateRevoked || record.Quantity == nil {
+		return 0
+	}
+	return *record.Quantity
 }
+
+// applyAccountBalanceDeltas applies per-account balance deltas within the
+// caller's transaction, locking accounts in sorted order to avoid deadlocks
+// between concurrent callers.
+//
+// An account in mustHaveRow without an account info row is a programming error
+// (its row must be created before the actions that reference it) and returns an
+// error. Any other account without a row is an external account with no stored
+// balance to maintain, and is skipped. A row that exists but is not yet
+// initialized (a legacy pre-migration row) is also skipped; the initialization
+// sweep computes its balance from full history.
+func (dp *DatabaseProvider) applyAccountBalanceDeltas(ctx context.Context, deltas map[string]int64, mustHaveRow map[string]bool) error {
+	tokenAccounts := make([]string, 0, len(deltas))
+	for tokenAccount := range deltas {
+		tokenAccounts = append(tokenAccounts, tokenAccount)
+	}
+	sort.Strings(tokenAccounts)
+
+	for _, tokenAccount := range tokenAccounts {
+		delta := deltas[tokenAccount]
+		if delta == 0 {
+			continue
+		}
+
+		balance, err := dp.GetAccountBalanceForUpdate(ctx, tokenAccount)
+		if err == account.ErrAccountInfoNotFound {
+			if mustHaveRow[tokenAccount] {
+				return fmt.Errorf("account info row missing for %s; account records must be created before their actions", tokenAccount)
+			}
+			continue
+		} else if err != nil {
+			return err
+		}
+		if balance == nil {
+			continue
+		}
+
+		if err := dp.ApplyAccountBalanceDelta(ctx, tokenAccount, delta); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireTx returns an error when a postgres-backed provider is used outside a
+// caller-opened transaction. The memory-backed provider has no transactions, so
+// the check is skipped there.
+func (dp *DatabaseProvider) requireTx(ctx context.Context) error {
+	if dp.db != nil && !pg.IsInTx(ctx) {
+		return errors.New("must be called within a transaction")
+	}
+	return nil
+}
+
+func (dp *DatabaseProvider) PutAllActions(ctx context.Context, records ...*action.Record) error {
+	if err := dp.requireTx(ctx); err != nil {
+		return err
+	}
+
+	deltas := make(map[string]int64)
+	mustHaveRow := make(map[string]bool)
+	for _, record := range records {
+		// An action's source is always a Code-managed account, so its row
+		// must already exist when the actions are saved.
+		mustHaveRow[record.Source] = true
+
+		contribution := int64(actionBalanceContribution(record))
+		if contribution == 0 {
+			continue
+		}
+		deltas[record.Source] -= contribution
+		if record.Destination != nil {
+			deltas[*record.Destination] += contribution
+		}
+	}
+
+	if err := dp.actions.PutAll(ctx, records...); err != nil {
+		return err
+	}
+	return dp.applyAccountBalanceDeltas(ctx, deltas, mustHaveRow)
+}
+
 func (dp *DatabaseProvider) UpdateAction(ctx context.Context, record *action.Record) error {
-	return dp.actions.Update(ctx, record)
+	if err := dp.requireTx(ctx); err != nil {
+		return err
+	}
+
+	// Read the pre-image to diff the action's balance contribution. Source and
+	// destination are immutable after creation, so only the contribution (state
+	// and quantity) can change.
+	previous, err := dp.actions.GetById(ctx, record.Intent, record.ActionId)
+	if err != nil {
+		return err
+	}
+	// The diff is only correct if previous is the state this update applies on
+	// top of. Update's CAS already enforces this (it commits only when the
+	// persisted version equals record.Version), but assert it explicitly so the
+	// precondition is stated and a stale update fails fast.
+	if previous.Version != record.Version {
+		return action.ErrStaleVersion
+	}
+
+	diff := int64(actionBalanceContribution(record)) - int64(actionBalanceContribution(previous))
+
+	if err := dp.actions.Update(ctx, record); err != nil {
+		return err
+	}
+
+	if diff == 0 {
+		return nil
+	}
+
+	deltas := map[string]int64{record.Source: -diff}
+	if record.Destination != nil {
+		deltas[*record.Destination] += diff
+	}
+	return dp.applyAccountBalanceDeltas(ctx, deltas, map[string]bool{record.Source: true})
 }
 func (dp *DatabaseProvider) GetActionById(ctx context.Context, intent string, actionId uint32) (*action.Record, error) {
 	return dp.actions.GetById(ctx, intent, actionId)
@@ -617,8 +757,53 @@ func (dp *DatabaseProvider) GetAllLiveCurrencyHolderCounts(ctx context.Context) 
 
 // Deposits
 // --------------------------------------------------------------------------------
+
+// depositBalanceContribution returns the quark amount an external deposit
+// contributes to its destination's balance: only finalized deposits count.
+func depositBalanceContribution(record *deposit.Record) uint64 {
+	if record.ConfirmationState != transaction.ConfirmationFinalized {
+		return 0
+	}
+	return record.Amount
+}
+
 func (dp *DatabaseProvider) SaveExternalDeposit(ctx context.Context, record *deposit.Record) error {
-	return dp.deposits.Save(ctx, record)
+	if record.ConfirmationState != transaction.ConfirmationFinalized {
+		return errors.New("external deposit record transaction state must be finalized")
+	}
+
+	if err := dp.requireTx(ctx); err != nil {
+		return err
+	}
+
+	// Lock the destination's balance row before reading the deposit pre-image.
+	// This serializes concurrent saves of the same deposit: the later one sees
+	// the earlier's committed row and computes a zero delta, so the deposit's
+	// amount is applied exactly once. External deposits are only recorded for
+	// internally-tracked accounts, so a missing row is an error.
+	balance, err := dp.GetAccountBalanceForUpdate(ctx, record.Destination)
+	if err != nil {
+		return err
+	}
+
+	// Read the pre-image to diff the deposit's balance contribution.
+	var previousContribution uint64
+	previous, err := dp.deposits.Get(ctx, record.Signature, record.Destination)
+	if err == nil {
+		previousContribution = depositBalanceContribution(previous)
+	} else if err != deposit.ErrDepositNotFound {
+		return err
+	}
+
+	if err := dp.deposits.Save(ctx, record); err != nil {
+		return err
+	}
+
+	diff := int64(depositBalanceContribution(record)) - int64(previousContribution)
+	if balance == nil {
+		return nil
+	}
+	return dp.ApplyAccountBalanceDelta(ctx, record.Destination, diff)
 }
 func (dp *DatabaseProvider) GetExternalDeposit(ctx context.Context, signature, account string) (*deposit.Record, error) {
 	return dp.deposits.Get(ctx, signature, account)
