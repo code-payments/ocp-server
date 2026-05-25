@@ -152,7 +152,7 @@ func CalculateFromBlockchain(ctx context.Context, data ocp_data.Provider, tokenA
 	}
 
 	// todo: we may need something that's more resistant to RPC nodes with stale account state
-	quarks, slot, err := data.GetBlockchainBalance(ctx, tokenAccount.PublicKey().ToBase58())
+	quarks, slot, err := data.GetBlockchainBalance(ctx, tokenAccount.PublicKey().ToBase58(), solana.CommitmentConfirmed)
 	if err == solana.ErrNoBalance {
 		// We can't tell whether
 		//  1. RPC node is behind, and observed a state before the account existed
