@@ -189,7 +189,7 @@ type Client interface {
 	GetSignatureStatuses([]Signature) ([]*SignatureStatus, error)
 	GetSignaturesForAddress(owner ed25519.PublicKey, commitment Commitment, limit uint64, before, until string) ([]*TransactionSignature, error)
 	GetSlot(Commitment) (uint64, error)
-	GetTokenAccountBalance(ed25519.PublicKey) (uint64, uint64, error)
+	GetTokenAccountBalance(ed25519.PublicKey, Commitment) (uint64, uint64, error)
 	GetTokenAccountsByOwner(owner, mint ed25519.PublicKey) ([]ed25519.PublicKey, error)
 	GetTransaction(Signature, Commitment) (ConfirmedTransaction, error)
 	GetTransactionTokenBalances(Signature) (TransactionTokenBalances, error)
@@ -657,14 +657,14 @@ func (c *client) GetBalance(account ed25519.PublicKey) (uint64, error) {
 	return 0, errors.Errorf("invalid value in response")
 }
 
-func (c *client) GetTokenAccountBalance(account ed25519.PublicKey) (uint64, uint64, error) {
+func (c *client) GetTokenAccountBalance(account ed25519.PublicKey, commitment Commitment) (uint64, uint64, error) {
 	var resp struct {
 		Context struct {
 			Slot int64 `json:"slot"`
 		} `json:"context"`
 		Value TokenAmount `json:"value"`
 	}
-	if err := c.call(&resp, "getTokenAccountBalance", base58.Encode(account[:]), CommitmentFinalized); err != nil {
+	if err := c.call(&resp, "getTokenAccountBalance", base58.Encode(account[:]), commitment); err != nil {
 		jsonRPCErr, ok := err.(*jsonrpc.RPCError)
 		if !ok {
 			return 0, 0, errors.Wrapf(err, "getTokenAccountBalance() failed to send request")

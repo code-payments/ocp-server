@@ -197,10 +197,10 @@ func (c *clientWithFallback) GetSlot(commitment Commitment) (uint64, error) {
 	)
 }
 
-func (c *clientWithFallback) GetTokenAccountBalance(account ed25519.PublicKey) (uint64, uint64, error) {
+func (c *clientWithFallback) GetTokenAccountBalance(account ed25519.PublicKey, commitment Commitment) (uint64, uint64, error) {
 	return withFallback2(
-		func() (uint64, uint64, error) { return c.primary.GetTokenAccountBalance(account) },
-		func() (uint64, uint64, error) { return c.fallback.GetTokenAccountBalance(account) },
+		func() (uint64, uint64, error) { return c.primary.GetTokenAccountBalance(account, commitment) },
+		func() (uint64, uint64, error) { return c.fallback.GetTokenAccountBalance(account, commitment) },
 	)
 }
 

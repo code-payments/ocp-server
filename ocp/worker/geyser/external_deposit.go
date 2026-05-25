@@ -80,7 +80,7 @@ func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provi
 		return errors.Wrap(err, "error getting vm deposit ata")
 	}
 
-	balance, _, err := data.GetBlockchainBalance(ctx, vmDepositAccounts.Ata.PublicKey().ToBase58())
+	balance, _, err := data.GetBlockchainBalance(ctx, vmDepositAccounts.Ata.PublicKey().ToBase58(), solana.CommitmentFinalized)
 	if err == solana.ErrNoBalance {
 		return nil
 	} else if err != nil {

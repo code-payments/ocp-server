@@ -22,7 +22,7 @@ type BlockchainData interface {
 
 	GetBlockchainAccountInfo(ctx context.Context, account string, commitment solana.Commitment) (*solana.AccountInfo, uint64, error)
 	GetBlockchainAccountDataAfterBlock(ctx context.Context, account string, slot uint64) ([]byte, uint64, error)
-	GetBlockchainBalance(ctx context.Context, account string) (uint64, uint64, error)
+	GetBlockchainBalance(ctx context.Context, account string, commitment solana.Commitment) (uint64, uint64, error)
 	GetBlockchainBlock(ctx context.Context, slot uint64) (*solana.Block, error)
 	GetBlockchainBlockSignatures(ctx context.Context, slot uint64) ([]string, error)
 	GetBlockchainBlocksWithLimit(ctx context.Context, start uint64, limit uint64) ([]uint64, error)
@@ -282,7 +282,7 @@ func (dp *BlockchainProvider) GetBlockchainMinimumBalanceForRentExemption(ctx co
 	return res, err
 }
 
-func (dp *BlockchainProvider) GetBlockchainBalance(ctx context.Context, account string) (uint64, uint64, error) {
+func (dp *BlockchainProvider) GetBlockchainBalance(ctx context.Context, account string, commitment solana.Commitment) (uint64, uint64, error) {
 	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainBalance")
 	defer tracer.End()
 
@@ -291,7 +291,7 @@ func (dp *BlockchainProvider) GetBlockchainBalance(ctx context.Context, account 
 		return 0, 0, err
 	}
 
-	quarks, slot, err := dp.sc.GetTokenAccountBalance(accountId)
+	quarks, slot, err := dp.sc.GetTokenAccountBalance(accountId, commitment)
 
 	if err != nil {
 		tracer.OnError(err)

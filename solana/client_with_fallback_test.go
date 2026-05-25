@@ -115,7 +115,7 @@ func (m *mockClient) GetSignaturesForAddress(ed25519.PublicKey, Commitment, uint
 	m.callCount++
 	return nil, nil
 }
-func (m *mockClient) GetTokenAccountBalance(ed25519.PublicKey) (uint64, uint64, error) {
+func (m *mockClient) GetTokenAccountBalance(ed25519.PublicKey, Commitment) (uint64, uint64, error) {
 	m.callCount++
 	return 0, 0, nil
 }

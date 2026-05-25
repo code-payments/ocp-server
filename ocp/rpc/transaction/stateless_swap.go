@@ -14,6 +14,7 @@ import (
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/grpc/client"
+	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
@@ -159,17 +160,12 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		return handleStatelessSwapError(streamer, err)
 	}
 
-	ownerFromMintAtaInfo, err := s.data.GetBlockchainTokenAccountInfo(
-		ctx,
-		ownerFromMintAta.PublicKey().ToBase58(),
-		fromMint.PublicKey().ToBase58(),
-		solana.CommitmentConfirmed,
-	)
+	ownerFromMintAtaBalance, _, err := balance.CalculateFromBlockchain(ctx, s.data, ownerFromMintAta)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting owner from_mint ata info")
 		return handleStatelessSwapError(streamer, NewSwapValidationError("source ata not found or invalid"))
 	}
-	if ownerFromMintAtaInfo.Amount < initiateStablecoinSwapReq.SwapAmount {
+	if ownerFromMintAtaBalance < initiateStablecoinSwapReq.SwapAmount {
 		return handleStatelessSwapError(streamer, NewSwapValidationError("insufficient balance"))
 	}
 
