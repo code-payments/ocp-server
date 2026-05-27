@@ -25,6 +25,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
@@ -68,6 +69,12 @@ type CreateIntentHandler interface {
 
 	// AllowCreation determines whether the new intent creation should be allowed.
 	AllowCreation(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata, actions []*transactionpb.Action) error
+
+	// OnPreSaveToDB is a callback that runs inside the intent DB transaction
+	// before the intent record itself is saved. Use this to persist supporting
+	// records (eg. a synthetic precursor intent) that must exist before the
+	// primary intent record.
+	OnPreSaveToDB(ctx context.Context) error
 
 	// OnCommitToDB is a callback when the intent is being committed to the DB
 	// within the scope of a DB transaction. Additional supporting DB records
@@ -354,6 +361,10 @@ func (h *OpenAccountsIntentHandler) validateActions(
 	return nil
 }
 
+func (h *OpenAccountsIntentHandler) OnPreSaveToDB(ctx context.Context) error {
+	return nil
+}
+
 func (h *OpenAccountsIntentHandler) OnCommitToDB(ctx context.Context) error {
 	return nil
 }
@@ -367,6 +378,11 @@ type SendPublicPaymentIntentHandler struct {
 
 	cachedDestinationAccountInfoRecord *account.Record
 	cachedSwapRecord                   *swap.Record
+
+	// Populated when the payment will auto-open a primary account for the
+	// recipient on the intent's mint as a precursor synthetic OpenAccounts
+	// intent.
+	cachedAutoOpenPrimary *autoOpenPrimaryAccount
 }
 
 func NewSendPublicPaymentIntentHandler(
@@ -447,6 +463,24 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 
 	if destinationAccountInfo != nil {
 		intentRecord.SendPublicPaymentMetadata.DestinationOwnerAccount = destinationAccountInfo.OwnerAccount
+	} else if !typedProtoMetadata.IsWithdrawal && !typedProtoMetadata.IsRemoteSend && typedProtoMetadata.DestinationOwner != nil {
+		// Direct primary-to-primary payment where the destination doesn't have
+		// a primary account for the intent's mint yet. If the destination owner
+		// is an existing OCP user, we'll synthesize an OpenAccounts intent for
+		// them before the payment intent is saved.
+		destinationOwner, err := common.NewAccountFromProto(typedProtoMetadata.DestinationOwner)
+		if err != nil {
+			return err
+		}
+
+		autoOpen, err := detectAutoOpenPrimaryAccount(ctx, h.data, destinationOwner, destination, mint)
+		if err != nil {
+			return err
+		}
+		if autoOpen != nil {
+			h.cachedAutoOpenPrimary = autoOpen
+			intentRecord.SendPublicPaymentMetadata.DestinationOwnerAccount = destinationOwner.PublicKey().ToBase58()
+		}
 	} else if typedProtoMetadata.IsWithdrawal && typedProtoMetadata.DestinationOwner != nil {
 		destinationOwner, err := common.NewAccountFromProto(typedProtoMetadata.DestinationOwner)
 		if err != nil {
@@ -772,6 +806,17 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 				return nil
 			}
 
+			// Direct primary-to-primary payment where the recipient doesn't yet have a
+			// primary on the intent mint. The server will synthesize an OpenAccounts
+			// intent for them before saving this payment, so the destination is treated
+			// as a valid destination.
+			if h.cachedAutoOpenPrimary != nil {
+				if simResult.HasAnyFeePayments() {
+					return NewIntentValidationError("fee payment not required for auto-opened primary destination")
+				}
+				return nil
+			}
+
 			// All payments to external destinations must be withdraws
 			if !metadata.IsWithdrawal {
 				return NewIntentValidationError("payments to external destinations must be withdrawals")
@@ -946,6 +991,10 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	}
 
 	return nil
+}
+
+func (h *SendPublicPaymentIntentHandler) OnPreSaveToDB(ctx context.Context) error {
+	return saveAutoOpenPrimaryAccountIntent(ctx, h.data, h.cachedAutoOpenPrimary)
 }
 
 func (h *SendPublicPaymentIntentHandler) OnCommitToDB(ctx context.Context) error {
@@ -1280,6 +1329,10 @@ func (h *ReceivePaymentsPubliclyIntentHandler) validateActions(
 	//
 
 	return validateMoneyMovementActionUserAccounts(ctx, h.data, intent.ReceivePaymentsPublicly, initiatorAccountsByVault, actions)
+}
+
+func (h *ReceivePaymentsPubliclyIntentHandler) OnPreSaveToDB(ctx context.Context) error {
+	return nil
 }
 
 func (h *ReceivePaymentsPubliclyIntentHandler) OnCommitToDB(ctx context.Context) error {
@@ -1624,6 +1677,10 @@ func (h *PublicDistributionIntentHandler) validateActions(
 	return nil
 }
 
+func (h *PublicDistributionIntentHandler) OnPreSaveToDB(ctx context.Context) error {
+	return nil
+}
+
 func (h *PublicDistributionIntentHandler) OnCommitToDB(ctx context.Context) error {
 	return nil
 }
@@ -1800,6 +1857,142 @@ func validateGiftCardAccountOpened(
 	}
 
 	return nil
+}
+
+// autoOpenPrimaryAccount holds the records that a synthetic OpenAccounts
+// intent will persist on behalf of an OCP user who doesn't yet have a primary
+// account for a given mint. Built by detectAutoOpenPrimaryAccount and consumed
+// by saveAutoOpenPrimaryAccountIntent.
+type autoOpenPrimaryAccount struct {
+	owner       *common.Account
+	vault       *common.Account
+	accountInfo *account.Record
+	timelock    *timelock.Record
+}
+
+// detectAutoOpenPrimaryAccount checks whether the server should synthesize an
+// OpenAccounts intent to create a primary account for destinationOwner on the
+// given mint. Returns nil if the destination is not eligible for auto-open.
+//
+// Eligibility:
+//   - destinationOwner must already be a recognized OCP user (12-words owner).
+//   - destinationVault must equal the derived primary timelock vault for
+//     (destinationOwner, mint).
+//   - No account_info row exists at the derived vault.
+func detectAutoOpenPrimaryAccount(
+	ctx context.Context,
+	data ocp_data.Provider,
+	destinationOwner *common.Account,
+	destinationVault *common.Account,
+	mint *common.Account,
+) (*autoOpenPrimaryAccount, error) {
+	ownerMetadata, err := common.GetOwnerMetadata(ctx, data, destinationOwner)
+	if err == common.ErrOwnerNotFound {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if ownerMetadata.Type != common.OwnerTypeUser12Words {
+		return nil, nil
+	}
+
+	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
+	if err != nil {
+		return nil, err
+	}
+	timelockAccounts, err := destinationOwner.GetTimelockAccounts(vmConfig)
+	if err != nil {
+		return nil, err
+	}
+	if timelockAccounts.Vault.PublicKey().ToBase58() != destinationVault.PublicKey().ToBase58() {
+		return nil, nil
+	}
+
+	// Safety guard: vault derivation is deterministic, so any existing
+	// account_info at the derived vault means the primary already exists.
+	_, err = data.GetAccountInfoByTokenAddress(ctx, timelockAccounts.Vault.PublicKey().ToBase58())
+	if err == nil {
+		return nil, nil
+	} else if err != account.ErrAccountInfoNotFound {
+		return nil, err
+	}
+
+	return &autoOpenPrimaryAccount{
+		owner: destinationOwner,
+		vault: timelockAccounts.Vault,
+		accountInfo: &account.Record{
+			OwnerAccount:         destinationOwner.PublicKey().ToBase58(),
+			AuthorityAccount:     destinationOwner.PublicKey().ToBase58(),
+			TokenAccount:         timelockAccounts.Vault.PublicKey().ToBase58(),
+			MintAccount:          mint.PublicKey().ToBase58(),
+			AccountType:          commonpb.AccountType_PRIMARY,
+			Index:                0,
+			DepositsLastSyncedAt: time.Now(),
+		},
+		timelock: timelockAccounts.ToDBRecord(),
+	}, nil
+}
+
+// saveAutoOpenPrimaryAccountIntent persists a synthetic OpenAccounts intent (plus
+// supporting action, timelock, account_info, and fulfillment records) for the
+// auto-open described by req. A nil req is a no-op. Must run inside a DB
+// transaction.
+func saveAutoOpenPrimaryAccountIntent(ctx context.Context, data ocp_data.Provider, req *autoOpenPrimaryAccount) error {
+	if req == nil {
+		return nil
+	}
+
+	intentID, err := common.NewRandomAccount()
+	if err != nil {
+		return err
+	}
+
+	openIntentRecord := &intent.Record{
+		IntentId:              intentID.PublicKey().ToBase58(),
+		IntentType:            intent.OpenAccounts,
+		MintAccount:           req.accountInfo.MintAccount,
+		InitiatorOwnerAccount: req.owner.PublicKey().ToBase58(),
+		OpenAccountsMetadata:  &intent.OpenAccountsMetadata{},
+		State:                 intent.StatePending,
+		CreatedAt:             time.Now(),
+	}
+	if err := data.SaveIntent(ctx, openIntentRecord); err != nil {
+		return err
+	}
+
+	openActionRecord := &action.Record{
+		Intent:     openIntentRecord.IntentId,
+		IntentType: intent.OpenAccounts,
+		ActionId:   0,
+		ActionType: action.OpenAccount,
+		Source:     req.vault.PublicKey().ToBase58(),
+		State:      action.StatePending,
+	}
+	if err := data.PutAllActions(ctx, openActionRecord); err != nil {
+		return err
+	}
+
+	if err := data.SaveTimelock(ctx, req.timelock); err != nil {
+		return err
+	}
+	if err := data.CreateAccountInfo(ctx, req.accountInfo); err != nil {
+		return err
+	}
+
+	openFulfillmentRecord := &fulfillment.Record{
+		Intent:                   openIntentRecord.IntentId,
+		IntentType:               intent.OpenAccounts,
+		ActionId:                 0,
+		ActionType:               action.OpenAccount,
+		FulfillmentType:          fulfillment.InitializeLockedTimelockAccount,
+		Source:                   req.vault.PublicKey().ToBase58(),
+		IntentOrderingIndex:      openIntentRecord.Id,
+		ActionOrderingIndex:      0,
+		FulfillmentOrderingIndex: 0,
+		DisableActiveScheduling:  true,
+		State:                    fulfillment.StateUnknown,
+	}
+	return data.PutAllFulfillments(ctx, openFulfillmentRecord)
 }
 
 func validateExternalTokenAccountWithinIntent(ctx context.Context, data ocp_data.Provider, tokenAccount, mintAccount *common.Account) error {
