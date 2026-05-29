@@ -622,6 +622,13 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	// operation. Not all store implementations have real support for this, so
 	// if anything is added, then ensure it does!
 	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		// Save any supporting records that must exist before the intent record
+		err = intentHandler.OnPreSaveToDB(ctx)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure executing intent db pre-save callback handler")
+			return err
+		}
+
 		// Save the intent record
 		err = s.data.SaveIntent(ctx, intentRecord)
 		if err != nil {
