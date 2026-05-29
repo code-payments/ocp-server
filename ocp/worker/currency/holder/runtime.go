@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	minHoldingValue = common.ToCoreMintQuarks(10) / 4 // $10
+	minHoldingValue = common.ToCoreMintQuarks(10) // $10
 )
 
 type holderRuntime struct {
