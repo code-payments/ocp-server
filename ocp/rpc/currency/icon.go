@@ -153,13 +153,12 @@ func processIcon(data []byte) ([]byte, string, string, error) {
 func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte, ext string, contentType string) (string, error) {
 	key := iconKey(mint, ext)
 
-	putReq := s3Client.PutObjectRequest(&s3.PutObjectInput{
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(config.CurrencyAssetsS3BucketName),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(data),
 		ContentType: aws.String(contentType),
 	})
-	_, err := putReq.Send(ctx)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to upload icon to s3")
 	}
@@ -171,11 +170,10 @@ func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, 
 func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, ext string) error {
 	key := iconKey(mint, ext)
 
-	deleteReq := s3Client.DeleteObjectRequest(&s3.DeleteObjectInput{
+	_, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(config.CurrencyAssetsS3BucketName),
 		Key:    aws.String(key),
 	})
-	_, err := deleteReq.Send(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete icon from s3")
 	}
