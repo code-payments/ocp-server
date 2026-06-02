@@ -1,12 +1,12 @@
 package pg
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/rds"
-	"github.com/aws/aws-sdk-go-v2/service/rds/rdsutils"
+	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 
 	//_ "github.com/jackc/pgx/v4/stdlib"
 	_ "github.com/newrelic/go-agent/v3/integrations/nrpgx"
@@ -28,14 +28,9 @@ type Config struct {
 func NewWithAwsIam(username, hostname, port, dbname string, config aws.Config) (*sql.DB, error) {
 	// IMPORTANT: Only Supported on provisioned Aurora RDS clusters (not on Aurora Serverless)
 
-	// Create an RDS client so we can grab the credential provider from it
-	rdsClient := rds.New(config)
-	credentials := rdsClient.Credentials
-	region := rdsClient.Region
-
 	// Generate IAM auth token (so we don't have to use a username/password)
 	endpoint := fmt.Sprintf("%s:%s", hostname, port)
-	authToken, err := rdsutils.BuildAuthToken(endpoint, region, username, credentials)
+	authToken, err := auth.BuildAuthToken(context.Background(), endpoint, config.Region, username, config.Credentials)
 	if err != nil {
 		return nil, err
 	}
