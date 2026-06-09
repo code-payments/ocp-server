@@ -44,6 +44,9 @@ type Record struct {
 	ReceivePaymentsPubliclyMetadata *ReceivePaymentsPubliclyMetadata
 	PublicDistributionMetadata      *PublicDistributionMetadata
 
+	// AppMetadata is optional app-level metadata provided with the intent
+	AppMetadata []byte
+
 	State State
 
 	Version uint64
@@ -146,6 +149,12 @@ func (r *Record) Clone() Record {
 		publicDistributionMetadata = &cloned
 	}
 
+	var appMetadata []byte
+	if r.AppMetadata != nil {
+		appMetadata = make([]byte, len(r.AppMetadata))
+		copy(appMetadata, r.AppMetadata)
+	}
+
 	return Record{
 		Id: r.Id,
 
@@ -161,6 +170,8 @@ func (r *Record) Clone() Record {
 		SendPublicPaymentMetadata:       sendPublicPaymentMetadata,
 		ReceivePaymentsPubliclyMetadata: receivePaymentsPubliclyMetadata,
 		PublicDistributionMetadata:      publicDistributionMetadata,
+
+		AppMetadata: appMetadata,
 
 		State: r.State,
 
@@ -185,6 +196,8 @@ func (r *Record) CopyTo(dst *Record) {
 	dst.SendPublicPaymentMetadata = r.SendPublicPaymentMetadata
 	dst.ReceivePaymentsPubliclyMetadata = r.ReceivePaymentsPubliclyMetadata
 	dst.PublicDistributionMetadata = r.PublicDistributionMetadata
+
+	dst.AppMetadata = r.AppMetadata
 
 	dst.State = r.State
 
