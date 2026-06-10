@@ -3,11 +3,14 @@ package common
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/hex"
 	"testing"
 
+	slip10 "github.com/anyproto/go-slip10"
 	"github.com/mr-tron/base58/base58"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bip39 "github.com/tyler-smith/go-bip39"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
@@ -77,6 +80,58 @@ func TestAccountWithPrivateKey(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ed25519.Sign(privateKey, message), signature)
 	}
+}
+
+func TestNewAccountFromEntropy(t *testing.T) {
+	// All-zeros BIP-39 entropy maps to the canonical "abandon ... about"
+	// mnemonic, whose Solana account at m/44'/501'/0'/0' (empty passphrase) is a
+	// well-known address shared with standard wallets (Phantom, Solana CLI).
+	entropy := make([]byte, 16)
+
+	account, err := NewAccountFromEntropy(entropy)
+	require.NoError(t, err)
+	require.NotNil(t, account.PrivateKey())
+	assert.Equal(t, "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk", account.PublicKey().ToBase58())
+
+	// The same entropy is deterministic; different entropy is unrelated.
+	again, err := NewAccountFromEntropy(entropy)
+	require.NoError(t, err)
+	assert.Equal(t, account.PublicKey().ToBase58(), again.PublicKey().ToBase58())
+	assert.Equal(t, account.PrivateKey().ToBase58(), again.PrivateKey().ToBase58())
+
+	otherEntropy := make([]byte, 16)
+	otherEntropy[15] = 1
+	other, err := NewAccountFromEntropy(otherEntropy)
+	require.NoError(t, err)
+	assert.NotEqual(t, account.PublicKey().ToBase58(), other.PublicKey().ToBase58())
+
+	// Only 16-byte entropy is accepted.
+	for _, badLen := range []int{0, 15, 17, 32} {
+		_, err := NewAccountFromEntropy(make([]byte, badLen))
+		assert.Error(t, err)
+	}
+}
+
+// TestNewAccountFromEntropy_SpecVectors anchors each stage of the derivation
+// pipeline to its canonical specification test vector, guarding against a
+// dependency behaving non-standardly.
+func TestNewAccountFromEntropy_SpecVectors(t *testing.T) {
+	// BIP-39: zero entropy -> mnemonic -> seed.
+	mnemonic, err := bip39.NewMnemonic(make([]byte, 16))
+	require.NoError(t, err)
+	assert.Equal(t, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", mnemonic)
+	assert.Equal(t,
+		"5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4",
+		hex.EncodeToString(bip39.NewSeed(mnemonic, "")),
+	)
+
+	// SLIP-0010 ed25519 test vector 1 (seed 000102...0f), deepest path.
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	require.NoError(t, err)
+	node, err := slip10.DeriveForPath("m/0'/1'/2'/2'/1000000000'", seed)
+	require.NoError(t, err)
+	_, privateKey := node.Keypair()
+	assert.Equal(t, "8f94d394a8e8fd6b1bc2f3f49f5c47e385281d5c17e65324b0f62483e37e8793", hex.EncodeToString(privateKey.Seed()))
 }
 
 func TestInvalidAccount(t *testing.T) {
