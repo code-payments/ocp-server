@@ -194,9 +194,9 @@ func makeReceivePaymentsPubliclyIntent(t *testing.T, owner *common.Account, usdM
 		IntentType: intent.ReceivePaymentsPublicly,
 
 		ReceivePaymentsPubliclyMetadata: &intent.ReceivePaymentsPubliclyMetadata{
-			Source:       testutil.NewRandomAccount(t).PublicKey().ToBase58(),
-			Quantity:     uint64(usdMarketValue),
-			IsRemoteSend: true,
+			Source:         testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+			Quantity:       uint64(usdMarketValue),
+			IsIndirectSend: true,
 
 			OriginalExchangeCurrency: currency_lib.USD,
 			OriginalExchangeRate:     1.0,

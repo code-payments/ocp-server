@@ -80,16 +80,16 @@ type SendPublicPaymentMetadata struct {
 	NativeAmount     float64
 	UsdMarketValue   float64
 
-	IsWithdrawal bool
-	IsRemoteSend bool
-	IsSwapSell   bool
+	IsWithdrawal   bool
+	IsIndirectSend bool
+	IsSwapSell     bool
 }
 
 type ReceivePaymentsPubliclyMetadata struct {
 	Source   string
 	Quantity uint64
 
-	IsRemoteSend            bool
+	IsIndirectSend          bool
 	IsReturned              bool
 	IsIssuerVoidingGiftCard bool
 
@@ -358,9 +358,9 @@ func (m *SendPublicPaymentMetadata) Clone() SendPublicPaymentMetadata {
 		NativeAmount:     m.NativeAmount,
 		UsdMarketValue:   m.UsdMarketValue,
 
-		IsWithdrawal: m.IsWithdrawal,
-		IsRemoteSend: m.IsRemoteSend,
-		IsSwapSell:   m.IsSwapSell,
+		IsWithdrawal:   m.IsWithdrawal,
+		IsIndirectSend: m.IsIndirectSend,
+		IsSwapSell:     m.IsSwapSell,
 	}
 }
 
@@ -375,7 +375,7 @@ func (m *SendPublicPaymentMetadata) CopyTo(dst *SendPublicPaymentMetadata) {
 	dst.UsdMarketValue = m.UsdMarketValue
 
 	dst.IsWithdrawal = m.IsWithdrawal
-	dst.IsRemoteSend = m.IsRemoteSend
+	dst.IsIndirectSend = m.IsIndirectSend
 	dst.IsSwapSell = m.IsSwapSell
 }
 
@@ -412,7 +412,7 @@ func (m *ReceivePaymentsPubliclyMetadata) Clone() ReceivePaymentsPubliclyMetadat
 		Source:   m.Source,
 		Quantity: m.Quantity,
 
-		IsRemoteSend:            m.IsRemoteSend,
+		IsIndirectSend:          m.IsIndirectSend,
 		IsReturned:              m.IsReturned,
 		IsIssuerVoidingGiftCard: m.IsIssuerVoidingGiftCard,
 
@@ -428,7 +428,7 @@ func (m *ReceivePaymentsPubliclyMetadata) CopyTo(dst *ReceivePaymentsPubliclyMet
 	dst.Source = m.Source
 	dst.Quantity = m.Quantity
 
-	dst.IsRemoteSend = m.IsRemoteSend
+	dst.IsIndirectSend = m.IsIndirectSend
 	dst.IsReturned = m.IsReturned
 	dst.IsIssuerVoidingGiftCard = m.IsIssuerVoidingGiftCard
 

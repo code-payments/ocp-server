@@ -40,7 +40,7 @@ type intentModel struct {
 	UsdMarketValue          float64        `db:"usd_market_value"`
 	OriginalUsdMarketValue  float64        `db:"original_usd_market_value"`
 	IsWithdrawal            bool           `db:"is_withdraw"`
-	IsRemoteSend            bool           `db:"is_remote_send"`
+	IsIndirectSend          bool           `db:"is_remote_send"` // todo: rename column
 	IsReturned              bool           `db:"is_returned"`
 	IsIssuerVoidingGiftCard bool           `db:"is_issuer_voiding_gift_card"`
 	IsSwap                  bool           `db:"is_swap"`
@@ -106,13 +106,13 @@ func toIntentModel(obj *intent.Record) (*intentModel, error) {
 		m.OriginalUsdMarketValue = obj.SendPublicPaymentMetadata.UsdMarketValue
 
 		m.IsWithdrawal = obj.SendPublicPaymentMetadata.IsWithdrawal
-		m.IsRemoteSend = obj.SendPublicPaymentMetadata.IsRemoteSend
+		m.IsIndirectSend = obj.SendPublicPaymentMetadata.IsIndirectSend
 		m.IsSwap = obj.SendPublicPaymentMetadata.IsSwapSell
 	case intent.ReceivePaymentsPublicly:
 		m.Source = obj.ReceivePaymentsPubliclyMetadata.Source
 		m.Quantity = obj.ReceivePaymentsPubliclyMetadata.Quantity
 
-		m.IsRemoteSend = obj.ReceivePaymentsPubliclyMetadata.IsRemoteSend
+		m.IsIndirectSend = obj.ReceivePaymentsPubliclyMetadata.IsIndirectSend
 		m.IsReturned = obj.ReceivePaymentsPubliclyMetadata.IsReturned
 		m.IsIssuerVoidingGiftCard = obj.ReceivePaymentsPubliclyMetadata.IsIssuerVoidingGiftCard
 
@@ -189,16 +189,16 @@ func fromIntentModel(obj *intentModel) *intent.Record {
 			NativeAmount:     obj.NativeAmount,
 			UsdMarketValue:   obj.UsdMarketValue,
 
-			IsWithdrawal: obj.IsWithdrawal,
-			IsRemoteSend: obj.IsRemoteSend,
-			IsSwapSell:   obj.IsSwap,
+			IsWithdrawal:   obj.IsWithdrawal,
+			IsIndirectSend: obj.IsIndirectSend,
+			IsSwapSell:     obj.IsSwap,
 		}
 	case intent.ReceivePaymentsPublicly:
 		record.ReceivePaymentsPubliclyMetadata = &intent.ReceivePaymentsPubliclyMetadata{
 			Source:   obj.Source,
 			Quantity: obj.Quantity,
 
-			IsRemoteSend:            obj.IsRemoteSend,
+			IsIndirectSend:          obj.IsIndirectSend,
 			IsReturned:              obj.IsReturned,
 			IsIssuerVoidingGiftCard: obj.IsIssuerVoidingGiftCard,
 
@@ -256,7 +256,7 @@ func (m *intentModel) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.UsdMarketValue,
 			m.OriginalUsdMarketValue,
 			m.IsWithdrawal,
-			m.IsRemoteSend,
+			m.IsIndirectSend,
 			m.IsReturned,
 			m.IsIssuerVoidingGiftCard,
 			m.IsSwap,
