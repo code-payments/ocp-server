@@ -155,8 +155,9 @@ func testSendPublicPaymentRoundTrip(t *testing.T, s intent.Store) {
 				IsRemoteSend: true,
 				IsSwapSell:   true,
 			},
-			State:     intent.StateUnknown,
-			CreatedAt: time.Now(),
+			AppMetadata: []byte("test_app_metadata"),
+			State:       intent.StateUnknown,
+			CreatedAt:   time.Now(),
 		}
 		cloned := expected.Clone()
 		err = s.Save(ctx, &expected)
@@ -181,6 +182,7 @@ func testSendPublicPaymentRoundTrip(t *testing.T, s intent.Store) {
 		assert.Equal(t, cloned.SendPublicPaymentMetadata.IsWithdrawal, actual.SendPublicPaymentMetadata.IsWithdrawal)
 		assert.Equal(t, cloned.SendPublicPaymentMetadata.IsRemoteSend, actual.SendPublicPaymentMetadata.IsRemoteSend)
 		assert.Equal(t, cloned.SendPublicPaymentMetadata.IsSwapSell, actual.SendPublicPaymentMetadata.IsSwapSell)
+		assert.Equal(t, cloned.AppMetadata, actual.AppMetadata)
 		assert.Equal(t, cloned.State, actual.State)
 		assert.Equal(t, cloned.CreatedAt.Unix(), actual.CreatedAt.Unix())
 		assert.EqualValues(t, 1, actual.Id)

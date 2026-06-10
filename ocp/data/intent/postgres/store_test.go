@@ -46,6 +46,8 @@ const (
 			is_issuer_voiding_gift_card BOOL NOT NULL,
 			is_swap BOOL NOT NULL,
 
+			app_metadata BYTEA NULL,
+
 			state INTEGER NOT NULL,
 
 			version INTEGER NOT NULL,

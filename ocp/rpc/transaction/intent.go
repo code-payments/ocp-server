@@ -271,6 +271,11 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
 	}
 
+	// Store any optional app-level metadata provided alongside the intent
+	if appMetadata := submitActionsReq.Metadata.GetAppMetadata(); appMetadata != nil {
+		intentRecord.AppMetadata = appMetadata.Value
+	}
+
 	// Check whether the intent is a no-op
 	isNoop, err := intentHandler.IsNoop(ctx, intentRecord, submitActionsReq.Metadata, submitActionsReq.Actions)
 	if err != nil {
@@ -888,6 +893,10 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 		return &transactionpb.GetIntentMetadataResponse{
 			Result: transactionpb.GetIntentMetadataResponse_DENIED,
 		}, nil
+	}
+
+	if len(intentRecord.AppMetadata) > 0 {
+		metadata.AppMetadata = &transactionpb.AppMetadata{Value: intentRecord.AppMetadata}
 	}
 
 	return &transactionpb.GetIntentMetadataResponse{
