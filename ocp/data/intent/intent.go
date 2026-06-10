@@ -44,7 +44,6 @@ type Record struct {
 	ReceivePaymentsPubliclyMetadata *ReceivePaymentsPubliclyMetadata
 	PublicDistributionMetadata      *PublicDistributionMetadata
 
-	// AppMetadata is optional app-level metadata provided with the intent
 	AppMetadata []byte
 
 	State State
