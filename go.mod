@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	filippo.io/edwards25519 v1.1.0
+	github.com/anyproto/go-slip10 v1.0.1
 	github.com/aws/aws-sdk-go-v2 v1.41.9
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.6.25
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.102.2
@@ -30,6 +31,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/viper v1.7.0
 	github.com/stretchr/testify v1.8.4
+	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/ybbus/jsonrpc v2.1.2+incompatible
 	go.uber.org/zap v1.27.1
 	golang.org/x/image v0.36.0

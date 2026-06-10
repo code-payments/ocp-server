@@ -7,7 +7,9 @@ import (
 	"fmt"
 
 	"filippo.io/edwards25519"
+	slip10 "github.com/anyproto/go-slip10"
 	"github.com/pkg/errors"
+	bip39 "github.com/tyler-smith/go-bip39"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
@@ -20,6 +22,10 @@ import (
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
+
+// solanaDerivationPath is the standard BIP-44 derivation path for Solana
+// accounts. All components are hardened per SLIP-0010 for ed25519.
+const solanaDerivationPath = "m/44'/501'/0'/0'"
 
 type Account struct {
 	publicKey  *Key
@@ -137,6 +143,41 @@ func NewAccountFromPrivateKeyString(privateKey string) (*Account, error) {
 	}
 
 	return NewAccountFromPrivateKey(key)
+}
+
+// NewAccountFromEntropy deterministically derives an account from a 16-byte
+// BIP-39 entropy value following the standard Solana key derivation used by Code
+// and other wallets:
+//
+//	entropy -> BIP-39 mnemonic -> BIP-39 seed (PBKDF2) -> SLIP-0010 ed25519 key
+//	at m/44'/501'/0'/0'
+//
+// The same entropy always produces the same account, while different entropy
+// values produce unrelated accounts.
+func NewAccountFromEntropy(entropy []byte) (*Account, error) {
+	if len(entropy) != 16 {
+		return nil, errors.New("entropy must be 16 bytes")
+	}
+
+	mnemonic, err := bip39.NewMnemonic(entropy)
+	if err != nil {
+		return nil, errors.Wrap(err, "error deriving mnemonic from entropy")
+	}
+
+	seed := bip39.NewSeed(mnemonic, "")
+
+	node, err := slip10.DeriveForPath(solanaDerivationPath, seed)
+	if err != nil {
+		return nil, errors.Wrap(err, "error deriving key from seed")
+	}
+	_, privateKey := node.Keypair()
+
+	derivedKey, err := NewKeyFromBytes(privateKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "error creating private key from entropy")
+	}
+
+	return NewAccountFromPrivateKey(derivedKey)
 }
 
 func NewAccountFromProto(proto *commonpb.SolanaAccountId) (*Account, error) {
