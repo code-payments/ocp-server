@@ -141,7 +141,7 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 			initiatorOwnerAccount = submitActionsOwnerAccount
 		case common.OwnerTypeRemoteSendGiftCard:
 			// Remote send gift cards can only be the owner of an intent for a
-			// remote send public receive. In this instance, we need to inspect
+			// indirect send public receive. In this instance, we need to inspect
 			// the destination account, which should be a user's primary
 			// account.
 			//
@@ -149,7 +149,7 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 			//       method for intent handlers.
 			switch typed := submitActionsReq.Metadata.Type.(type) {
 			case *transactionpb.Metadata_ReceivePaymentsPublicly:
-				if typed.ReceivePaymentsPublicly.IsRemoteSend {
+				if typed.ReceivePaymentsPublicly.IsIndirectSend {
 					switch typed := submitActionsReq.Actions[0].Type.(type) {
 					case *transactionpb.Action_NoPrivacyWithdraw:
 						accountInfoRecord, err := s.data.GetAccountInfoByTokenAddress(ctx, base58.Encode(typed.NoPrivacyWithdraw.Destination.Value))
@@ -853,9 +853,9 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 							Mint:         mintAccount.ToProto(),
 						},
 					},
-					IsRemoteSend: intentRecord.SendPublicPaymentMetadata.IsRemoteSend,
-					IsWithdrawal: intentRecord.SendPublicPaymentMetadata.IsWithdrawal,
-					Mint:         mintAccount.ToProto(),
+					IsIndirectSend: intentRecord.SendPublicPaymentMetadata.IsIndirectSend,
+					IsWithdrawal:   intentRecord.SendPublicPaymentMetadata.IsWithdrawal,
+					Mint:           mintAccount.ToProto(),
 				},
 			},
 		}
@@ -875,9 +875,9 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 		metadata = &transactionpb.Metadata{
 			Type: &transactionpb.Metadata_ReceivePaymentsPublicly{
 				ReceivePaymentsPublicly: &transactionpb.ReceivePaymentsPubliclyMetadata{
-					Source:       sourceAccount.ToProto(),
-					Quarks:       intentRecord.ReceivePaymentsPubliclyMetadata.Quantity,
-					IsRemoteSend: intentRecord.ReceivePaymentsPubliclyMetadata.IsRemoteSend,
+					Source:         sourceAccount.ToProto(),
+					Quarks:         intentRecord.ReceivePaymentsPubliclyMetadata.Quantity,
+					IsIndirectSend: intentRecord.ReceivePaymentsPubliclyMetadata.IsIndirectSend,
 					ExchangeData: &transactionpb.ExchangeData{
 						Currency:     string(intentRecord.ReceivePaymentsPubliclyMetadata.OriginalExchangeCurrency),
 						ExchangeRate: intentRecord.ReceivePaymentsPubliclyMetadata.OriginalExchangeRate,

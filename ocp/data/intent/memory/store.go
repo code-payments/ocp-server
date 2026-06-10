@@ -194,16 +194,16 @@ func (s *store) filterByType(items []*intent.Record, intentType intent.Type) []*
 	return res
 }
 
-func (s *store) filterByRemoteSendFlag(items []*intent.Record, want bool) []*intent.Record {
+func (s *store) filterByIndirectSendFlag(items []*intent.Record, want bool) []*intent.Record {
 	var res []*intent.Record
 	for _, item := range items {
 		switch item.IntentType {
 		case intent.SendPublicPayment:
-			if item.SendPublicPaymentMetadata.IsRemoteSend == want {
+			if item.SendPublicPaymentMetadata.IsIndirectSend == want {
 				res = append(res, item)
 			}
 		case intent.ReceivePaymentsPublicly:
-			if item.ReceivePaymentsPubliclyMetadata.IsRemoteSend == want {
+			if item.ReceivePaymentsPubliclyMetadata.IsIndirectSend == want {
 				res = append(res, item)
 			}
 		}
@@ -319,7 +319,7 @@ func (s *store) GetOriginalGiftCardIssuedIntent(ctx context.Context, giftCardVau
 	items := s.findByDestination(giftCardVault)
 	items = s.filterByType(items, intent.SendPublicPayment)
 	items = s.filterByState(items, false, intent.StateRevoked)
-	items = s.filterByRemoteSendFlag(items, true)
+	items = s.filterByIndirectSendFlag(items, true)
 
 	if len(items) == 0 {
 		return nil, intent.ErrIntentNotFound
@@ -340,7 +340,7 @@ func (s *store) GetGiftCardClaimedIntent(ctx context.Context, giftCardVault stri
 	items := s.findBySource(giftCardVault)
 	items = s.filterByType(items, intent.ReceivePaymentsPublicly)
 	items = s.filterByState(items, false, intent.StateRevoked)
-	items = s.filterByRemoteSendFlag(items, true)
+	items = s.filterByIndirectSendFlag(items, true)
 
 	if len(items) == 0 {
 		return nil, intent.ErrIntentNotFound

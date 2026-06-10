@@ -99,7 +99,7 @@ func (e *testEnv) generateRandomGiftCard(t *testing.T, creationTs time.Time) *te
 			NativeAmount:     12345,
 			UsdMarketValue:   1000.0,
 
-			IsRemoteSend: true,
+			IsIndirectSend: true,
 		},
 
 		State: intent.StatePending,
@@ -210,7 +210,7 @@ func (e *testEnv) assertGiftCardAutoReturned(t *testing.T, giftCard *testGiftCar
 	require.NotNil(t, historyRecord.ReceivePaymentsPubliclyMetadata)
 	assert.Equal(t, giftCard.accountInfoRecord.TokenAccount, historyRecord.ReceivePaymentsPubliclyMetadata.Source)
 	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.Quantity, historyRecord.ReceivePaymentsPubliclyMetadata.Quantity)
-	assert.True(t, historyRecord.ReceivePaymentsPubliclyMetadata.IsRemoteSend)
+	assert.True(t, historyRecord.ReceivePaymentsPubliclyMetadata.IsIndirectSend)
 	assert.True(t, historyRecord.ReceivePaymentsPubliclyMetadata.IsReturned)
 	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency, historyRecord.ReceivePaymentsPubliclyMetadata.OriginalExchangeCurrency)
 	assert.Equal(t, giftCard.issuedIntentRecord.SendPublicPaymentMetadata.ExchangeRate, historyRecord.ReceivePaymentsPubliclyMetadata.OriginalExchangeRate)

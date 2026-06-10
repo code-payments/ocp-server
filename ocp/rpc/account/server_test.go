@@ -462,8 +462,8 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 				NativeAmount:     12.3,
 				UsdMarketValue:   24.6,
 
-				IsWithdrawal: false,
-				IsRemoteSend: true,
+				IsWithdrawal:   false,
+				IsIndirectSend: true,
 			},
 
 			State: intent.StatePending,

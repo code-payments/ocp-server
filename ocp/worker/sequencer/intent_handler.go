@@ -73,7 +73,7 @@ func (h *SendPublicPaymentIntentHandler) OnActionUpdated(ctx context.Context, in
 		// Do not include the auto-return action, which is a different server-side
 		// initiated intent using the final action here.
 		//
-		// todo: Assumes > 2 case is just remote send, but saves a DB call
+		// todo: Assumes > 2 case is just indirect send, but saves a DB call
 		actionRecordsToCheck = actionRecordsToCheck[:len(actionRecordsToCheck)-1]
 	}
 

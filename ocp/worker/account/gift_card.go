@@ -323,7 +323,7 @@ func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, g
 			Source:   giftCardIssuedIntent.SendPublicPaymentMetadata.DestinationTokenAccount,
 			Quantity: giftCardIssuedIntent.SendPublicPaymentMetadata.Quantity,
 
-			IsRemoteSend:            true,
+			IsIndirectSend:          true,
 			IsIssuerVoidingGiftCard: isVoidedByUser,
 			IsReturned:              !isVoidedByUser,
 

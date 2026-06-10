@@ -457,13 +457,13 @@ func (h *SendPublicPaymentIntentHandler) PopulateMetadata(ctx context.Context, i
 		NativeAmount:     nativeAmount,
 		UsdMarketValue:   usdMarketValue,
 
-		IsWithdrawal: typedProtoMetadata.IsWithdrawal,
-		IsRemoteSend: typedProtoMetadata.IsRemoteSend,
+		IsWithdrawal:   typedProtoMetadata.IsWithdrawal,
+		IsIndirectSend: typedProtoMetadata.IsIndirectSend,
 	}
 
 	if destinationAccountInfo != nil {
 		intentRecord.SendPublicPaymentMetadata.DestinationOwnerAccount = destinationAccountInfo.OwnerAccount
-	} else if !typedProtoMetadata.IsWithdrawal && !typedProtoMetadata.IsRemoteSend && typedProtoMetadata.DestinationOwner != nil {
+	} else if !typedProtoMetadata.IsWithdrawal && !typedProtoMetadata.IsIndirectSend && typedProtoMetadata.DestinationOwner != nil {
 		// Direct primary-to-primary payment where the destination doesn't have
 		// a primary account for the intent's mint yet. If the destination owner
 		// is an existing OCP user, we'll synthesize an OpenAccounts intent for
@@ -719,18 +719,18 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	// Part 1: High-level action validation based on intent metadata
 	//
 
-	if metadata.IsRemoteSend && metadata.IsWithdrawal {
-		return NewIntentValidationError("remote send cannot be a withdraw")
+	if metadata.IsIndirectSend && metadata.IsWithdrawal {
+		return NewIntentValidationError("indirect send cannot be a withdraw")
 	}
 
-	if !metadata.IsWithdrawal && !metadata.IsRemoteSend && len(actions) != 1 {
+	if !metadata.IsWithdrawal && !metadata.IsIndirectSend && len(actions) != 1 {
 		return NewIntentValidationError("expected 1 action for payment")
 	}
 	if metadata.IsWithdrawal && len(actions) != 1 && len(actions) != 2 {
 		return NewIntentValidationError("expected 1 or 2 actions for withdrawal")
 	}
-	if metadata.IsRemoteSend && len(actions) != 3 {
-		return NewIntentValidationError("expected 3 actions for remote send")
+	if metadata.IsIndirectSend && len(actions) != 3 {
+		return NewIntentValidationError("expected 3 actions for indirect send")
 	}
 
 	//
@@ -756,8 +756,8 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 	}
 
 	if h.cachedDestinationAccountInfoRecord != nil {
-		// Remote sends must be to a brand new gift card account
-		if metadata.IsRemoteSend {
+		// Indirect sends must be to a brand new gift card account
+		if metadata.IsIndirectSend {
 			return NewIntentValidationError("destination must be a brand new gift card account")
 		}
 
@@ -802,7 +802,7 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 		err = func() error {
 			// Destination is to a brand new gift card that will be created as part of this
 			// intent
-			if metadata.IsRemoteSend {
+			if metadata.IsIndirectSend {
 				return nil
 			}
 
@@ -943,7 +943,7 @@ func (h *SendPublicPaymentIntentHandler) validateActions(
 
 	// Part 6: Validate open and closed accounts
 
-	if metadata.IsRemoteSend {
+	if metadata.IsIndirectSend {
 		if len(simResult.GetOpenedAccounts()) != 1 {
 			return NewIntentValidationError("expected 1 account opened")
 		}
@@ -1049,7 +1049,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) PopulateMetadata(ctx context.Cont
 	}
 
 	// This is an optimization for payment history. Original fiat amounts are not
-	// easily linked due to the nature of gift cards and the remote send flow. We
+	// easily linked due to the nature of gift cards and the indirect send flow. We
 	// fetch this metadata up front so we don't need to do it every time in history.
 	giftCardIssuedIntentRecord, err := h.data.GetOriginalGiftCardIssuedIntent(ctx, giftCardVault.PublicKey().ToBase58())
 	if err == intent.ErrIntentNotFound {
@@ -1065,7 +1065,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) PopulateMetadata(ctx context.Cont
 		Source:   giftCardVault.PublicKey().ToBase58(),
 		Quantity: typedProtoMetadata.Quarks,
 
-		IsRemoteSend:            typedProtoMetadata.IsRemoteSend,
+		IsIndirectSend:          typedProtoMetadata.IsIndirectSend,
 		IsReturned:              false,
 		IsIssuerVoidingGiftCard: false,
 
@@ -1112,8 +1112,8 @@ func (h *ReceivePaymentsPubliclyIntentHandler) AllowCreation(ctx context.Context
 		return errors.New("unexpected metadata proto message")
 	}
 
-	if !typedMetadata.IsRemoteSend {
-		return NewIntentValidationError("only remote send is supported")
+	if !typedMetadata.IsIndirectSend {
+		return NewIntentValidationError("only indirect send is supported")
 	}
 
 	if typedMetadata.ExchangeData != nil {
@@ -1736,7 +1736,7 @@ func validateMoneyMovementActionUserAccounts(
 			}
 		case *transactionpb.Action_NoPrivacyWithdraw:
 			// No privacy withdraws are used in two ways depending on the intent:
-			//  1. As an auto-return action back to the payer's primary account in a public payment intent for remote send
+			//  1. As an auto-return action back to the payer's primary account in a public payment intent for indirect send
 			//  2. As a receiver of funds to the primary account in a public receive
 
 			mint, err = common.GetBackwardsCompatMint(typedAction.NoPrivacyWithdraw.Mint)
