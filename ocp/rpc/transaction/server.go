@@ -18,6 +18,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/integration"
+	ocp_task "github.com/code-payments/ocp-server/ocp/task"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 )
 
@@ -33,6 +34,8 @@ type transactionServer struct {
 
 	submitIntentIntegration integration.SubmitIntent
 	swapIntegration         integration.Swap
+
+	taskScheduler *ocp_task.Scheduler
 
 	antispamGuard *antispam.Guard
 	amlGuard      *aml.Guard
@@ -56,6 +59,7 @@ func NewTransactionServer(
 	mintDataProvider *currency_util.MintDataProvider,
 	submitIntentIntegration integration.SubmitIntent,
 	swapIntegration integration.Swap,
+	taskScheduler *ocp_task.Scheduler,
 	antispamGuard *antispam.Guard,
 	amlGuard *aml.Guard,
 	coinbaseClient *coinbase.Client,
@@ -103,6 +107,8 @@ func NewTransactionServer(
 
 		submitIntentIntegration: submitIntentIntegration,
 		swapIntegration:         swapIntegration,
+
+		taskScheduler: taskScheduler,
 
 		antispamGuard: antispamGuard,
 		amlGuard:      amlGuard,
