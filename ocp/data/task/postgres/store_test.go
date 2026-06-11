@@ -38,7 +38,7 @@ const (
 
 			state INTEGER NOT NULL,
 
-			attempts INTEGER NOT NULL DEFAULT 0,
+			failed_attempts INTEGER NOT NULL DEFAULT 0,
 			next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
 
 			version INTEGER NOT NULL,

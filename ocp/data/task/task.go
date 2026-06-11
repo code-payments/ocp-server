@@ -30,8 +30,8 @@ type Record struct {
 
 	State State
 
-	Attempts      uint32
-	NextAttemptAt time.Time
+	FailedAttempts uint32
+	NextAttemptAt  time.Time
 
 	Version uint64
 
@@ -63,8 +63,8 @@ func (r *Record) Clone() Record {
 
 		State: r.State,
 
-		Attempts:      r.Attempts,
-		NextAttemptAt: r.NextAttemptAt,
+		FailedAttempts: r.FailedAttempts,
+		NextAttemptAt:  r.NextAttemptAt,
 
 		Version: r.Version,
 
@@ -86,7 +86,7 @@ func (r *Record) CopyTo(dst *Record) {
 
 	dst.State = cloned.State
 
-	dst.Attempts = cloned.Attempts
+	dst.FailedAttempts = cloned.FailedAttempts
 	dst.NextAttemptAt = cloned.NextAttemptAt
 
 	dst.Version = cloned.Version

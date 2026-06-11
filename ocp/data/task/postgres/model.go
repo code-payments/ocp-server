@@ -18,16 +18,16 @@ const (
 )
 
 type model struct {
-	Id            sql.NullInt64  `db:"id"`
-	TaskId        string         `db:"task_id"`
-	TaskType      uint32         `db:"task_type"`
-	Data          []byte         `db:"data"`
-	ReferenceId   sql.NullString `db:"reference_id"`
-	State         uint8          `db:"state"`
-	Attempts      uint32         `db:"attempts"`
-	NextAttemptAt time.Time      `db:"next_attempt_at"`
-	Version       uint64         `db:"version"`
-	CreatedAt     time.Time      `db:"created_at"`
+	Id             sql.NullInt64  `db:"id"`
+	TaskId         string         `db:"task_id"`
+	TaskType       uint32         `db:"task_type"`
+	Data           []byte         `db:"data"`
+	ReferenceId    sql.NullString `db:"reference_id"`
+	State          uint8          `db:"state"`
+	FailedAttempts uint32         `db:"failed_attempts"`
+	NextAttemptAt  time.Time      `db:"next_attempt_at"`
+	Version        uint64         `db:"version"`
+	CreatedAt      time.Time      `db:"created_at"`
 }
 
 func toModel(obj *task.Record) (*model, error) {
@@ -49,16 +49,16 @@ func toModel(obj *task.Record) (*model, error) {
 	}
 
 	return &model{
-		Id:            sql.NullInt64{Int64: int64(obj.Id), Valid: true},
-		TaskId:        obj.TaskId,
-		TaskType:      obj.Type,
-		Data:          obj.Data,
-		ReferenceId:   referenceId,
-		State:         uint8(obj.State),
-		Attempts:      obj.Attempts,
-		NextAttemptAt: obj.NextAttemptAt,
-		Version:       obj.Version,
-		CreatedAt:     obj.CreatedAt,
+		Id:             sql.NullInt64{Int64: int64(obj.Id), Valid: true},
+		TaskId:         obj.TaskId,
+		TaskType:       obj.Type,
+		Data:           obj.Data,
+		ReferenceId:    referenceId,
+		State:          uint8(obj.State),
+		FailedAttempts: obj.FailedAttempts,
+		NextAttemptAt:  obj.NextAttemptAt,
+		Version:        obj.Version,
+		CreatedAt:      obj.CreatedAt,
 	}, nil
 }
 
@@ -70,23 +70,23 @@ func fromModel(m *model) *task.Record {
 	}
 
 	return &task.Record{
-		Id:            uint64(m.Id.Int64),
-		TaskId:        m.TaskId,
-		Type:          m.TaskType,
-		Data:          m.Data,
-		ReferenceId:   referenceId,
-		State:         task.State(m.State),
-		Attempts:      m.Attempts,
-		NextAttemptAt: m.NextAttemptAt,
-		Version:       m.Version,
-		CreatedAt:     m.CreatedAt,
+		Id:             uint64(m.Id.Int64),
+		TaskId:         m.TaskId,
+		Type:           m.TaskType,
+		Data:           m.Data,
+		ReferenceId:    referenceId,
+		State:          task.State(m.State),
+		FailedAttempts: m.FailedAttempts,
+		NextAttemptAt:  m.NextAttemptAt,
+		Version:        m.Version,
+		CreatedAt:      m.CreatedAt,
 	}
 }
 
 func dbPutAllInTx(ctx context.Context, tx *sqlx.Tx, models []*model) ([]*model, error) {
 	var res []*model
 
-	query := `INSERT INTO ` + tableName + ` (task_id, task_type, data, reference_id, state, attempts, next_attempt_at, version, created_at) VALUES `
+	query := `INSERT INTO ` + tableName + ` (task_id, task_type, data, reference_id, state, failed_attempts, next_attempt_at, version, created_at) VALUES `
 
 	var parameters []interface{}
 	for i, model := range models {
@@ -107,14 +107,14 @@ func dbPutAllInTx(ctx context.Context, tx *sqlx.Tx, models []*model) ([]*model, 
 			model.Data,
 			model.ReferenceId,
 			model.State,
-			model.Attempts,
+			model.FailedAttempts,
 			model.NextAttemptAt,
 			model.Version,
 			model.CreatedAt,
 		)
 	}
 
-	query += ` RETURNING id, task_id, task_type, data, reference_id, state, attempts, next_attempt_at, version, created_at`
+	query += ` RETURNING id, task_id, task_type, data, reference_id, state, failed_attempts, next_attempt_at, version, created_at`
 
 	err := tx.SelectContext(
 		ctx,
@@ -132,9 +132,9 @@ func dbPutAllInTx(ctx context.Context, tx *sqlx.Tx, models []*model) ([]*model, 
 func (m *model) dbUpdate(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		query := `UPDATE ` + tableName + `
-			SET state = $3, attempts = $4, next_attempt_at = $5, version = version + 1
+			SET state = $3, failed_attempts = $4, next_attempt_at = $5, version = version + 1
 			WHERE task_id = $1 AND version = $2
-			RETURNING id, task_id, task_type, data, reference_id, state, attempts, next_attempt_at, version, created_at`
+			RETURNING id, task_id, task_type, data, reference_id, state, failed_attempts, next_attempt_at, version, created_at`
 
 		err := tx.QueryRowxContext(
 			ctx,
@@ -142,7 +142,7 @@ func (m *model) dbUpdate(ctx context.Context, db *sqlx.DB) error {
 			m.TaskId,
 			m.Version,
 			m.State,
-			m.Attempts,
+			m.FailedAttempts,
 			m.NextAttemptAt,
 		).StructScan(m)
 		if err != nil {
@@ -156,7 +156,7 @@ func (m *model) dbUpdate(ctx context.Context, db *sqlx.DB) error {
 func dbGetByTaskId(ctx context.Context, db *sqlx.DB, taskId string) (*model, error) {
 	res := &model{}
 
-	query := `SELECT id, task_id, task_type, data, reference_id, state, attempts, next_attempt_at, version, created_at
+	query := `SELECT id, task_id, task_type, data, reference_id, state, failed_attempts, next_attempt_at, version, created_at
 		FROM ` + tableName + `
 		WHERE task_id = $1
 		LIMIT 1`
@@ -172,7 +172,7 @@ func dbGetAllReadyByState(ctx context.Context, db *sqlx.DB, state task.State, as
 	res := []*model{}
 
 	query := `SELECT
-		id, task_id, task_type, data, reference_id, state, attempts, next_attempt_at, version, created_at
+		id, task_id, task_type, data, reference_id, state, failed_attempts, next_attempt_at, version, created_at
 		FROM ` + tableName + `
 		WHERE state = $1 AND next_attempt_at <= $2`
 

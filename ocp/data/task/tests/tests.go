@@ -200,7 +200,7 @@ func testUpdateHappyPath(t *testing.T, s task.Store) {
 		assert.EqualValues(t, 1, expected.Version)
 
 		expected.State = task.StatePending
-		expected.Attempts = 3
+		expected.FailedAttempts = 3
 		expected.NextAttemptAt = time.Now().Add(time.Minute)
 
 		err := s.Update(ctx, expected)
@@ -211,7 +211,7 @@ func testUpdateHappyPath(t *testing.T, s task.Store) {
 		actual, err := s.GetByTaskId(ctx, "test_task_id")
 		require.NoError(t, err)
 		assertEquivalentRecords(t, expected, actual)
-		assert.EqualValues(t, 3, actual.Attempts)
+		assert.EqualValues(t, 3, actual.FailedAttempts)
 
 		expected.State = task.StateConfirmed
 		mutatedData := []byte("mutated_data_should_be_ignored")
@@ -426,6 +426,6 @@ func assertEquivalentRecords(t *testing.T, obj1, obj2 *task.Record) {
 
 	assert.Equal(t, obj1.State, obj2.State)
 
-	assert.Equal(t, obj1.Attempts, obj2.Attempts)
+	assert.Equal(t, obj1.FailedAttempts, obj2.FailedAttempts)
 	assert.Equal(t, obj1.NextAttemptAt.UTC().Truncate(time.Microsecond), obj2.NextAttemptAt.UTC().Truncate(time.Microsecond))
 }

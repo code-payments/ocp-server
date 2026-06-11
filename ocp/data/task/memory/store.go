@@ -91,7 +91,7 @@ func (s *store) Update(ctx context.Context, data *task.Record) error {
 	data.Version++
 
 	item.State = data.State
-	item.Attempts = data.Attempts
+	item.FailedAttempts = data.FailedAttempts
 	item.NextAttemptAt = data.NextAttemptAt
 	item.Version = data.Version
 

@@ -20,8 +20,8 @@ type Store interface {
 	PutAll(ctx context.Context, records ...*Record) error
 
 	// Update updates an existing task with an optimistic concurrency check
-	// on the version. Only mutable fields (state, attempts, next attempt
-	// timestamp) are updated.
+	// on the version. Only mutable fields (state, failed attempts, next
+	// attempt timestamp) are updated.
 	Update(ctx context.Context, record *Record) error
 
 	// GetByTaskId gets a task by its task ID
