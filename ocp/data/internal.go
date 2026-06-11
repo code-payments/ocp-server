@@ -31,6 +31,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
+	"github.com/code-payments/ocp-server/ocp/data/task"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
@@ -49,6 +50,7 @@ import (
 	nonce_memory_client "github.com/code-payments/ocp-server/ocp/data/nonce/memory"
 	rendezvous_memory_client "github.com/code-payments/ocp-server/ocp/data/rendezvous/memory"
 	swap_memory_client "github.com/code-payments/ocp-server/ocp/data/swap/memory"
+	task_memory_client "github.com/code-payments/ocp-server/ocp/data/task/memory"
 	timelock_memory_client "github.com/code-payments/ocp-server/ocp/data/timelock/memory"
 	transaction_memory_client "github.com/code-payments/ocp-server/ocp/data/transaction/memory"
 	vault_memory_client "github.com/code-payments/ocp-server/ocp/data/vault/memory"
@@ -67,6 +69,7 @@ import (
 	nonce_postgres_client "github.com/code-payments/ocp-server/ocp/data/nonce/postgres"
 	rendezvous_postgres_client "github.com/code-payments/ocp-server/ocp/data/rendezvous/postgres"
 	swap_postgres_client "github.com/code-payments/ocp-server/ocp/data/swap/postgres"
+	task_postgres_client "github.com/code-payments/ocp-server/ocp/data/task/postgres"
 	timelock_postgres_client "github.com/code-payments/ocp-server/ocp/data/timelock/postgres"
 	transaction_postgres_client "github.com/code-payments/ocp-server/ocp/data/transaction/postgres"
 	vault_postgres_client "github.com/code-payments/ocp-server/ocp/data/vault/postgres"
@@ -228,6 +231,14 @@ type DatabaseData interface {
 	GetAllSwapsByState(ctx context.Context, state swap.State, opts ...query.Option) ([]*swap.Record, error)
 	GetSwapCountByState(ctx context.Context, state swap.State) (uint64, error)
 
+	// Tasks
+	// --------------------------------------------------------------------------------
+	PutAllTasks(ctx context.Context, records ...*task.Record) error
+	UpdateTask(ctx context.Context, record *task.Record) error
+	GetTaskById(ctx context.Context, taskId string) (*task.Record, error)
+	GetAllReadyTasksByState(ctx context.Context, state task.State, asOf time.Time, opts ...query.Option) ([]*task.Record, error)
+	GetTaskCountByState(ctx context.Context, state task.State) (uint64, error)
+
 	// Timelocks
 	// --------------------------------------------------------------------------------
 	SaveTimelock(ctx context.Context, record *timelock.Record) error
@@ -293,6 +304,7 @@ type DatabaseProvider struct {
 	nonces       nonce.Store
 	rendezvous   rendezvous.Store
 	swaps        swap.Store
+	tasks        task.Store
 	timelocks    timelock.Store
 	transactions transaction.Store
 	vault        vault.Store
@@ -339,6 +351,7 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		nonces:       nonce_postgres_client.New(db),
 		rendezvous:   rendezvous_postgres_client.New(db),
 		swaps:        swap_postgres_client.New(db),
+		tasks:        task_postgres_client.New(db),
 		timelocks:    timelock_postgres_client.New(db),
 		transactions: transaction_postgres_client.New(db),
 		vault:        vault_postgres_client.New(db),
@@ -366,6 +379,7 @@ func NewTestDatabaseProvider() DatabaseData {
 		nonces:       nonce_memory_client.New(),
 		rendezvous:   rendezvous_memory_client.New(),
 		swaps:        swap_memory_client.New(),
+		tasks:        task_memory_client.New(),
 		timelocks:    timelock_memory_client.New(),
 		transactions: transaction_memory_client.New(),
 		vault:        vault_memory_client.New(),
@@ -816,6 +830,29 @@ func (dp *DatabaseProvider) GetAllSwapsByState(ctx context.Context, state swap.S
 }
 func (dp *DatabaseProvider) GetSwapCountByState(ctx context.Context, state swap.State) (uint64, error) {
 	return dp.swaps.CountByState(ctx, state)
+}
+
+// Tasks
+// --------------------------------------------------------------------------------
+
+func (dp *DatabaseProvider) PutAllTasks(ctx context.Context, records ...*task.Record) error {
+	return dp.tasks.PutAll(ctx, records...)
+}
+func (dp *DatabaseProvider) UpdateTask(ctx context.Context, record *task.Record) error {
+	return dp.tasks.Update(ctx, record)
+}
+func (dp *DatabaseProvider) GetTaskById(ctx context.Context, taskId string) (*task.Record, error) {
+	return dp.tasks.GetByTaskId(ctx, taskId)
+}
+func (dp *DatabaseProvider) GetAllReadyTasksByState(ctx context.Context, state task.State, asOf time.Time, opts ...query.Option) ([]*task.Record, error) {
+	req, err := query.DefaultPaginationHandler(opts...)
+	if err != nil {
+		return nil, err
+	}
+	return dp.tasks.GetAllReadyByState(ctx, state, asOf, req.Cursor, req.Limit, req.SortBy)
+}
+func (dp *DatabaseProvider) GetTaskCountByState(ctx context.Context, state task.State) (uint64, error) {
+	return dp.tasks.CountByState(ctx, state)
 }
 
 // Timelocks
