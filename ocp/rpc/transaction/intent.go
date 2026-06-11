@@ -724,7 +724,10 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	}
 
 	go func() {
-		err := s.submitIntentIntegration.OnSuccess(context.Background(), intentRecord)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+
+		err := s.submitIntentIntegration.OnSuccess(ctx, intentRecord)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure calling integration success callback")
 		}
@@ -732,7 +735,12 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 
 	// Fast path for scheduled tasks. Anything that fails here is picked up
 	// by the background worker.
-	go s.taskScheduler.TryExecuteNow(context.Background(), tasksToSchedule...)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+
+		s.taskScheduler.TryExecuteNow(ctx, tasksToSchedule...)
+	}()
 
 	//
 	// Intent is submitted, and anything beyond this point is best-effort.
