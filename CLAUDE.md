@@ -37,7 +37,7 @@ This is a library project without a main entry point. Integration is done by imp
 - Intent-based transaction system: clients submit intents, sequencer processes them
 - Key components:
   - `ocp/rpc/`: gRPC service implementations (entry points for client requests): `transaction`, `account`, `currency`, `messaging`
-  - `ocp/worker/`: Background workers (nonce management, swap processing, sequencer, Geyser integration, account sync, currency tasks)
+  - `ocp/worker/`: Background workers (nonce management, swap processing, sequencer, Geyser integration, account sync, currency tasks, guaranteed task execution)
   - `ocp/transaction/`: Transaction building and local nonce pool management
   - `ocp/data/`: Data layer with Store interfaces for all domain entities
   - `ocp/integration/`: Pluggable integration hooks (SubmitIntent, Swap, Geyser, Moderation, Antispam) for application-specific behavior
@@ -76,6 +76,13 @@ This is a library project without a main entry point. Integration is done by imp
 - Swaps come in two flavors: stateful swaps processed by `ocp/worker/swap/`, and stateless swaps handled directly in `ocp/rpc/transaction/stateless_swap.go`
 - `solana/coinbasestableswapper/`: Solana program interface for Coinbase's Stable Swapper (used for USDC↔USDF)
 - `coinbase/`: HTTP client for the Coinbase Developer Platform Onramp API (JWT auth, used as a swap funding source)
+
+**Task System** (`ocp/task/`, `ocp/worker/task/`, `ocp/data/task/`)
+- Durable, app-defined background work with at-least-once execution guarantees
+- Apps return tasks from the `GetTasksToSchedule` SubmitIntent hook; the scheduler (`ocp/task/scheduler.go`) enqueues them in the *same* DB transaction that commits the intent, so scheduling is atomic with the intent
+- After commit, a best-effort fast path attempts immediate execution; the background worker (`ocp/worker/task/`) sweeps `StatePending` tasks whose `NextAttemptAt` has elapsed and retries with backoff, dead-lettering to `StateFailed` after a max attempt count
+- Execution is delegated to the app's `TaskExecutor` integration hook. Because tasks can run concurrently and more than once (fast path + worker, multiple processes), **TaskExecutor implementations must be idempotent** — the task ID is the natural dedup key. Concurrent state advances are resolved by an optimistic version check on the task record
+- Task `Type`/`Data` are opaque to the base system; the implementing app owns their namespace and serialization
 
 **Solana Integration**
 - `solana/` package: Low-level Solana primitives (accounts, transactions, programs)

@@ -28,6 +28,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
+	"github.com/code-payments/ocp-server/ocp/data/task"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/pointer"
@@ -626,6 +627,7 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	// Note: This is the first use case of this new method to do this kind of
 	// operation. Not all store implementations have real support for this, so
 	// if anything is added, then ensure it does!
+	var tasksToSchedule []*task.Record
 	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 		// Save any supporting records that must exist before the intent record
 		err = intentHandler.OnPreSaveToDB(ctx)
@@ -698,6 +700,19 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 			}
 		}
 
+		// Schedule app-defined tasks atomically with the intent, so their
+		// execution is guaranteed once the intent is committed
+		tasksToSchedule, err = s.submitIntentIntegration.GetTasksToSchedule(ctx, intentRecord)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting tasks to schedule from integration")
+			return err
+		}
+		err = s.taskScheduler.Enqueue(ctx, tasksToSchedule...)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure enqueuing tasks")
+			return err
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -709,10 +724,22 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 	}
 
 	go func() {
-		err := s.submitIntentIntegration.OnSuccess(context.Background(), intentRecord)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+
+		err := s.submitIntentIntegration.OnSuccess(ctx, intentRecord)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure calling integration success callback")
 		}
+	}()
+
+	// Fast path for scheduled tasks. Anything that fails here is picked up
+	// by the background worker.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+
+		s.taskScheduler.TryExecuteNow(ctx, tasksToSchedule...)
 	}()
 
 	//
