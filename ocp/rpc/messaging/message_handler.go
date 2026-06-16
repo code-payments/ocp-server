@@ -3,6 +3,7 @@ package messaging
 import (
 	"bytes"
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -23,13 +24,14 @@ type MessageHandler interface {
 	// allowed to be sent and persisted
 	Validate(ctx context.Context, rendezvous *common.Account, message *messagingpb.Message) error
 
-	// OnSuccess is called upon creating the message after validation
-	OnSuccess(ctx context.Context) error
-
 	// GetAdditionalContext returns additional server-provided context to be
 	// injected into the message before delivering to clients. Returns nil
 	// if no additional context is needed.
 	GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error)
+
+	// GetExpiry returns how long the message remains valid once persisted. A zero
+	// duration means the message never expires.
+	GetExpiry() time.Duration
 }
 
 type RequestToGrabBillMessageHandler struct {
@@ -67,12 +69,12 @@ func (h *RequestToGrabBillMessageHandler) Validate(ctx context.Context, rendezvo
 	return nil
 }
 
-func (h *RequestToGrabBillMessageHandler) OnSuccess(ctx context.Context) error {
-	return nil
-}
-
 func (h *RequestToGrabBillMessageHandler) GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error) {
 	return nil, nil
+}
+
+func (h *RequestToGrabBillMessageHandler) GetExpiry() time.Duration {
+	return 5 * time.Minute
 }
 
 // todo: This message type needs tests
@@ -129,10 +131,6 @@ func (h *RequestToGiveBillMessageHandler) Validate(ctx context.Context, rendezvo
 	return nil
 }
 
-func (h *RequestToGiveBillMessageHandler) OnSuccess(ctx context.Context) error {
-	return nil
-}
-
 func (h *RequestToGiveBillMessageHandler) GetAdditionalContext(ctx context.Context, message *messagingpb.Message) (*messagingpb.AdditionalServerContext, error) {
 	typedMessage := message.GetRequestToGiveBill()
 	if typedMessage == nil {
@@ -156,4 +154,8 @@ func (h *RequestToGiveBillMessageHandler) GetAdditionalContext(ctx context.Conte
 			},
 		},
 	}, nil
+}
+
+func (h *RequestToGiveBillMessageHandler) GetExpiry() time.Duration {
+	return 5 * time.Minute
 }

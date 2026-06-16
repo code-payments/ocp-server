@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -63,8 +64,12 @@ func (s *store) Get(_ context.Context, account string) ([]*messaging.Record, err
 
 	items := s.findByAccount(account)
 
+	now := time.Now()
 	var copied []*messaging.Record
 	for _, item := range items {
+		if !item.ExpiresAt.IsZero() && !item.ExpiresAt.After(now) {
+			continue
+		}
 		cloned := item.Clone()
 		copied = append(copied, &cloned)
 	}

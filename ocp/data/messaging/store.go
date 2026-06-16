@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -15,6 +16,7 @@ type Record struct {
 	Account   string
 	MessageID uuid.UUID
 	Message   []byte
+	ExpiresAt time.Time
 }
 
 // Store stores messages.
@@ -52,8 +54,9 @@ func (r *Record) Validate() error {
 
 func (r *Record) Clone() Record {
 	copied := Record{
-		Account: r.Account,
-		Message: make([]byte, len(r.Message)),
+		Account:   r.Account,
+		Message:   make([]byte, len(r.Message)),
+		ExpiresAt: r.ExpiresAt,
 	}
 
 	copy(copied.MessageID[:], r.MessageID[:])
