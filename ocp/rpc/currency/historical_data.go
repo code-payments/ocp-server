@@ -292,8 +292,8 @@ func getTimeRangeForPredefinedRange(predefinedRange currencypb.PredefinedRange, 
 		} else if currencyAge < 2*7*24*time.Hour {
 			interval = query.IntervalHour
 		}
-		// For all time, go back 100 years
-		return now.Add(-100 * 365 * 24 * time.Hour), now, interval
+		// For all time, go back 20 years
+		return now.Add(-20 * 365 * 24 * time.Hour), now, interval
 	}
 }
 
