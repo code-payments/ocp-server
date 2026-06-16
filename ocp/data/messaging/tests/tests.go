@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,7 @@ func RunTests(t *testing.T, s messaging.Store, teardown func()) {
 		testDuplicateMessage,
 		testGetMultipleMessages,
 		testDeleteNonExistantMessage,
+		testExpiry,
 	} {
 		tf(t, s)
 		teardown()
@@ -109,4 +111,30 @@ func assertEquivalentRecords(t *testing.T, obj1, obj2 *messaging.Record) {
 	assert.Equal(t, obj1.Account, obj2.Account)
 	assert.Equal(t, obj1.MessageID, obj2.MessageID)
 	assert.Equal(t, obj1.Message, obj2.Message)
+}
+
+func testExpiry(t *testing.T, s messaging.Store) {
+	t.Run("testExpiry", func(t *testing.T) {
+		ctx := context.Background()
+		account := "expiry-account"
+
+		live := &messaging.Record{Account: account, MessageID: uuid.New(), Message: []byte("live"), ExpiresAt: time.Now().Add(time.Hour)}
+		expired := &messaging.Record{Account: account, MessageID: uuid.New(), Message: []byte("expired"), ExpiresAt: time.Now().Add(-time.Hour)}
+		permanent := &messaging.Record{Account: account, MessageID: uuid.New(), Message: []byte("permanent")}
+		for _, r := range []*messaging.Record{live, expired, permanent} {
+			require.NoError(t, s.Insert(ctx, r))
+		}
+
+		actual, err := s.Get(ctx, account)
+		require.NoError(t, err)
+
+		ids := make(map[uuid.UUID]bool, len(actual))
+		for _, r := range actual {
+			ids[r.MessageID] = true
+		}
+		require.Len(t, actual, 2)
+		assert.True(t, ids[live.MessageID])
+		assert.True(t, ids[permanent.MessageID])
+		assert.False(t, ids[expired.MessageID])
+	})
 }

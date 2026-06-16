@@ -2,7 +2,6 @@ package messaging
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -47,9 +46,10 @@ const (
 )
 
 type server struct {
-	log  *zap.Logger
-	conf *conf
-	data ocp_data.Provider
+	log      *zap.Logger
+	conf     *conf
+	data     ocp_data.Provider
+	messages messaging.Store
 
 	mintDataProvider *currency_util.MintDataProvider
 
@@ -70,10 +70,12 @@ type server struct {
 func NewMessagingClient(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	messages messaging.Store,
 ) InternalMessageClient {
 	return &server{
-		log:  log,
-		data: data,
+		log:      log,
+		data:     data,
+		messages: messages,
 	}
 }
 
@@ -83,6 +85,7 @@ func NewMessagingClient(
 func NewMessagingClientAndServer(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	messages messaging.Store,
 	mintDataProvider *currency_util.MintDataProvider,
 	rpcSignatureVerifier *auth.RPCSignatureVerifier,
 	broadcastAddress string,
@@ -92,6 +95,7 @@ func NewMessagingClientAndServer(
 		log:                  log,
 		conf:                 configProvider(),
 		data:                 data,
+		messages:             messages,
 		mintDataProvider:     mintDataProvider,
 		streams:              make(map[string]*messageStream),
 		individualStreamMu:   make(map[string]*sync.Mutex),
@@ -511,7 +515,7 @@ func (s *server) PollMessages(ctx context.Context, req *messagingpb.PollMessages
 		return nil, err
 	}
 
-	records, err := s.data.GetMessages(ctx, rendezvousAccount.PublicKey().ToBase58())
+	records, err := s.messages.Get(ctx, rendezvousAccount.PublicKey().ToBase58())
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to load undelivered messages")
 		return nil, status.Error(codes.Internal, "")
@@ -567,7 +571,7 @@ func (s *server) AckMessages(ctx context.Context, req *messagingpb.AckMessagesRe
 			return nil, status.Error(codes.Internal, "")
 		}
 
-		if err := s.data.DeleteMessage(ctx, account, converted); err != nil {
+		if err := s.messages.Delete(ctx, account, converted); err != nil {
 			log.With(zap.Error(err)).Warn("Failed to delete message")
 			return nil, status.Error(codes.Internal, "")
 		}
@@ -691,34 +695,19 @@ func (s *server) SendMessage(ctx context.Context, req *messagingpb.SendMessageRe
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Start off by persisting the message, so any async flushes will catch it.
-	// In the same database transaction, store any supporting DB records as
-	// required by the message type.
-	//
-	// Note: Not all store implementations have real support for this, so if
-	// anything is added, then ensure it does!
-	err = s.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
-		record := &messaging.Record{
-			Account:   base58.Encode(req.RendezvousKey.Value),
-			MessageID: id,
-			Message:   messageWithGeneratedIDAndSignatureBytes,
-		}
+	// Persist the message so any async flushes will catch it.
+	record := &messaging.Record{
+		Account:   base58.Encode(req.RendezvousKey.Value),
+		MessageID: id,
+		Message:   messageWithGeneratedIDAndSignatureBytes,
+	}
+	if ttl := messageHandler.GetExpiry(); ttl > 0 {
+		record.ExpiresAt = time.Now().Add(ttl)
+	}
 
-		err = s.data.CreateMessage(ctx, record)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failed to create message")
-			return err
-		}
-
-		err = messageHandler.OnSuccess(ctx)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failure calling message hanlder success callback")
-			return err
-		}
-
-		return nil
-	})
+	err = s.messages.Insert(ctx, record)
 	if err != nil {
+		log.With(zap.Error(err)).Warn("failed to create message")
 		return nil, status.Error(codes.Internal, "")
 	}
 
@@ -766,7 +755,7 @@ func (s *server) flush(ctx context.Context, accountID *messagingpb.RendezvousKey
 		zap.String("account_id", accountStr),
 	)
 
-	records, err := s.data.GetMessages(ctx, accountStr)
+	records, err := s.messages.Get(ctx, accountStr)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("Failed to load undelivered messages")
 		return

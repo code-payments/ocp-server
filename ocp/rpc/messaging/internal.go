@@ -81,7 +81,7 @@ func (s *server) InternallyCreateMessage(ctx context.Context, rendezvousKey *com
 	}
 
 	// Save the message to the DB
-	err = s.data.CreateMessage(ctx, record)
+	err = s.messages.Insert(ctx, record)
 	if err != nil {
 		return uuid.Nil, errors.Wrap(err, "error saving message to db")
 	}
