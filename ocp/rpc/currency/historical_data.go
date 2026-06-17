@@ -188,13 +188,13 @@ func (s *currencyServer) getCachedReserveHistory(
 		return cached.([]*currency.ReserveRecord), nil
 	}
 
-	reserveHistory, err := s.data.GetCurrencyReserveHistory(
+	reserveHistory, err := s.mintDataProvider.GetReserveHistory(
 		ctx,
 		mint,
-		query.WithStartTime(startTime),
-		query.WithEndTime(endTime),
-		query.WithInterval(interval),
-		query.WithDirection(query.Ascending),
+		interval,
+		startTime,
+		endTime,
+		query.Ascending,
 	)
 	if err != nil {
 		return nil, err
@@ -217,13 +217,13 @@ func (s *currencyServer) getCachedExchangeRateHistory(
 		return cached.([]*currency.ExchangeRateRecord), nil
 	}
 
-	exchangeRateHistory, err := s.data.GetExchangeRateHistory(
+	exchangeRateHistory, err := s.mintDataProvider.GetExchangeRateHistory(
 		ctx,
-		currencyCode,
-		query.WithStartTime(startTime),
-		query.WithEndTime(endTime),
-		query.WithInterval(interval),
-		query.WithDirection(query.Ascending),
+		string(currencyCode),
+		interval,
+		startTime,
+		endTime,
+		query.Ascending,
 	)
 	if err != nil {
 		return nil, err

@@ -428,7 +428,7 @@ func (p *runtime) buildRefundRecordsForCancelledSwap(ctx context.Context, swapRe
 			return nil, nil, errors.New("unexpected source mint")
 		}
 		exchangeCurrency = currency_lib.USD
-		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, quantity, time.Now())
+		usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, p.exchangeRateStore, p.reserveStore, common.CoreMintAccount, quantity, time.Now())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -600,7 +600,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 		usdMarketValueWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
 
 		if common.IsCoreMint(toMint) {
-			usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, uint64(deltaQuarksIntoOmnibus), time.Now())
+			usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, p.exchangeRateStore, p.reserveStore, common.CoreMintAccount, uint64(deltaQuarksIntoOmnibus), time.Now())
 			if err != nil {
 				return 0, false, err
 			}
@@ -627,7 +627,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 		}
 
 		exchangeCurrency = currency_lib.USD
-		usdMarketValueWithoutFees, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, common.CoreMintAccount, swapRecord.SwapAmount, time.Now())
+		usdMarketValueWithoutFees, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, p.exchangeRateStore, p.reserveStore, common.CoreMintAccount, swapRecord.SwapAmount, time.Now())
 		if err != nil {
 			return 0, false, err
 		}
@@ -1126,7 +1126,7 @@ func (p *runtime) updateLiveReserveStateForFinalizedSwap(ctx context.Context, sw
 			continue
 		}
 
-		err = p.data.PutLiveCurrencyReserve(ctx, &currency.ReserveRecord{
+		err = p.reserveStore.PutLiveReserve(ctx, &currency.ReserveRecord{
 			Mint:              mint.PublicKey().ToBase58(),
 			SupplyFromBonding: currencycreator.DefaultMintMaxQuarkSupply - postBalance,
 			Slot:              tokenBalances.Slot,

@@ -12,6 +12,8 @@ import (
 	geyserpb "github.com/code-payments/ocp-server/ocp/worker/geyser/api/gen"
 
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 )
 
 type eventWorkerMetrics struct {
@@ -21,9 +23,11 @@ type eventWorkerMetrics struct {
 
 // todo: we can consolidate the various subscription streams into one
 type runtime struct {
-	log  *zap.Logger
-	data ocp_data.Provider
-	conf *conf
+	log               *zap.Logger
+	data              ocp_data.Provider
+	exchangeRateStore exchange.Store
+	reserveStore      reserve.Store
+	conf              *conf
 
 	integration integration.Geyser
 
@@ -45,15 +49,17 @@ type runtime struct {
 	backupExternalDepositWorkerStatus bool
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, integration integration.Geyser, configProvider ConfigProvider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, integration integration.Geyser, configProvider ConfigProvider) worker.Runtime {
 	conf := configProvider()
 	return &runtime{
 		log:                        log,
 		data:                       data,
+		exchangeRateStore:          exchangeRateStore,
+		reserveStore:               reserveStore,
 		conf:                       configProvider(),
 		integration:                integration,
 		programUpdatesChan:         make(chan *geyserpb.SubscribeUpdateAccount, conf.programUpdateQueueSize.Get(context.Background())),
-		programUpdateHandlers:      initializeProgramAccountUpdateHandlers(conf, data, integration),
+		programUpdateHandlers:      initializeProgramAccountUpdateHandlers(conf, data, exchangeRateStore, reserveStore, integration),
 		programUpdateWorkerMetrics: make(map[int]*eventWorkerMetrics),
 	}
 }

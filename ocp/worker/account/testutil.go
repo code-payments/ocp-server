@@ -17,7 +17,6 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/pointer"
@@ -45,13 +44,6 @@ func setup(t *testing.T) *testEnv {
 	data := ocp_data.NewTestDataProvider()
 
 	require.NoError(t, common.InjectTestSubsidizer(context.Background(), data, testutil.NewRandomAccount(t)))
-
-	require.NoError(t, data.ImportExchangeRates(context.Background(), &currency.MultiRateRecord{
-		Time: time.Now(),
-		Rates: map[string]float64{
-			"usd": 0.1,
-		},
-	}))
 
 	return &testEnv{
 		ctx:     context.Background(),

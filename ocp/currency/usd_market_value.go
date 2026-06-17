@@ -10,6 +10,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
@@ -28,7 +30,7 @@ func CalculateUsdMarketValueFromFiatAmount(fiatAmount, fiatToUsdRate float64) (f
 
 // CalculateUsdMarketValueFromTokenAmount calculates the current USD market value
 // of a crypto amount in quarks.
-func CalculateUsdMarketValueFromTokenAmount(ctx context.Context, data ocp_data.Provider, mint *common.Account, quarks uint64, at time.Time) (float64, error) {
+func CalculateUsdMarketValueFromTokenAmount(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, mint *common.Account, quarks uint64, at time.Time) (float64, error) {
 	isLive := time.Since(at) < 5*time.Second
 
 	isSupportedMint, err := common.IsSupportedMint(ctx, data, mint)
@@ -48,7 +50,7 @@ func CalculateUsdMarketValueFromTokenAmount(ctx context.Context, data ocp_data.P
 			Time:   at,
 		}
 	} else {
-		exchangeRateRecord, err = data.GetExchangeRate(ctx, currency_lib.USD, at)
+		exchangeRateRecord, err = exchangeRateStore.GetExchangeRate(ctx, string(currency_lib.USD), at)
 		if err != nil {
 			return 0, err
 		}
@@ -64,12 +66,12 @@ func CalculateUsdMarketValueFromTokenAmount(ctx context.Context, data ocp_data.P
 
 	var reserveRecord *currency.ReserveRecord
 	if isLive {
-		reserveRecord, err = data.GetLiveCurrencyReserve(ctx, mint.PublicKey().ToBase58())
+		reserveRecord, err = reserveStore.GetLiveReserve(ctx, mint.PublicKey().ToBase58())
 		if err != nil {
 			return 0, err
 		}
 	} else {
-		reserveRecord, err = data.GetCurrencyReserveAtTime(ctx, mint.PublicKey().ToBase58(), at)
+		reserveRecord, err = reserveStore.GetReserveAtTime(ctx, mint.PublicKey().ToBase58(), at)
 		if err != nil {
 			return 0, err
 		}

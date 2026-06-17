@@ -12,6 +12,8 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/solana/token"
 )
 
@@ -28,16 +30,20 @@ type ProgramAccountUpdateHandler interface {
 }
 
 type TokenProgramAccountHandler struct {
-	conf        *conf
-	data        ocp_data.Provider
-	integration integration.Geyser
+	conf              *conf
+	data              ocp_data.Provider
+	exchangeRateStore exchange.Store
+	reserveStore      reserve.Store
+	integration       integration.Geyser
 }
 
-func NewTokenProgramAccountHandler(conf *conf, data ocp_data.Provider, integration integration.Geyser) ProgramAccountUpdateHandler {
+func NewTokenProgramAccountHandler(conf *conf, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, integration integration.Geyser) ProgramAccountUpdateHandler {
 	return &TokenProgramAccountHandler{
-		conf:        conf,
-		data:        data,
-		integration: integration,
+		conf:              conf,
+		data:              data,
+		exchangeRateStore: exchangeRateStore,
+		reserveStore:      reserveStore,
+		integration:       integration,
 	}
 }
 
@@ -89,7 +95,7 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		return nil
 	}
 
-	err = processPotentialCirculatingSupplyUpdate(ctx, h.data, tokenAccount, mintAccount, unmarshalled.Amount, update.Slot)
+	err = processPotentialCirculatingSupplyUpdate(ctx, h.data, h.reserveStore, tokenAccount, mintAccount, unmarshalled.Amount, update.Slot)
 	if err != nil {
 		return errors.Wrap(err, "error processing potential currency circulating supply update")
 	}
@@ -106,7 +112,7 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 		return nil
 	}
 
-	err = processPotentialExternalDepositIntoVm(ctx, h.data, h.integration, signature, userAuthorityAccount, mintAccount)
+	err = processPotentialExternalDepositIntoVm(ctx, h.data, h.exchangeRateStore, h.reserveStore, h.integration, signature, userAuthorityAccount, mintAccount)
 	if err != nil {
 		return errors.Wrap(err, "error processing signature for external deposit into vm")
 	}
@@ -126,8 +132,8 @@ func (h *TokenProgramAccountHandler) Handle(ctx context.Context, update *geyserp
 	return nil
 }
 
-func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, integration integration.Geyser) map[string]ProgramAccountUpdateHandler {
+func initializeProgramAccountUpdateHandlers(conf *conf, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, integration integration.Geyser) map[string]ProgramAccountUpdateHandler {
 	return map[string]ProgramAccountUpdateHandler{
-		base58.Encode(token.ProgramKey): NewTokenProgramAccountHandler(conf, data, integration),
+		base58.Encode(token.ProgramKey): NewTokenProgramAccountHandler(conf, data, exchangeRateStore, reserveStore, integration),
 	}
 }

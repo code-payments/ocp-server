@@ -10,6 +10,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
@@ -19,7 +21,7 @@ import (
 // records needed for a launchpad currency to be fully functional: currency
 // metadata (Available), VM metadata (Available), authority private key in
 // vault, and a live reserve record.
-func SetupLaunchpadCurrency(t *testing.T, data ocp_data.Provider) *common.Account {
+func SetupLaunchpadCurrency(t *testing.T, data ocp_data.Provider, reserveStore reserve.Store, holderStore holder.Store) *common.Account {
 	vmConfig := NewRandomVmConfig(t, false)
 
 	metadataRecord := &currency.MetadataRecord{
@@ -83,14 +85,14 @@ func SetupLaunchpadCurrency(t *testing.T, data ocp_data.Provider) *common.Accoun
 		Slot:              1,
 		Time:              time.Now(),
 	}
-	require.NoError(t, data.PutLiveCurrencyReserve(t.Context(), reserveRecord))
+	require.NoError(t, reserveStore.PutLiveReserve(t.Context(), reserveRecord))
 
 	holderCountRecord := &currency.HolderCountRecord{
 		Mint:        vmConfig.Mint.PublicKey().ToBase58(),
 		HolderCount: 32,
 		Time:        time.Now(),
 	}
-	require.NoError(t, data.PutLiveCurrencyHolderCount(t.Context(), holderCountRecord))
+	require.NoError(t, holderStore.PutLiveHolderCount(t.Context(), holderCountRecord))
 
 	return vmConfig.Mint
 }

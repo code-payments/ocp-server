@@ -28,6 +28,11 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	exchange_memory "github.com/code-payments/ocp-server/ocp/data/currency/exchange/memory"
+	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
+	holder_memory "github.com/code-payments/ocp-server/ocp/data/currency/holder/memory"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
+	reserve_memory "github.com/code-payments/ocp-server/ocp/data/currency/reserve/memory"
 	"github.com/code-payments/ocp-server/ocp/data/messaging"
 	messaging_memory "github.com/code-payments/ocp-server/ocp/data/messaging/memory"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
@@ -53,12 +58,18 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 	data := ocp_data.NewTestDataProvider()
 	messages := messaging_memory.New()
 
+	exchangeRateStore := exchange_memory.New()
+	reserveStore := reserve_memory.New()
+	holderStore := holder_memory.New()
+
 	env.client1 = &clientEnv{
 		ctx:              context.Background(),
 		client:           messagingpb.NewMessagingClient(conn1),
 		conf:             &clientConf{},
 		streams:          make(map[string][]*cancellableStream),
 		directDataAccess: data,
+		reserveStore:     reserveStore,
+		holderStore:      holderStore,
 	}
 	env.client2 = &clientEnv{
 		ctx:              context.Background(),
@@ -66,6 +77,8 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 		conf:             &clientConf{},
 		streams:          make(map[string][]*cancellableStream),
 		directDataAccess: data,
+		reserveStore:     reserveStore,
+		holderStore:      holderStore,
 	}
 	if enableMultiServer {
 		env.client2.client = messagingpb.NewMessagingClient(conn2)
@@ -73,14 +86,14 @@ func setup(t *testing.T, enableMultiServer bool) (env testEnv, cleanup func()) {
 
 	subsidizer := testutil.SetupRandomSubsidizer(t, data)
 
-	require.NoError(t, data.ImportExchangeRates(context.Background(), &currency.MultiRateRecord{
+	require.NoError(t, exchangeRateStore.PutExchangeRates(context.Background(), &currency.MultiRateRecord{
 		Time: time.Now(),
 		Rates: map[string]float64{
 			"usd": 0.1,
 		},
 	}))
 
-	mintDataProvider := currency_util.NewMintDataProvider(log, data, 0, time.Second, time.Second)
+	mintDataProvider := currency_util.NewMintDataProvider(log, data, exchangeRateStore, reserveStore, holderStore, 0, time.Second, time.Second)
 	require.NoError(t, mintDataProvider.Start(context.Background()))
 
 	s1 := NewMessagingClientAndServer(log, data, messages, mintDataProvider, auth.NewRPCSignatureVerifier(log, data), conn1.Target(), withManualTestOverrides(&testOverrides{}))
@@ -211,6 +224,8 @@ type clientEnv struct {
 
 	// Direct data access to help test/pass validation checks
 	directDataAccess ocp_data.Provider
+	reserveStore     reserve.Store
+	holderStore      holder.Store
 }
 
 func (c *clientEnv) openMessageStream(t *testing.T, rendezvousKey *common.Account, enableKeepAlive bool) {
@@ -471,7 +486,7 @@ func (c *clientEnv) sendRequestToGiveBillMessage(t *testing.T, rendezvousKey *co
 	if c.conf.simulateUnsupportedMint {
 		mintAccount = testutil.NewRandomAccount(t)
 	} else if c.conf.simulateLaunchpadMint {
-		mintAccount = testutil.SetupLaunchpadCurrency(t, c.directDataAccess)
+		mintAccount = testutil.SetupLaunchpadCurrency(t, c.directDataAccess, c.reserveStore, c.holderStore)
 	}
 
 	requestToGiveBill := &messagingpb.RequestToGiveBill{

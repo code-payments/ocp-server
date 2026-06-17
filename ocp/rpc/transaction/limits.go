@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -36,13 +35,13 @@ func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.Ge
 		return nil, err
 	}
 
-	multiRateRecord, err := s.data.GetAllExchangeRates(ctx, time.Now())
+	liveExchangeData, err := s.mintDataProvider.GetLiveExchangeRates(ctx)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting current exchange rates")
 		return nil, status.Error(codes.Internal, "")
 	}
 
-	usdRate, ok := multiRateRecord.Rates[string(currency_lib.USD)]
+	usdRate, ok := liveExchangeData.Rates[string(currency_lib.USD)]
 	if !ok {
 		log.With(zap.Error(err)).Warn("usd rate is missing")
 		return nil, status.Error(codes.Internal, "")
@@ -61,7 +60,7 @@ func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.Ge
 	}
 	sendLimits := make(map[string]*transactionpb.SendLimit)
 	for currency, sendLimit := range currency_util.SendLimits {
-		otherRate, ok := multiRateRecord.Rates[string(currency)]
+		otherRate, ok := liveExchangeData.Rates[string(currency)]
 		if !ok {
 			log.Debug(fmt.Sprintf("%s rate is missing", currency))
 			continue

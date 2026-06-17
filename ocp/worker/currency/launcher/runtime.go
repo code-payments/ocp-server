@@ -11,21 +11,27 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
 
 type runtime struct {
-	log        *zap.Logger
-	conf       *conf
-	data       ocp_data.Provider
-	subsidizer *common.Account
+	log          *zap.Logger
+	conf         *conf
+	data         ocp_data.Provider
+	reserveStore reserve.Store
+	holderStore  holder.Store
+	subsidizer   *common.Account
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, configProvider ConfigProvider) (worker.Runtime, error) {
+func New(log *zap.Logger, data ocp_data.Provider, reserveStore reserve.Store, holderStore holder.Store, configProvider ConfigProvider) (worker.Runtime, error) {
 	p := &runtime{
-		log:  log,
-		conf: configProvider(),
-		data: data,
+		log:          log,
+		conf:         configProvider(),
+		data:         data,
+		reserveStore: reserveStore,
+		holderStore:  holderStore,
 	}
 
 	err := p.loadSubsidizer()

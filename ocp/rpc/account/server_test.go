@@ -24,6 +24,11 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	exchange_memory "github.com/code-payments/ocp-server/ocp/data/currency/exchange/memory"
+	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
+	holder_memory "github.com/code-payments/ocp-server/ocp/data/currency/holder/memory"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
+	reserve_memory "github.com/code-payments/ocp-server/ocp/data/currency/reserve/memory"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
@@ -36,11 +41,13 @@ import (
 )
 
 type testEnv struct {
-	ctx        context.Context
-	client     accountpb.AccountClient
-	server     *server
-	data       ocp_data.Provider
-	subsidizer *common.Account
+	ctx          context.Context
+	client       accountpb.AccountClient
+	server       *server
+	data         ocp_data.Provider
+	reserveStore reserve.Store
+	holderStore  holder.Store
+	subsidizer   *common.Account
 }
 
 func setup(t *testing.T) (env testEnv, cleanup func()) {
@@ -52,9 +59,12 @@ func setup(t *testing.T) (env testEnv, cleanup func()) {
 	env.ctx = context.Background()
 	env.client = accountpb.NewAccountClient(conn)
 	env.data = ocp_data.NewTestDataProvider()
+	env.reserveStore = reserve_memory.New()
+	env.holderStore = holder_memory.New()
 	env.subsidizer = testutil.SetupRandomSubsidizer(t, env.data)
 
-	mintDataProvider := currency_util.NewMintDataProvider(log, env.data, 0, time.Second, time.Second)
+	exchangeRateStore := exchange_memory.New()
+	mintDataProvider := currency_util.NewMintDataProvider(log, env.data, exchangeRateStore, env.reserveStore, env.holderStore, 0, time.Second, time.Second)
 	s := NewAccountServer(log, env.data, mintDataProvider)
 	env.server = s.(*server)
 
@@ -155,7 +165,7 @@ func TestGetTokenAccountInfos_UserAccounts_HappyPath(t *testing.T) {
 
 	coreVmConfig := testutil.NewRandomVmConfig(t, true)
 	swapVmConfig := testutil.NewRandomVmConfig(t, false)
-	jeffyMint := testutil.SetupLaunchpadCurrency(t, env.data)
+	jeffyMint := testutil.SetupLaunchpadCurrency(t, env.data, env.reserveStore, env.holderStore)
 	jeffyVmConfig, err := common.GetVmConfigForMint(env.ctx, env.data, jeffyMint)
 	require.NoError(t, err)
 
@@ -312,7 +322,7 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 	env, cleanup := setup(t)
 	defer cleanup()
 
-	mint := testutil.SetupLaunchpadCurrency(t, env.data)
+	mint := testutil.SetupLaunchpadCurrency(t, env.data, env.reserveStore, env.holderStore)
 	vmConfig, err := common.GetVmConfigForMint(env.ctx, env.data, mint)
 	require.NoError(t, err)
 

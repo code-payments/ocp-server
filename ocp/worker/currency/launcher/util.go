@@ -126,12 +126,12 @@ func (p *runtime) markCurrencyMetadataAbandoned(ctx context.Context, record *cur
 func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.MetadataRecord) error {
 	// Note: The live reserve state is initialized by the swap worker on initial purchase
 
-	err := p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
+	err := p.reserveStore.PutHistoricalReserve(ctx, &currency.ReserveRecord{
 		Mint:              record.Mint,
 		SupplyFromBonding: 0,
 		Time:              record.CreatedAt,
 	})
-	if err != nil {
+	if err != nil && err != currency.ErrExists {
 		return errors.Wrap(err, "error putting initial historical reserve state")
 	}
 
@@ -139,21 +139,21 @@ func (p *runtime) putInitialReserveState(ctx context.Context, record *currency.M
 }
 
 func (p *runtime) putInitialHolderCount(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+	err := p.holderStore.PutLiveHolderCount(ctx, &currency.HolderCountRecord{
 		Mint:        record.Mint,
 		HolderCount: 1,
 		Time:        time.Now(),
 	})
-	if err != nil {
+	if err != nil && err != currency.ErrStaleHolderState {
 		return errors.Wrap(err, "error putting initial live holder count")
 	}
 
-	err = p.data.PutHistoricalCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+	err = p.holderStore.PutHistoricalHolderCount(ctx, &currency.HolderCountRecord{
 		Mint:        record.Mint,
 		HolderCount: 0,
 		Time:        record.CreatedAt,
 	})
-	if err != nil {
+	if err != nil && err != currency.ErrExists {
 		return errors.Wrap(err, "error putting initial historical holder count")
 	}
 

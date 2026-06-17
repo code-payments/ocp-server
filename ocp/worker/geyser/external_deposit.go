@@ -20,6 +20,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/currency"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
@@ -44,7 +46,7 @@ var (
 	syncedDepositCache = cache.NewCache(1_000_000)
 )
 
-func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, integration integration.Geyser, userAuthority, mint *common.Account) error {
+func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, integration integration.Geyser, userAuthority, mint *common.Account) error {
 	err := maybeInitiateExternalDepositIntoVm(ctx, data, userAuthority, mint)
 	if err != nil {
 		return errors.Wrap(err, "error depositing into the vm")
@@ -57,7 +59,7 @@ func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, int
 
 	var anyError error
 	for _, signature := range signatures {
-		err := processPotentialExternalDepositIntoVm(ctx, data, integration, signature, userAuthority, mint)
+		err := processPotentialExternalDepositIntoVm(ctx, data, exchangeRateStore, reserveStore, integration, signature, userAuthority, mint)
 		if err != nil {
 			anyError = errors.Wrap(err, "error processing signature for external deposit into vm")
 		}
@@ -229,7 +231,7 @@ func findPotentialExternalDepositsIntoVm(ctx context.Context, data ocp_data.Prov
 	}
 }
 
-func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, integration integration.Geyser, signature string, userAuthority, mint *common.Account) error {
+func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, integration integration.Geyser, signature string, userAuthority, mint *common.Account) error {
 	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
 	if err != nil {
 		return err
@@ -319,13 +321,13 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 			return errors.Wrap(err, "invalid owner account")
 		}
 
-		isInitialPurchase, usdMarketValue, err := isInitialCurrencyCreatorDeposit(ctx, data, ownerAccount, mint, userVirtualTimelockVaultAccount, uint64(deltaQuarksIntoOmnibus))
+		isInitialPurchase, usdMarketValue, err := isInitialCurrencyCreatorDeposit(ctx, data, exchangeRateStore, reserveStore, ownerAccount, mint, userVirtualTimelockVaultAccount, uint64(deltaQuarksIntoOmnibus))
 		if err != nil {
 			return errors.Wrap(err, "error checking for initial currency creator deposit")
 		}
 
 		if !isInitialPurchase {
-			usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, data, mint, uint64(deltaQuarksIntoOmnibus), time.Now())
+			usdMarketValue, err = currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, data, exchangeRateStore, reserveStore, mint, uint64(deltaQuarksIntoOmnibus), time.Now())
 			if err != nil {
 				return errors.Wrap(err, "error calculating usd market value")
 			}
@@ -486,7 +488,7 @@ func getSyncedVmDepositCacheKey(signature string, vmDepositAta *common.Account) 
 //  2. The depositor is the currency creator
 //  3. This is their first deposit for this currency
 //  4. The deposit amount matches the expected output of the first swap within 1 quark error tolerance
-func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider, owner, mint, destination *common.Account, depositQuarks uint64) (bool, float64, error) {
+func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, owner, mint, destination *common.Account, depositQuarks uint64) (bool, float64, error) {
 	if common.IsCoreMint(mint) {
 		return false, 0, nil
 	}
@@ -520,7 +522,7 @@ func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider
 
 	initialSwap := swapRecords[0]
 
-	usdMarketValue, err := currency.CalculateUsdMarketValueFromTokenAmount(ctx, data, common.CoreMintAccount, initialSwap.SwapAmount, initialSwap.CreatedAt)
+	usdMarketValue, err := currency.CalculateUsdMarketValueFromTokenAmount(ctx, data, exchangeRateStore, reserveStore, common.CoreMintAccount, initialSwap.SwapAmount, initialSwap.CreatedAt)
 	if err != nil {
 		return false, 0, errors.Wrap(err, "error calculating usd market value")
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/testutil"
 )
@@ -150,13 +149,6 @@ func setupAmlTest(t *testing.T) (env amlTestEnv) {
 	env.guard = NewGuard(log, env.data)
 
 	testutil.SetupRandomSubsidizer(t, env.data)
-
-	env.data.ImportExchangeRates(env.ctx, &currency.MultiRateRecord{
-		Time: time.Now(),
-		Rates: map[string]float64{
-			string(currency_lib.USD): 0.1,
-		},
-	})
 
 	return env
 }

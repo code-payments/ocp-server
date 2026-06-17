@@ -14,20 +14,23 @@ import (
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
 
 type exchangeRateRuntime struct {
-	log  *zap.Logger
-	data ocp_data.Provider
+	log               *zap.Logger
+	data              ocp_data.Provider
+	exchangeRateStore exchange.Store
 
 	lastRates *currency.MultiRateRecord
 }
 
-func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, exchangeRateStore exchange.Store) worker.Runtime {
 	return &exchangeRateRuntime{
-		log:  log,
-		data: data,
+		log:               log,
+		data:              data,
+		exchangeRateStore: exchangeRateStore,
 	}
 }
 
@@ -77,7 +80,7 @@ func (p *exchangeRateRuntime) GetCurrentExchangeRates(ctx context.Context) error
 
 		lastRates := p.lastRates
 		if lastRates == nil {
-			lastRates, _ = p.data.GetAllExchangeRates(ctx, time.Now())
+			lastRates, _ = p.exchangeRateStore.GetAllExchangeRates(ctx, time.Now())
 		}
 
 		if lastRates == nil {
@@ -110,7 +113,7 @@ func (p *exchangeRateRuntime) GetCurrentExchangeRates(ctx context.Context) error
 	delete(data.Rates, string(currency_lib.ZMK))
 	delete(data.Rates, string(currency_lib.ZWL))
 
-	if err = p.data.ImportExchangeRates(ctx, data); err != nil {
+	if err = p.exchangeRateStore.PutExchangeRates(ctx, data); err != nil {
 		return errors.Wrap(err, "failed to store rate data")
 	}
 
