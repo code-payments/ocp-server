@@ -1,11 +1,4 @@
 // Package exchange defines a focused store for core-mint exchange rate records.
-//
-// It mirrors the exchange-rate portion of the larger ocp/data/currency store,
-// reusing that package's record types (currency.ExchangeRateRecord,
-// currency.MultiRateRecord) and error sentinels (currency.ErrNotFound,
-// currency.ErrExists, currency.ErrInvalidRange, currency.ErrInvalidInterval) so
-// callers see identical semantics. A DynamoDB-backed implementation lives in the
-// dynamodb subpackage and an in-memory implementation lives in memory.
 package exchange
 
 import (

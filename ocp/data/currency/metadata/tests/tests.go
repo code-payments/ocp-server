@@ -10,13 +10,12 @@ import (
 
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/metadata"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
-func RunTests(t *testing.T, s currency.Store, teardown func()) {
-	for _, tf := range []func(t *testing.T, s currency.Store){
-		testExchangeRateRoundTrip,
-		testGetExchangeRatesInRange,
+func RunTests(t *testing.T, s metadata.Store, teardown func()) {
+	for _, tf := range []func(t *testing.T, s metadata.Store){
 		testMetadataRoundTrip,
 		testMetadataSaveWithVersioning,
 		testMetadataUniqueNameConstraint,
@@ -26,131 +25,13 @@ func RunTests(t *testing.T, s currency.Store, teardown func()) {
 		testGetAllMints,
 		testCountMints,
 		testCountMetadataByState,
-		testReserveRoundTrip,
-		testGetReservesInRange,
-		testLiveReserveRoundTrip,
-		testGetAllLiveReserves,
-		testHolderCountRoundTrip,
-		testGetAllHolderCountsAtTime,
-		testLiveHolderCountRoundTrip,
-		testGetAllLiveHolderCounts,
 	} {
 		tf(t, s)
 		teardown()
 	}
 }
 
-func testExchangeRateRoundTrip(t *testing.T, s currency.Store) {
-	now := time.Date(2021, 01, 29, 13, 0, 5, 0, time.UTC)
-
-	record, err := s.GetAllExchangeRates(context.Background(), now)
-	assert.Nil(t, record)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	rates := map[string]float64{
-		"usd": 0.000055,
-		"cad": 0.00007,
-	}
-	require.NoError(t, s.PutExchangeRates(context.Background(), &currency.MultiRateRecord{
-		Time:  now,
-		Rates: rates,
-	}))
-
-	// Overwrite should fail
-	assert.Equal(t, currency.ErrExists, s.PutExchangeRates(context.Background(), &currency.MultiRateRecord{
-		Time:  now,
-		Rates: rates,
-	}))
-
-	// Test GetExchangeRate(), it should return the USD record
-	single, err := s.GetExchangeRate(context.Background(), "usd", now)
-	require.NoError(t, err)
-	assert.Equal(t, now.Unix(), single.Time.Unix())
-	assert.EqualValues(t, rates["usd"], single.Rate)
-
-	// Test GetAllExchangeRates(), it should return all recent rates
-	record, err = s.GetAllExchangeRates(context.Background(), now)
-	require.NoError(t, err)
-
-	assert.Equal(t, now.Unix(), record.Time.Unix())
-	assert.EqualValues(t, rates, record.Rates)
-
-	// within same day, should return entry
-	record, err = s.GetAllExchangeRates(context.Background(), time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
-	require.NoError(t, err)
-
-	assert.Equal(t, now.Unix(), record.Time.Unix())
-	assert.EqualValues(t, rates, record.Rates)
-
-	// day after, should be empty
-	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
-	record, err = s.GetAllExchangeRates(context.Background(), tomorrow)
-	assert.Nil(t, record)
-	assert.Equal(t, currency.ErrNotFound, err)
-}
-
-func testGetExchangeRatesInRange(t *testing.T, s currency.Store) {
-	var rates []currency.MultiRateRecord
-
-	now := time.Now().UTC()
-
-	for i := 0; i < 100; i++ {
-		rates = append(rates, currency.MultiRateRecord{
-			Time: now.Add(time.Duration(i) * time.Hour),
-			Rates: map[string]float64{
-				"usd": (0.000058 + float64(i/10000)),
-				"cad": (0.00008 + float64(i/10000)),
-			},
-		})
-	}
-
-	record, err := s.GetAllExchangeRates(context.Background(), rates[0].Time)
-	assert.Nil(t, record)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	for _, item := range rates {
-		require.NoError(t, s.PutExchangeRates(context.Background(), &item))
-	}
-
-	result, err := s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalRaw, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-	assert.Equal(t, len(result), 100)
-	for i, item := range result {
-		assert.Equal(t, rates[i].Time.Unix(), item.Time.Unix())
-		assert.EqualValues(t, rates[i].Rates["usd"], item.Rate)
-	}
-
-	result, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalRaw, rates[0].Time, rates[49].Time, query.Ascending)
-	require.NoError(t, err)
-	assert.Equal(t, len(result), 50)
-	for i, item := range result {
-		assert.Equal(t, rates[i].Time.Unix(), item.Time.Unix())
-		assert.EqualValues(t, rates[i].Rates["usd"], item.Rate)
-	}
-
-	result, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalRaw, rates[0].Time, rates[99].Time, query.Descending)
-	require.NoError(t, err)
-	assert.Equal(t, len(result), 100)
-	for i, item := range result {
-		assert.Equal(t, rates[99-i].Time.Unix(), item.Time.Unix())
-		assert.EqualValues(t, rates[99-i].Rates["usd"], item.Rate)
-	}
-
-	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalSecond, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalMinute, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalHour, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalDay, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalWeek, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetExchangeRatesInRange(context.Background(), "usd", query.IntervalMonth, rates[0].Time, rates[99].Time, query.Ascending)
-	require.NoError(t, err)
-}
-
-func testMetadataRoundTrip(t *testing.T, s currency.Store) {
+func testMetadataRoundTrip(t *testing.T, s metadata.Store) {
 	expected := &currency.MetadataRecord{
 		Name:        "Jeffy",
 		Symbol:      "JFY",
@@ -202,12 +83,12 @@ func testMetadataRoundTrip(t *testing.T, s currency.Store) {
 
 	actual, err := s.GetMetadata(context.Background(), expected.Mint)
 	require.NoError(t, err)
-	assertEquivalentMetadataRecords(t, cloned, actual)
+	assertEquivalentRecords(t, cloned, actual)
 	assert.EqualValues(t, currency.MetadataStateUnknown, actual.State)
 	assert.EqualValues(t, 1, actual.Version)
 }
 
-func testMetadataUniqueNameConstraint(t *testing.T, s currency.Store) {
+func testMetadataUniqueNameConstraint(t *testing.T, s metadata.Store) {
 	record1 := &currency.MetadataRecord{
 		Name:        "UniqueName",
 		Symbol:      "UN1",
@@ -284,7 +165,7 @@ func testMetadataUniqueNameConstraint(t *testing.T, s currency.Store) {
 	assert.Equal(t, currency.ErrDuplicateCurrency, s.SaveMetadata(context.Background(), record2))
 }
 
-func testIsNameAvailable(t *testing.T, s currency.Store) {
+func testIsNameAvailable(t *testing.T, s metadata.Store) {
 	ctx := context.Background()
 
 	// Name should be available when no records exist
@@ -350,7 +231,7 @@ func testIsNameAvailable(t *testing.T, s currency.Store) {
 	assert.True(t, available)
 }
 
-func testAbandonedCurrencyNameReuse(t *testing.T, s currency.Store) {
+func testAbandonedCurrencyNameReuse(t *testing.T, s metadata.Store) {
 	ctx := context.Background()
 
 	record := &currency.MetadataRecord{
@@ -458,7 +339,7 @@ func testAbandonedCurrencyNameReuse(t *testing.T, s currency.Store) {
 	assert.False(t, available)
 }
 
-func testGetAllMetadataByState(t *testing.T, s currency.Store) {
+func testGetAllMetadataByState(t *testing.T, s metadata.Store) {
 	t.Run("testGetAllMetadataByState", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -570,7 +451,7 @@ func testGetAllMetadataByState(t *testing.T, s currency.Store) {
 	})
 }
 
-func testGetAllMints(t *testing.T, s currency.Store) {
+func testGetAllMints(t *testing.T, s metadata.Store) {
 	// No mints should exist initially
 	mints, err := s.GetAllMints(context.Background())
 	assert.Nil(t, mints)
@@ -634,7 +515,7 @@ func testGetAllMints(t *testing.T, s currency.Store) {
 	assert.Contains(t, mints, record2.Mint)
 }
 
-func testCountMints(t *testing.T, s currency.Store) {
+func testCountMints(t *testing.T, s metadata.Store) {
 	// No mints should exist initially
 	count, err := s.CountMints(context.Background())
 	require.NoError(t, err)
@@ -709,7 +590,7 @@ func testCountMints(t *testing.T, s currency.Store) {
 	assert.EqualValues(t, 1, count)
 }
 
-func testCountMetadataByState(t *testing.T, s currency.Store) {
+func testCountMetadataByState(t *testing.T, s metadata.Store) {
 	ctx := context.Background()
 
 	// No records should exist initially
@@ -815,101 +696,7 @@ func testCountMetadataByState(t *testing.T, s currency.Store) {
 	assert.EqualValues(t, 1, count)
 }
 
-func testReserveRoundTrip(t *testing.T, s currency.Store) {
-	now := time.Date(2021, 01, 29, 13, 0, 5, 0, time.UTC)
-
-	record, err := s.GetReserveAtTime(context.Background(), "mint", now)
-	assert.Nil(t, record)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	expected := &currency.ReserveRecord{
-		Mint:              "mint",
-		SupplyFromBonding: 1,
-		Time:              now,
-	}
-	require.NoError(t, s.PutHistoricalReserveRecord(context.Background(), expected))
-
-	assert.Equal(t, currency.ErrExists, s.PutHistoricalReserveRecord(context.Background(), expected))
-
-	actual, err := s.GetReserveAtTime(context.Background(), "mint", now)
-	require.NoError(t, err)
-	assert.Equal(t, now.Unix(), actual.Time.Unix())
-	assert.Equal(t, actual.SupplyFromBonding, expected.SupplyFromBonding)
-
-	actual, err = s.GetReserveAtTime(context.Background(), "mint", time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
-	require.NoError(t, err)
-
-	assert.Equal(t, now.Unix(), actual.Time.Unix())
-	assert.Equal(t, actual.SupplyFromBonding, expected.SupplyFromBonding)
-
-	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
-	actual, err = s.GetReserveAtTime(context.Background(), "mint", tomorrow)
-	assert.Nil(t, actual)
-	assert.Equal(t, currency.ErrNotFound, err)
-}
-
-func testGetReservesInRange(t *testing.T, s currency.Store) {
-	var reserves []currency.ReserveRecord
-
-	now := time.Now().UTC()
-	mint := "test-mint"
-
-	for i := 0; i < 100; i++ {
-		reserves = append(reserves, currency.ReserveRecord{
-			Mint:              mint,
-			SupplyFromBonding: uint64(1000 + i),
-			Time:              now.Add(time.Duration(i) * time.Hour),
-		})
-	}
-
-	record, err := s.GetReserveAtTime(context.Background(), mint, reserves[0].Time)
-	assert.Nil(t, record)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	for _, item := range reserves {
-		itemCopy := item
-		require.NoError(t, s.PutHistoricalReserveRecord(context.Background(), &itemCopy))
-	}
-
-	result, err := s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-	assert.Equal(t, len(result), 100)
-	for i, item := range result {
-		assert.Equal(t, reserves[i].Time.Unix(), item.Time.Unix())
-		assert.EqualValues(t, reserves[i].SupplyFromBonding, item.SupplyFromBonding)
-	}
-
-	result, err = s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[49].Time, query.Ascending)
-	require.NoError(t, err)
-	assert.Equal(t, len(result), 50)
-	for i, item := range result {
-		assert.Equal(t, reserves[i].Time.Unix(), item.Time.Unix())
-		assert.EqualValues(t, reserves[i].SupplyFromBonding, item.SupplyFromBonding)
-	}
-
-	result, err = s.GetReservesInRange(context.Background(), mint, query.IntervalRaw, reserves[0].Time, reserves[99].Time, query.Descending)
-	require.NoError(t, err)
-	assert.Equal(t, len(result), 100)
-	for i, item := range result {
-		assert.Equal(t, reserves[99-i].Time.Unix(), item.Time.Unix())
-		assert.EqualValues(t, reserves[99-i].SupplyFromBonding, item.SupplyFromBonding)
-	}
-
-	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalSecond, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalMinute, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalHour, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalDay, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalWeek, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-	_, err = s.GetReservesInRange(context.Background(), mint, query.IntervalMonth, reserves[0].Time, reserves[99].Time, query.Ascending)
-	require.NoError(t, err)
-}
-
-func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
+func testMetadataSaveWithVersioning(t *testing.T, s metadata.Store) {
 	record := &currency.MetadataRecord{
 		Name:        "Versioned",
 		Symbol:      "VER",
@@ -1018,340 +805,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s currency.Store) {
 	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
 }
 
-func testLiveReserveRoundTrip(t *testing.T, s currency.Store) {
-	ctx := context.Background()
-	mint := "live-reserve-mint"
-
-	// No record should exist initially
-	_, err := s.GetLiveReserve(ctx, mint)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	// Insert the first live reserve record
-	record := &currency.ReserveRecord{
-		Mint:              mint,
-		SupplyFromBonding: 1000,
-		Slot:              100,
-		Time:              time.Now(),
-	}
-	require.NoError(t, s.PutLiveReserveRecord(ctx, record))
-
-	// Verify the record was stored
-	actual, err := s.GetLiveReserve(ctx, mint)
-	require.NoError(t, err)
-	assert.Equal(t, mint, actual.Mint)
-	assert.EqualValues(t, 1000, actual.SupplyFromBonding)
-	assert.EqualValues(t, 100, actual.Slot)
-
-	// Update with a higher slot should succeed
-	record = &currency.ReserveRecord{
-		Mint:              mint,
-		SupplyFromBonding: 2000,
-		Slot:              200,
-		Time:              time.Now(),
-	}
-	require.NoError(t, s.PutLiveReserveRecord(ctx, record))
-
-	actual, err = s.GetLiveReserve(ctx, mint)
-	require.NoError(t, err)
-	assert.EqualValues(t, 2000, actual.SupplyFromBonding)
-	assert.EqualValues(t, 200, actual.Slot)
-
-	// Update with same slot should return stale error
-	record = &currency.ReserveRecord{
-		Mint:              mint,
-		SupplyFromBonding: 3000,
-		Slot:              200,
-		Time:              time.Now(),
-	}
-	assert.Equal(t, currency.ErrStaleReserveState, s.PutLiveReserveRecord(ctx, record))
-
-	// Update with lower slot should return stale error
-	record = &currency.ReserveRecord{
-		Mint:              mint,
-		SupplyFromBonding: 3000,
-		Slot:              50,
-		Time:              time.Now(),
-	}
-	assert.Equal(t, currency.ErrStaleReserveState, s.PutLiveReserveRecord(ctx, record))
-
-	// Verify original record unchanged after stale attempts
-	actual, err = s.GetLiveReserve(ctx, mint)
-	require.NoError(t, err)
-	assert.EqualValues(t, 2000, actual.SupplyFromBonding)
-	assert.EqualValues(t, 200, actual.Slot)
-
-	// Different mint should work independently
-	otherMint := "other-live-mint"
-	record = &currency.ReserveRecord{
-		Mint:              otherMint,
-		SupplyFromBonding: 5000,
-		Slot:              50,
-		Time:              time.Now(),
-	}
-	require.NoError(t, s.PutLiveReserveRecord(ctx, record))
-
-	actual, err = s.GetLiveReserve(ctx, otherMint)
-	require.NoError(t, err)
-	assert.EqualValues(t, 5000, actual.SupplyFromBonding)
-	assert.EqualValues(t, 50, actual.Slot)
-}
-
-func testGetAllLiveReserves(t *testing.T, s currency.Store) {
-	ctx := context.Background()
-
-	// No records should exist initially
-	_, err := s.GetAllLiveReserves(ctx)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	// Insert live reserves for two mints
-	record1 := &currency.ReserveRecord{
-		Mint:              "mint-all-live-1",
-		SupplyFromBonding: 1000,
-		Slot:              100,
-		Time:              time.Now(),
-	}
-	require.NoError(t, s.PutLiveReserveRecord(ctx, record1))
-
-	// Should return one record
-	reserves, err := s.GetAllLiveReserves(ctx)
-	require.NoError(t, err)
-	assert.Len(t, reserves, 1)
-	assert.EqualValues(t, 1000, reserves["mint-all-live-1"].SupplyFromBonding)
-	assert.EqualValues(t, 100, reserves["mint-all-live-1"].Slot)
-
-	record2 := &currency.ReserveRecord{
-		Mint:              "mint-all-live-2",
-		SupplyFromBonding: 2000,
-		Slot:              200,
-		Time:              time.Now(),
-	}
-	require.NoError(t, s.PutLiveReserveRecord(ctx, record2))
-
-	// Should return both records
-	reserves, err = s.GetAllLiveReserves(ctx)
-	require.NoError(t, err)
-	assert.Len(t, reserves, 2)
-	assert.EqualValues(t, 1000, reserves["mint-all-live-1"].SupplyFromBonding)
-	assert.EqualValues(t, 100, reserves["mint-all-live-1"].Slot)
-	assert.EqualValues(t, 2000, reserves["mint-all-live-2"].SupplyFromBonding)
-	assert.EqualValues(t, 200, reserves["mint-all-live-2"].Slot)
-
-	// Update one mint and verify the change is reflected
-	record1Updated := &currency.ReserveRecord{
-		Mint:              "mint-all-live-1",
-		SupplyFromBonding: 1500,
-		Slot:              150,
-		Time:              time.Now(),
-	}
-	require.NoError(t, s.PutLiveReserveRecord(ctx, record1Updated))
-
-	reserves, err = s.GetAllLiveReserves(ctx)
-	require.NoError(t, err)
-	assert.Len(t, reserves, 2)
-	assert.EqualValues(t, 1500, reserves["mint-all-live-1"].SupplyFromBonding)
-	assert.EqualValues(t, 150, reserves["mint-all-live-1"].Slot)
-	assert.EqualValues(t, 2000, reserves["mint-all-live-2"].SupplyFromBonding)
-	assert.EqualValues(t, 200, reserves["mint-all-live-2"].Slot)
-}
-
-func testHolderCountRoundTrip(t *testing.T, s currency.Store) {
-	now := time.Date(2021, 01, 29, 13, 0, 5, 0, time.UTC)
-
-	record, err := s.GetHolderCountAtTime(context.Background(), "mint", now)
-	assert.Nil(t, record)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	expected := &currency.HolderCountRecord{
-		Mint:        "mint",
-		HolderCount: 42,
-		Time:        now,
-	}
-	require.NoError(t, s.PutHistoricalHolderCountRecord(context.Background(), expected))
-
-	assert.Equal(t, currency.ErrExists, s.PutHistoricalHolderCountRecord(context.Background(), expected))
-
-	actual, err := s.GetHolderCountAtTime(context.Background(), "mint", now)
-	require.NoError(t, err)
-	assert.Equal(t, now.Unix(), actual.Time.Unix())
-	assert.EqualValues(t, expected.HolderCount, actual.HolderCount)
-
-	actual, err = s.GetHolderCountAtTime(context.Background(), "mint", time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
-	require.NoError(t, err)
-
-	assert.Equal(t, now.Unix(), actual.Time.Unix())
-	assert.EqualValues(t, expected.HolderCount, actual.HolderCount)
-
-	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
-	actual, err = s.GetHolderCountAtTime(context.Background(), "mint", tomorrow)
-	assert.Nil(t, actual)
-	assert.Equal(t, currency.ErrNotFound, err)
-}
-
-func testGetAllHolderCountsAtTime(t *testing.T, s currency.Store) {
-	now := time.Date(2021, 01, 29, 13, 0, 5, 0, time.UTC)
-
-	// No records should exist initially
-	_, err := s.GetAllHolderCountsAtTime(context.Background(), now)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	// Insert holder counts for two mints
-	record1 := &currency.HolderCountRecord{
-		Mint:        "mint1",
-		HolderCount: 42,
-		Time:        now,
-	}
-	require.NoError(t, s.PutHistoricalHolderCountRecord(context.Background(), record1))
-
-	record2 := &currency.HolderCountRecord{
-		Mint:        "mint2",
-		HolderCount: 100,
-		Time:        now,
-	}
-	require.NoError(t, s.PutHistoricalHolderCountRecord(context.Background(), record2))
-
-	// Should return both records at exact time
-	result, err := s.GetAllHolderCountsAtTime(context.Background(), now)
-	require.NoError(t, err)
-	assert.Len(t, result, 2)
-	assert.EqualValues(t, 42, result["mint1"].HolderCount)
-	assert.EqualValues(t, 100, result["mint2"].HolderCount)
-
-	// Should return both records within same day
-	result, err = s.GetAllHolderCountsAtTime(context.Background(), time.Date(2021, 01, 29, 14, 0, 5, 0, time.UTC))
-	require.NoError(t, err)
-	assert.Len(t, result, 2)
-	assert.EqualValues(t, 42, result["mint1"].HolderCount)
-	assert.EqualValues(t, 100, result["mint2"].HolderCount)
-
-	// Day after should be empty
-	tomorrow := time.Date(2021, 01, 30, 0, 0, 0, 0, time.UTC)
-	_, err = s.GetAllHolderCountsAtTime(context.Background(), tomorrow)
-	assert.Equal(t, currency.ErrNotFound, err)
-}
-
-func testLiveHolderCountRoundTrip(t *testing.T, s currency.Store) {
-	ctx := context.Background()
-	mint := "live-holder-mint"
-
-	// No record should exist initially
-	_, err := s.GetLiveHolderCount(ctx, mint)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	// Insert the first live holder count record
-	now := time.Now().UTC().Truncate(time.Second)
-	record := &currency.HolderCountRecord{
-		Mint:        mint,
-		HolderCount: 10,
-		Time:        now,
-	}
-	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record))
-
-	// Verify the record was stored
-	actual, err := s.GetLiveHolderCount(ctx, mint)
-	require.NoError(t, err)
-	assert.Equal(t, mint, actual.Mint)
-	assert.EqualValues(t, 10, actual.HolderCount)
-
-	// Update with a later timestamp should succeed
-	record = &currency.HolderCountRecord{
-		Mint:        mint,
-		HolderCount: 20,
-		Time:        now.Add(time.Second),
-	}
-	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record))
-
-	actual, err = s.GetLiveHolderCount(ctx, mint)
-	require.NoError(t, err)
-	assert.EqualValues(t, 20, actual.HolderCount)
-
-	// Update with same timestamp should return stale error
-	record = &currency.HolderCountRecord{
-		Mint:        mint,
-		HolderCount: 30,
-		Time:        now.Add(time.Second),
-	}
-	assert.Equal(t, currency.ErrStaleHolderState, s.PutLiveHolderCountRecord(ctx, record))
-
-	// Update with earlier timestamp should return stale error
-	record = &currency.HolderCountRecord{
-		Mint:        mint,
-		HolderCount: 30,
-		Time:        now,
-	}
-	assert.Equal(t, currency.ErrStaleHolderState, s.PutLiveHolderCountRecord(ctx, record))
-
-	// Verify original record unchanged after stale attempts
-	actual, err = s.GetLiveHolderCount(ctx, mint)
-	require.NoError(t, err)
-	assert.EqualValues(t, 20, actual.HolderCount)
-
-	// Different mint should work independently
-	otherMint := "other-live-holder-mint"
-	record = &currency.HolderCountRecord{
-		Mint:        otherMint,
-		HolderCount: 50,
-		Time:        now,
-	}
-	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record))
-
-	actual, err = s.GetLiveHolderCount(ctx, otherMint)
-	require.NoError(t, err)
-	assert.EqualValues(t, 50, actual.HolderCount)
-}
-
-func testGetAllLiveHolderCounts(t *testing.T, s currency.Store) {
-	ctx := context.Background()
-
-	// No records should exist initially
-	_, err := s.GetAllLiveHolderCounts(ctx)
-	assert.Equal(t, currency.ErrNotFound, err)
-
-	now := time.Now().UTC().Truncate(time.Second)
-
-	// Insert holder counts for two mints
-	record1 := &currency.HolderCountRecord{
-		Mint:        "mint-all-live-holder-1",
-		HolderCount: 10,
-		Time:        now,
-	}
-	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record1))
-
-	// Should return one record
-	counts, err := s.GetAllLiveHolderCounts(ctx)
-	require.NoError(t, err)
-	assert.Len(t, counts, 1)
-	assert.EqualValues(t, 10, counts["mint-all-live-holder-1"].HolderCount)
-
-	record2 := &currency.HolderCountRecord{
-		Mint:        "mint-all-live-holder-2",
-		HolderCount: 20,
-		Time:        now,
-	}
-	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record2))
-
-	// Should return both records
-	counts, err = s.GetAllLiveHolderCounts(ctx)
-	require.NoError(t, err)
-	assert.Len(t, counts, 2)
-	assert.EqualValues(t, 10, counts["mint-all-live-holder-1"].HolderCount)
-	assert.EqualValues(t, 20, counts["mint-all-live-holder-2"].HolderCount)
-
-	// Update one mint and verify the change is reflected
-	record1Updated := &currency.HolderCountRecord{
-		Mint:        "mint-all-live-holder-1",
-		HolderCount: 15,
-		Time:        now.Add(time.Second),
-	}
-	require.NoError(t, s.PutLiveHolderCountRecord(ctx, record1Updated))
-
-	counts, err = s.GetAllLiveHolderCounts(ctx)
-	require.NoError(t, err)
-	assert.Len(t, counts, 2)
-	assert.EqualValues(t, 15, counts["mint-all-live-holder-1"].HolderCount)
-	assert.EqualValues(t, 20, counts["mint-all-live-holder-2"].HolderCount)
-}
-
-func assertEquivalentMetadataRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {
+func assertEquivalentRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) {
 	assert.Equal(t, obj1.Name, obj2.Name)
 	assert.Equal(t, obj1.Symbol, obj2.Symbol)
 	assert.Equal(t, obj1.Description, obj2.Description)

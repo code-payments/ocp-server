@@ -1,13 +1,6 @@
 // Package holder defines a focused store for currency creator mint holder
 // counts.
 //
-// It mirrors the holder-count portion of the larger ocp/data/currency store,
-// reusing that package's record type (currency.HolderCountRecord) and error
-// sentinels (currency.ErrNotFound, currency.ErrExists, currency.ErrInvalidRange,
-// currency.ErrInvalidInterval, currency.ErrStaleHolderState). A DynamoDB-backed
-// implementation lives in the dynamodb subpackage and an in-memory
-// implementation lives in memory.
-//
 // Records are keyed per mint (the number of mints is unbounded), so every record
 // is a single item — there is no map-of-all-mints row.
 package holder
