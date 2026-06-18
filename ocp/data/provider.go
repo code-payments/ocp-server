@@ -4,10 +4,6 @@ import (
 	pg "github.com/code-payments/ocp-server/database/postgres"
 )
 
-const (
-	maxCurrencyHistoryReqSize = 1024
-)
-
 type Provider interface {
 	BlockchainData
 	DatabaseData

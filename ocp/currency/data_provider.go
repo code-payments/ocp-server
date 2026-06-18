@@ -16,11 +16,15 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 
+	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/auth"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
+	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/usdc"
@@ -52,8 +56,12 @@ type cachedProtoMint struct {
 }
 
 type MintDataProvider struct {
-	log  *zap.Logger
-	data ocp_data.Provider
+	log *zap.Logger
+
+	data              ocp_data.Provider
+	exchangeRateStore exchange.Store
+	reserveStore      reserve.Store
+	holderStore       holder.Store
 
 	protoMintCacheTTL             time.Duration
 	exchangeRatePollInterval      time.Duration
@@ -102,6 +110,9 @@ type MintDataProvider struct {
 func NewMintDataProvider(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	exchangeRateStore exchange.Store,
+	reserveStore reserve.Store,
+	holderStore holder.Store,
 	protoMintCacheTTL,
 	exchangeRatePollInterval,
 	launchpadCurrencyPollInterval time.Duration,
@@ -110,6 +121,9 @@ func NewMintDataProvider(
 	return &MintDataProvider{
 		log:                           log,
 		data:                          data,
+		exchangeRateStore:             exchangeRateStore,
+		reserveStore:                  reserveStore,
+		holderStore:                   holderStore,
 		protoMintCacheTTL:             protoMintCacheTTL,
 		exchangeRatePollInterval:      exchangeRatePollInterval,
 		launchpadCurrencyPollInterval: launchpadCurrencyPollInterval,
@@ -474,6 +488,18 @@ func (m *MintDataProvider) GetLiveExchangeRates(ctx context.Context) (*LiveExcha
 	}
 
 	return m.exchangeRates, nil
+}
+
+// GetExchangeRateHistory returns historical exchange rate records for the core
+// mint, passing straight through to the underlying exchange rate store.
+func (m *MintDataProvider) GetExchangeRateHistory(ctx context.Context, symbol string, interval query.Interval, start, end time.Time, ordering query.Ordering) ([]*currency.ExchangeRateRecord, error) {
+	return m.exchangeRateStore.GetExchangeRatesInRange(ctx, symbol, interval, start, end, ordering)
+}
+
+// GetReserveHistory returns historical reserve records for a currency creator
+// mint, passing straight through to the underlying reserve store.
+func (m *MintDataProvider) GetReserveHistory(ctx context.Context, mint string, interval query.Interval, start, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
+	return m.reserveStore.GetReservesInRange(ctx, mint, interval, start, end, ordering)
 }
 
 // GetAllCachedReserveStates returns a snapshot of all currently cached reserve
@@ -856,7 +882,7 @@ func (m *MintDataProvider) pollExchangeRates(ctx context.Context) {
 }
 
 func (m *MintDataProvider) fetchAndUpdateExchangeRates(ctx context.Context, log *zap.Logger) {
-	rates, err := m.data.GetAllExchangeRates(ctx, time.Now())
+	rates, err := m.exchangeRateStore.GetAllExchangeRates(ctx, time.Now())
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to fetch exchange rates")
 		return
@@ -902,7 +928,7 @@ func (m *MintDataProvider) pollReserveState(ctx context.Context) {
 }
 
 func (m *MintDataProvider) fetchAndUpdateReserveStates(ctx context.Context) {
-	liveReserves, err := m.data.GetAllLiveCurrencyReserves(ctx)
+	liveReserves, err := m.reserveStore.GetAllLiveReserves(ctx)
 	if err == currency.ErrNotFound {
 		return
 	}
@@ -974,7 +1000,7 @@ func (m *MintDataProvider) pollHolderCounts(ctx context.Context) {
 }
 
 func (m *MintDataProvider) fetchAndUpdateHolderCounts(ctx context.Context) {
-	liveCounts, err := m.data.GetAllLiveCurrencyHolderCounts(ctx)
+	liveCounts, err := m.holderStore.GetAllLiveHolderCounts(ctx)
 	if err == currency.ErrNotFound {
 		return
 	}
@@ -983,10 +1009,15 @@ func (m *MintDataProvider) fetchAndUpdateHolderCounts(ctx context.Context) {
 		return
 	}
 
+	mints := make([]string, 0, len(liveCounts))
+	for mintAddr := range liveCounts {
+		mints = append(mints, mintAddr)
+	}
+
 	var includeWeeklyDeltas bool
 	oneWeekAgo := time.Now().Add(-7 * 24 * time.Hour)
 	endOfWeekAgoDay := time.Date(oneWeekAgo.Year(), oneWeekAgo.Month(), oneWeekAgo.Day(), 23, 59, 59, 0, time.UTC)
-	historicalCounts, err := m.data.GetAllCurrencyHolderCountsAtTime(ctx, endOfWeekAgoDay)
+	historicalCounts, err := m.holderStore.GetHolderCountsForDay(ctx, mints, endOfWeekAgoDay)
 	if err != nil && err != currency.ErrNotFound {
 		m.log.With(zap.Error(err)).Warn("failed to fetch historical holder counts for weekly delta")
 	} else {

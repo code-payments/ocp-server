@@ -15,12 +15,10 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	currency_holder "github.com/code-payments/ocp-server/ocp/data/currency/holder"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/ocp/worker"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
-)
-
-const (
-	historicalUpdateTimeInterval = time.Hour
 )
 
 var (
@@ -28,14 +26,18 @@ var (
 )
 
 type holderRuntime struct {
-	log  *zap.Logger
-	data ocp_data.Provider
+	log          *zap.Logger
+	data         ocp_data.Provider
+	reserveStore reserve.Store
+	holderStore  currency_holder.Store
 }
 
-func New(log *zap.Logger, data ocp_data.Provider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, reserveStore reserve.Store, holderStore currency_holder.Store) worker.Runtime {
 	return &holderRuntime{
-		log:  log,
-		data: data,
+		log:          log,
+		data:         data,
+		reserveStore: reserveStore,
+		holderStore:  holderStore,
 	}
 }
 
@@ -64,7 +66,7 @@ func (p *holderRuntime) Start(runtimeCtx context.Context, interval time.Duration
 }
 
 func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Context) {
-	liveReserveRecordsByMint, err := p.data.GetAllLiveCurrencyReserves(ctx)
+	liveReserveRecordsByMint, err := p.reserveStore.GetAllLiveReserves(ctx)
 	if err != nil {
 		p.log.With(zap.Error(err)).Warn("failed getting all available currencies")
 		return
@@ -81,7 +83,7 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 
 		now := time.Now()
 
-		err = p.data.PutLiveCurrencyHolderCount(ctx, &currency.HolderCountRecord{
+		err = p.holderStore.PutLiveHolderCount(ctx, &currency.HolderCountRecord{
 			Mint:        mint,
 			HolderCount: holderCount,
 			Time:        now,
@@ -91,28 +93,14 @@ func (p *holderRuntime) UpdateAllLaunchpadCurrencyHolderCounts(ctx context.Conte
 			continue
 		}
 
-		var shouldCreateHistoricalRecord bool
-		historicalRecord, err := p.data.GetCurrencyHolderCountAtTime(ctx, mint, now)
-		switch err {
-		case nil:
-			shouldCreateHistoricalRecord = time.Since(historicalRecord.Time) >= historicalUpdateTimeInterval
-		case currency.ErrNotFound:
-			shouldCreateHistoricalRecord = true
-		default:
-			log.With(zap.Error(err)).Warn("failed getting historical record")
+		err = p.holderStore.PutHistoricalHolderCount(ctx, &currency.HolderCountRecord{
+			Mint:        mint,
+			HolderCount: holderCount,
+			Time:        now,
+		})
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failed creating historical holder count")
 			continue
-		}
-
-		if shouldCreateHistoricalRecord {
-			err = p.data.PutHistoricalCurrencyHolderCount(ctx, &currency.HolderCountRecord{
-				Mint:        mint,
-				HolderCount: holderCount,
-				Time:        now,
-			})
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failed creating historical holder count")
-				continue
-			}
 		}
 	}
 }

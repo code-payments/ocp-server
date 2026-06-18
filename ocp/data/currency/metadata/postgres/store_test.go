@@ -8,8 +8,8 @@ import (
 	"github.com/ory/dockertest/v3"
 	"go.uber.org/zap"
 
-	"github.com/code-payments/ocp-server/ocp/data/currency"
-	"github.com/code-payments/ocp-server/ocp/data/currency/tests"
+	"github.com/code-payments/ocp-server/ocp/data/currency/metadata"
+	"github.com/code-payments/ocp-server/ocp/data/currency/metadata/tests"
 
 	postgrestest "github.com/code-payments/ocp-server/database/postgres/test"
 
@@ -19,17 +19,6 @@ import (
 const (
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableCreate = `
-	CREATE TABLE ocp__core_exchangerate (
-		id serial NOT NULL PRIMARY KEY, 
-
-		for_date VARCHAR(10) NOT NULL, 
-		for_timestamp TIMESTAMP WITH TIME ZONE NOT NULL, 
-		currency_code VARCHAR(3) NOT NULL, 
-		currency_rate NUMERIC(18, 9) NOT NULL,
-
-		CONSTRAINT ocp__core_exchangerate__uniq__timestamp__and__code UNIQUE (for_timestamp, currency_code),
-		CONSTRAINT ocp__core_exchangerate__currency_code CHECK (currency_code::text ~ '^[a-z]{3}$')
-	);
 	CREATE TABLE ocp__core_currencymetadata (
 		id serial NOT NULL PRIMARY KEY,
 
@@ -71,56 +60,16 @@ const (
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 	CREATE UNIQUE INDEX ocp__core_currencymetadata__name__idx ON ocp__core_currencymetadata (LOWER(name)) WHERE state != 8;
-	CREATE TABLE ocp__core_currencyreserve (
-		id serial NOT NULL PRIMARY KEY,
-
-		for_date VARCHAR(10) NOT NULL, 
-		for_timestamp TIMESTAMP WITH TIME ZONE NOT NULL, 
-		mint TEXT NOT NULL, 
-		supply_from_bonding BIGINT NOT NULL,
-
-		CONSTRAINT ocp__core_currencyreserve__uniq__timestamp__and__mint UNIQUE (for_timestamp, mint)
-	);
-	CREATE TABLE ocp__core_currencyreserve2 (
-		id serial NOT NULL PRIMARY KEY,
-
-		mint TEXT UNIQUE NOT NULL,
-		supply_from_bonding BIGINT NOT NULL,
-		slot BIGINT NOT NULL,
-		last_updated_at TIMESTAMP WITH TIME ZONE NOT NULL
-	);
-	CREATE TABLE ocp__core_currencyholdercount (
-		id serial NOT NULL PRIMARY KEY,
-
-		for_date VARCHAR(10) NOT NULL,
-		for_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-		mint TEXT NOT NULL,
-		holder_count BIGINT NOT NULL,
-
-		CONSTRAINT ocp__core_currencyholdercount__uniq__timestamp__and__mint UNIQUE (for_timestamp, mint)
-	);
-	CREATE TABLE ocp__core_currencyholdercount2 (
-		id serial NOT NULL PRIMARY KEY,
-
-		mint TEXT UNIQUE NOT NULL,
-		holder_count BIGINT NOT NULL,
-		last_updated_at TIMESTAMP WITH TIME ZONE NOT NULL
-	);
 	`
 
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableDestroy = `
-		DROP TABLE ocp__core_exchangerate;
 		DROP TABLE ocp__core_currencymetadata;
-		DROP TABLE ocp__core_currencyreserve;
-		DROP TABLE ocp__core_currencyreserve2;
-		DROP TABLE ocp__core_currencyholdercount;
-		DROP TABLE ocp__core_currencyholdercount2;
 	`
 )
 
 var (
-	testStore currency.Store
+	testStore metadata.Store
 	teardown  func()
 )
 
@@ -166,7 +115,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestCurrencyPostgresStore(t *testing.T) {
+func TestMetadata_PostgresStore(t *testing.T) {
 	tests.RunTests(t, testStore, teardown)
 }
 

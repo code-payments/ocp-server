@@ -11,20 +11,23 @@ import (
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	currency_reserve "github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/ocp/worker"
 )
 
 type reserveRuntime struct {
-	log  *zap.Logger
-	conf *conf
-	data ocp_data.Provider
+	log          *zap.Logger
+	conf         *conf
+	data         ocp_data.Provider
+	reserveStore currency_reserve.Store
 }
 
-func New(log *zap.Logger, data ocp_data.Provider, configProvider ConfigProvider) worker.Runtime {
+func New(log *zap.Logger, data ocp_data.Provider, reserveStore currency_reserve.Store, configProvider ConfigProvider) worker.Runtime {
 	return &reserveRuntime{
-		log:  log,
-		conf: configProvider(),
-		data: data,
+		log:          log,
+		conf:         configProvider(),
+		data:         data,
+		reserveStore: reserveStore,
 	}
 }
 
@@ -55,7 +58,7 @@ func (p *reserveRuntime) Start(runtimeCtx context.Context, interval time.Duratio
 func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context) {
 	staleThreshold := p.conf.staleThreshold.Get(ctx)
 
-	liveReserveStatesByMint, err := p.data.GetAllLiveCurrencyReserves(ctx)
+	liveReserveStatesByMint, err := p.reserveStore.GetAllLiveReserves(ctx)
 	if err != nil {
 		p.log.With(zap.Error(err)).Warn("failed getting all live reserve states")
 		return
@@ -72,7 +75,7 @@ func (p *reserveRuntime) UpdateAllLaunchpadCurrencyReserves(ctx context.Context)
 			}
 		}
 
-		err = p.data.PutHistoricalCurrencyReserve(ctx, &currency.ReserveRecord{
+		err = p.reserveStore.PutHistoricalReserve(ctx, &currency.ReserveRecord{
 			Mint:              mint,
 			SupplyFromBonding: liveReserveRecord.SupplyFromBonding,
 			Time:              now,
@@ -105,7 +108,7 @@ func (p *reserveRuntime) refreshLiveReserveState(ctx context.Context, log *zap.L
 		Slot:              slot,
 		Time:              time.Now(),
 	}
-	err = p.data.PutLiveCurrencyReserve(ctx, record)
+	err = p.reserveStore.PutLiveReserve(ctx, record)
 	if err != nil && err != currency.ErrStaleReserveState {
 		log.With(zap.Error(err)).Warn("failed to update live reserve state")
 		return nil, err

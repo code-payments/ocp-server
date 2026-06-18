@@ -11,6 +11,8 @@ import (
 
 	"github.com/code-payments/ocp-server/coinbase"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/integration"
@@ -19,18 +21,22 @@ import (
 )
 
 type runtime struct {
-	log             *zap.Logger
-	conf            *conf
-	data            ocp_data.Provider
-	vmIndexerClient indexerpb.IndexerClient
-	integration     integration.Swap
-	solanaNoncePool *transaction.LocalNoncePool
-	coinbaseClient  *coinbase.Client
+	log               *zap.Logger
+	conf              *conf
+	data              ocp_data.Provider
+	exchangeRateStore exchange.Store
+	reserveStore      reserve.Store
+	vmIndexerClient   indexerpb.IndexerClient
+	integration       integration.Swap
+	solanaNoncePool   *transaction.LocalNoncePool
+	coinbaseClient    *coinbase.Client
 }
 
 func New(
 	log *zap.Logger,
 	data ocp_data.Provider,
+	exchangeRateStore exchange.Store,
+	reserveStore reserve.Store,
 	vmIndexerClient indexerpb.IndexerClient,
 	integration integration.Swap,
 	solanaNoncePool *transaction.LocalNoncePool,
@@ -42,13 +48,15 @@ func New(
 	}
 
 	return &runtime{
-		log:             log,
-		conf:            configProvider(),
-		data:            data,
-		vmIndexerClient: vmIndexerClient,
-		integration:     integration,
-		solanaNoncePool: solanaNoncePool,
-		coinbaseClient:  coinbaseClient,
+		log:               log,
+		conf:              configProvider(),
+		data:              data,
+		exchangeRateStore: exchangeRateStore,
+		reserveStore:      reserveStore,
+		vmIndexerClient:   vmIndexerClient,
+		integration:       integration,
+		solanaNoncePool:   solanaNoncePool,
+		coinbaseClient:    coinbaseClient,
 	}, nil
 }
 

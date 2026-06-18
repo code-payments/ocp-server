@@ -8,6 +8,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
@@ -15,7 +16,7 @@ var (
 	liquidityPoolVaultCache = cache.NewCache(10_000)
 )
 
-func processPotentialCirculatingSupplyUpdate(ctx context.Context, data ocp_data.Provider, tokenAccount, mintAccount *common.Account, amount uint64, slot uint64) error {
+func processPotentialCirculatingSupplyUpdate(ctx context.Context, data ocp_data.Provider, reserveStore reserve.Store, tokenAccount, mintAccount *common.Account, amount uint64, slot uint64) error {
 	cachedVault, ok := liquidityPoolVaultCache.Retrieve(mintAccount.PublicKey().ToBase58())
 	if !ok {
 		metadataRecord, err := data.GetCurrencyMetadata(ctx, mintAccount.PublicKey().ToBase58())
@@ -33,11 +34,11 @@ func processPotentialCirculatingSupplyUpdate(ctx context.Context, data ocp_data.
 		return nil
 	}
 
-	return updateLiveReserveState(ctx, data, mintAccount.PublicKey().ToBase58(), amount, slot)
+	return updateLiveReserveState(ctx, reserveStore, mintAccount.PublicKey().ToBase58(), amount, slot)
 }
 
-func updateLiveReserveState(ctx context.Context, data ocp_data.Provider, mint string, vaultAmount uint64, slot uint64) error {
-	err := data.PutLiveCurrencyReserve(ctx, &currency.ReserveRecord{
+func updateLiveReserveState(ctx context.Context, reserveStore reserve.Store, mint string, vaultAmount uint64, slot uint64) error {
+	err := reserveStore.PutLiveReserve(ctx, &currency.ReserveRecord{
 		Mint:              mint,
 		SupplyFromBonding: currencycreator.DefaultMintMaxQuarkSupply - vaultAmount,
 		Slot:              slot,

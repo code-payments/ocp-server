@@ -10,7 +10,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/code-payments/ocp-server/cache"
-	currency_lib "github.com/code-payments/ocp-server/currency"
 	pg "github.com/code-payments/ocp-server/database/postgres"
 	"github.com/code-payments/ocp-server/database/query"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -23,6 +22,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	currency_metadata "github.com/code-payments/ocp-server/ocp/data/currency/metadata"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
@@ -40,7 +40,7 @@ import (
 	account_memory_client "github.com/code-payments/ocp-server/ocp/data/account/memory"
 	action_memory_client "github.com/code-payments/ocp-server/ocp/data/action/memory"
 	balance_memory_client "github.com/code-payments/ocp-server/ocp/data/balance/memory"
-	currency_memory_client "github.com/code-payments/ocp-server/ocp/data/currency/memory"
+	currency_metadata_memory_client "github.com/code-payments/ocp-server/ocp/data/currency/metadata/memory"
 	deposit_memory_client "github.com/code-payments/ocp-server/ocp/data/deposit/memory"
 	fulfillment_memory_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/memory"
 	intent_memory_client "github.com/code-payments/ocp-server/ocp/data/intent/memory"
@@ -58,7 +58,7 @@ import (
 	account_postgres_client "github.com/code-payments/ocp-server/ocp/data/account/postgres"
 	action_postgres_client "github.com/code-payments/ocp-server/ocp/data/action/postgres"
 	balance_postgres_client "github.com/code-payments/ocp-server/ocp/data/balance/postgres"
-	currency_postgres_client "github.com/code-payments/ocp-server/ocp/data/currency/postgres"
+	currency_metadata_postgres_client "github.com/code-payments/ocp-server/ocp/data/currency/metadata/postgres"
 	deposit_postgres_client "github.com/code-payments/ocp-server/ocp/data/deposit/postgres"
 	fulfillment_postgres_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/postgres"
 	intent_postgres_client "github.com/code-payments/ocp-server/ocp/data/intent/postgres"
@@ -76,10 +76,6 @@ import (
 
 // Cache Constants
 const (
-	maxExchangeRateCacheBudget    = 1000000 // 1 million
-	singleExchangeRateCacheWeight = 1
-	multiExchangeRateCacheWeight  = 60 // usually we get 60 exchange rates from CoinGecko for a single time interval
-
 	maxTimelockCacheBudget = 100000
 	timelockCacheTTL       = 5 * time.Second // Keep this relatively small
 )
@@ -131,10 +127,6 @@ type DatabaseData interface {
 
 	// Currency
 	// --------------------------------------------------------------------------------
-	GetExchangeRate(ctx context.Context, code currency_lib.Code, t time.Time) (*currency.ExchangeRateRecord, error)
-	GetAllExchangeRates(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error)
-	GetExchangeRateHistory(ctx context.Context, code currency_lib.Code, opts ...query.Option) ([]*currency.ExchangeRateRecord, error)
-	ImportExchangeRates(ctx context.Context, record *currency.MultiRateRecord) error
 	SaveCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error
 	GetCurrencyMetadata(ctx context.Context, mint string) (*currency.MetadataRecord, error)
 	GetAllCurrencyMetadataByState(ctx context.Context, state currency.MetadataState, opts ...query.Option) ([]*currency.MetadataRecord, error)
@@ -142,18 +134,6 @@ type DatabaseData interface {
 	GetAllCurrencyMints(ctx context.Context) ([]string, error)
 	CountCurrencyMints(ctx context.Context) (uint64, error)
 	IsCurrencyNameAvailable(ctx context.Context, name string) (bool, error)
-	PutHistoricalCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
-	GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
-	GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error)
-	PutLiveCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error
-	GetLiveCurrencyReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error)
-	GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error)
-	PutHistoricalCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error
-	GetCurrencyHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error)
-	GetAllCurrencyHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error)
-	PutLiveCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error
-	GetLiveCurrencyHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error)
-	GetAllLiveCurrencyHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error)
 
 	// Deposits
 	// --------------------------------------------------------------------------------
@@ -286,7 +266,7 @@ type DatabaseProvider struct {
 	accounts     account.Store
 	actions      action.Store
 	balance      balance.Store
-	currencies   currency.Store
+	currencies   currency_metadata.Store
 	deposits     deposit.Store
 	fulfillments fulfillment.Store
 	intents      intent.Store
@@ -301,7 +281,6 @@ type DatabaseProvider struct {
 	vmRam        vm_ram.Store
 	vmStorage    vm_storage.Store
 
-	exchangeCache cache.Cache
 	timelockCache cache.Cache
 
 	db *sqlx.DB
@@ -332,7 +311,7 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		accounts:     account_postgres_client.New(db),
 		actions:      action_postgres_client.New(db),
 		balance:      balance_postgres_client.New(db),
-		currencies:   currency_postgres_client.New(db),
+		currencies:   currency_metadata_postgres_client.New(db),
 		deposits:     deposit_postgres_client.New(db),
 		fulfillments: fulfillment_postgres_client.New(db),
 		intents:      intent_postgres_client.New(db),
@@ -347,7 +326,6 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 		vmRam:        vm_ram_postgres_client.New(db),
 		vmStorage:    vm_storage_postgres_client.New(db),
 
-		exchangeCache: cache.NewCache(maxExchangeRateCacheBudget),
 		timelockCache: cache.NewCache(maxTimelockCacheBudget),
 
 		db: sqlx.NewDb(db, "pgx"),
@@ -359,7 +337,7 @@ func NewTestDatabaseProvider() DatabaseData {
 		accounts:     account_memory_client.New(),
 		actions:      action_memory_client.New(),
 		balance:      balance_memory_client.New(),
-		currencies:   currency_memory_client.New(),
+		currencies:   currency_metadata_memory_client.New(),
 		deposits:     deposit_memory_client.New(),
 		fulfillments: fulfillment_memory_client.New(),
 		intents:      intent_memory_client.New(),
@@ -374,7 +352,6 @@ func NewTestDatabaseProvider() DatabaseData {
 		vmRam:        vm_ram_memory_client.New(),
 		vmStorage:    vm_storage_memory_client.New(),
 
-		exchangeCache: cache.NewCache(maxExchangeRateCacheBudget),
 		timelockCache: nil, // Shouldn't be used for tests
 	}
 }
@@ -489,56 +466,6 @@ func (dp *DatabaseProvider) GetExternalBalanceCheckpoint(ctx context.Context, ac
 
 // Currencies
 // --------------------------------------------------------------------------------
-func (dp *DatabaseProvider) GetExchangeRate(ctx context.Context, code currency_lib.Code, t time.Time) (*currency.ExchangeRateRecord, error) {
-	key := fmt.Sprintf("%s:%s", code, t.Truncate(5*time.Minute).Format(time.RFC3339))
-	if rate, ok := dp.exchangeCache.Retrieve(key); ok {
-		return rate.(*currency.ExchangeRateRecord), nil
-	}
-
-	rate, err := dp.currencies.GetExchangeRate(ctx, string(code), t)
-	if err != nil {
-		return nil, err
-	}
-
-	dp.exchangeCache.Insert(key, rate, singleExchangeRateCacheWeight)
-
-	return rate, nil
-}
-func (dp *DatabaseProvider) GetAllExchangeRates(ctx context.Context, t time.Time) (*currency.MultiRateRecord, error) {
-	key := fmt.Sprintf("everything:%s", t.Truncate(5*time.Minute).Format(time.RFC3339))
-	if rates, ok := dp.exchangeCache.Retrieve(key); ok {
-		return rates.(*currency.MultiRateRecord), nil
-	}
-
-	rates, err := dp.currencies.GetAllExchangeRates(ctx, t)
-	if err != nil {
-		return nil, err
-	}
-	dp.exchangeCache.Insert(key, rates, multiExchangeRateCacheWeight)
-
-	return rates, nil
-}
-func (dp *DatabaseProvider) GetExchangeRateHistory(ctx context.Context, code currency_lib.Code, opts ...query.Option) ([]*currency.ExchangeRateRecord, error) {
-	req := query.QueryOptions{
-		Limit:     maxCurrencyHistoryReqSize,
-		End:       time.Now(),
-		SortBy:    query.Ascending,
-		Supported: query.CanLimitResults | query.CanSortBy | query.CanBucketBy | query.CanQueryByStartTime | query.CanQueryByEndTime,
-	}
-	req.Apply(opts...)
-
-	if req.Start.IsZero() {
-		return nil, query.ErrQueryNotSupported
-	}
-	if req.Limit > maxCurrencyHistoryReqSize {
-		return nil, query.ErrQueryNotSupported
-	}
-
-	return dp.currencies.GetExchangeRatesInRange(ctx, string(code), req.Interval, req.Start, req.End, req.SortBy)
-}
-func (dp *DatabaseProvider) ImportExchangeRates(ctx context.Context, data *currency.MultiRateRecord) error {
-	return dp.currencies.PutExchangeRates(ctx, data)
-}
 func (dp *DatabaseProvider) SaveCurrencyMetadata(ctx context.Context, record *currency.MetadataRecord) error {
 	return dp.currencies.SaveMetadata(ctx, record)
 }
@@ -563,57 +490,6 @@ func (dp *DatabaseProvider) CountCurrencyMints(ctx context.Context) (uint64, err
 }
 func (dp *DatabaseProvider) IsCurrencyNameAvailable(ctx context.Context, name string) (bool, error) {
 	return dp.currencies.IsNameAvailable(ctx, name)
-}
-func (dp *DatabaseProvider) PutHistoricalCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
-	return dp.currencies.PutHistoricalReserveRecord(ctx, record)
-}
-func (dp *DatabaseProvider) GetCurrencyReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error) {
-	return dp.currencies.GetReserveAtTime(ctx, mint, t)
-}
-func (dp *DatabaseProvider) GetCurrencyReserveHistory(ctx context.Context, mint string, opts ...query.Option) ([]*currency.ReserveRecord, error) {
-	req := query.QueryOptions{
-		Limit:     maxCurrencyHistoryReqSize,
-		End:       time.Now(),
-		SortBy:    query.Ascending,
-		Supported: query.CanLimitResults | query.CanSortBy | query.CanBucketBy | query.CanQueryByStartTime | query.CanQueryByEndTime,
-	}
-	req.Apply(opts...)
-
-	if req.Start.IsZero() {
-		return nil, query.ErrQueryNotSupported
-	}
-	if req.Limit > maxCurrencyHistoryReqSize {
-		return nil, query.ErrQueryNotSupported
-	}
-
-	return dp.currencies.GetReservesInRange(ctx, mint, req.Interval, req.Start, req.End, req.SortBy)
-}
-func (dp *DatabaseProvider) PutLiveCurrencyReserve(ctx context.Context, record *currency.ReserveRecord) error {
-	return dp.currencies.PutLiveReserveRecord(ctx, record)
-}
-func (dp *DatabaseProvider) GetLiveCurrencyReserve(ctx context.Context, mint string) (*currency.ReserveRecord, error) {
-	return dp.currencies.GetLiveReserve(ctx, mint)
-}
-func (dp *DatabaseProvider) GetAllLiveCurrencyReserves(ctx context.Context) (map[string]*currency.ReserveRecord, error) {
-	return dp.currencies.GetAllLiveReserves(ctx)
-}
-func (dp *DatabaseProvider) PutHistoricalCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error {
-	return dp.currencies.PutHistoricalHolderCountRecord(ctx, record)
-}
-func (dp *DatabaseProvider) GetCurrencyHolderCountAtTime(ctx context.Context, mint string, t time.Time) (*currency.HolderCountRecord, error) {
-	return dp.currencies.GetHolderCountAtTime(ctx, mint, t)
-}
-func (dp *DatabaseProvider) GetAllCurrencyHolderCountsAtTime(ctx context.Context, t time.Time) (map[string]*currency.HolderCountRecord, error) {
-	return dp.currencies.GetAllHolderCountsAtTime(ctx, t)
-}
-func (dp *DatabaseProvider) PutLiveCurrencyHolderCount(ctx context.Context, record *currency.HolderCountRecord) error {
-	return dp.currencies.PutLiveHolderCountRecord(ctx, record)
-}
-func (dp *DatabaseProvider) GetLiveCurrencyHolderCount(ctx context.Context, mint string) (*currency.HolderCountRecord, error) {
-	return dp.currencies.GetLiveHolderCount(ctx, mint)
-}
-func (dp *DatabaseProvider) GetAllLiveCurrencyHolderCounts(ctx context.Context) (map[string]*currency.HolderCountRecord, error) {
-	return dp.currencies.GetAllLiveHolderCounts(ctx)
 }
 
 // Deposits
