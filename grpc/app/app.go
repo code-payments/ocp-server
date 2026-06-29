@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	health_grpc "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/grpc/headers"
@@ -261,15 +262,23 @@ func Run(app App, options ...Option) error {
 		os.Exit(1)
 	}
 
-	secureServ := grpc.NewServer(
+	keepaliveOpts := []grpc.ServerOption{
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     15 * time.Minute,
+			MaxConnectionAge:      30 * time.Minute,
+			MaxConnectionAgeGrace: config.ShutdownGracePeriod / 2,
+		}),
+	}
+
+	secureServ := grpc.NewServer(append([]grpc.ServerOption{
 		grpc.Creds(transportCreds),
 		grpc_middleware.WithUnaryServerChain(opts.unaryServerInterceptors...),
 		grpc_middleware.WithStreamServerChain(opts.streamServerInterceptors...),
-	)
-	insecureServ := grpc.NewServer(
+	}, keepaliveOpts...)...)
+	insecureServ := grpc.NewServer(append([]grpc.ServerOption{
 		grpc_middleware.WithUnaryServerChain(opts.unaryServerInterceptors...),
 		grpc_middleware.WithStreamServerChain(opts.streamServerInterceptors...),
-	)
+	}, keepaliveOpts...)...)
 	app.RegisterWithGRPC(secureServ)
 	app.RegisterWithGRPC(insecureServ)
 

@@ -68,7 +68,7 @@ var defaultConfig = BaseConfig{
 	InsecureListenAddress: "localhost:8086",
 	DebugListenAddress:    ":8123",
 
-	ShutdownGracePeriod: 30 * time.Second,
+	ShutdownGracePeriod: 60 * time.Second,
 
 	EnablePprof:  true,
 	EnableExpvar: true,
