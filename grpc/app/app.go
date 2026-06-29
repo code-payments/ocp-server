@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/tls"
 	"expvar"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/newrelic/go-agent/v3/integrations/logcontext-v2/nrzap"
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/pkg/errors"
@@ -21,10 +23,12 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	health_grpc "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/grpc/headers"
@@ -233,16 +237,24 @@ func Run(app App, options ...Option) error {
 		}
 	}
 
+	// Recover from panics in handlers (and the downstream interceptors) so that
+	// a single panicking RPC can't take down the entire process. This must be
+	// the outermost interceptor so it also protects everything below it; the
+	// handler itself records the panic since it bypasses the metrics trace.
+	recoveryOpt := grpc_recovery.WithRecoveryHandlerContext(panicRecoveryHandler(log))
+
 	// Metrics interceptor should be near the top of the chain, so we can
 	// capture as many calls as possible. However, it does need to be after
 	// headers since it relies on certain header values being present.
 	defaultUnaryServerInterceptors := []grpc.UnaryServerInterceptor{
+		grpc_recovery.UnaryServerInterceptor(recoveryOpt),
 		headers.UnaryServerInterceptor(),
 		grpc_metrics.UnaryServerInterceptor(metricsProvider, config.UserAgentName),
 		validation.UnaryServerInterceptor(log),
 		client.MinVersionUnaryServerInterceptor(config.UserAgentName),
 	}
 	defaultStreamServerInterceptors := []grpc.StreamServerInterceptor{
+		grpc_recovery.StreamServerInterceptor(recoveryOpt),
 		headers.StreamServerInterceptor(),
 		grpc_metrics.StreamServerInterceptor(metricsProvider, config.UserAgentName),
 		validation.StreamServerInterceptor(log),
@@ -282,8 +294,14 @@ func Run(app App, options ...Option) error {
 	app.RegisterWithGRPC(secureServ)
 	app.RegisterWithGRPC(insecureServ)
 
-	health_grpc.RegisterHealthServer(secureServ, health.NewServer())
-	health_grpc.RegisterHealthServer(insecureServ, health.NewServer())
+	// Use a single health server across both gRPC servers so its serving status
+	// can be driven centrally. The app has already been initialized at this
+	// point, so it is ready to serve; the status is flipped to NOT_SERVING on
+	// shutdown so load balancers stop routing new traffic before we drain.
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", health_grpc.HealthCheckResponse_SERVING)
+	health_grpc.RegisterHealthServer(secureServ, healthServer)
+	health_grpc.RegisterHealthServer(insecureServ, healthServer)
 
 	secureServShutdownCh := make(chan struct{})
 	inssecureServShutdownCh := make(chan struct{})
@@ -329,6 +347,11 @@ func Run(app App, options ...Option) error {
 
 	shutdownCh := make(chan struct{})
 	go func() {
+		// Mark the service as not serving before draining so that load balancers
+		// and readiness probes stop routing new traffic to this instance while
+		// in-flight requests are allowed to complete by GracefulStop.
+		healthServer.Shutdown()
+
 		// Both the gRPC server and the application should have idempotent
 		// shutdown methods, so it's fine call them both, regardless of the
 		// shutdown condition.
@@ -350,5 +373,20 @@ func Run(app App, options ...Option) error {
 		return nil
 	case <-time.After(config.ShutdownGracePeriod):
 		return errors.Errorf("failed to stop the application within %v", config.ShutdownGracePeriod)
+	}
+}
+
+// panicRecoveryHandler returns a gRPC recovery handler that logs the panic with
+// a stack trace and converts the panic into a gRPC Internal error instead of
+// letting it crash the process.
+func panicRecoveryHandler(log *zap.Logger) grpc_recovery.RecoveryHandlerFuncContext {
+	return func(ctx context.Context, p interface{}) error {
+		log.Error(
+			"recovered from panic in grpc handler",
+			zap.Any("panic", p),
+			zap.Stack("stack"),
+		)
+
+		return status.Errorf(codes.Internal, "internal server error")
 	}
 }
