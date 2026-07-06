@@ -14,7 +14,7 @@ const (
 	CoreMintPublicKeyString = usdf.Mint
 	CoreMintQuarksPerUnit   = uint64(usdf.QuarksPerUsdf)
 	CoreMintDecimals        = usdf.Decimals
-	CoreMintName            = "USD on Flipcash"
+	CoreMintName            = "USDF"
 	CoreMintSymbol          = "USDF"
 	CoreMintDescription     = "USDF is a fully backed digital dollar created in partnership with Coinbase. USDF can be used to buy currencies on Flipcash, or can be withdrawn to any other crypto wallet that supports the Solana blockchain. USDF can also be sold, allowing you to move your funds into a traditional bank account."
 
