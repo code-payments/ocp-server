@@ -449,7 +449,7 @@ func NewReserveBuySellSwapHandler(
 		amount:          amount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 400_000,
+		computeUnitLimit: 250_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_sell_v0",
 	}
