@@ -168,10 +168,6 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("swap must involve core mint"))
-	}
-
 	if bytes.Equal(fromMint.PublicKey().ToBytes(), toMint.PublicKey().ToBytes()) {
 		return handleStatefulSwapError(streamer, NewSwapValidationError("must swap between two different mints"))
 	}
@@ -284,29 +280,41 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported", initiateReserveSwapReq.FundingSource))
 	}
 
-	otherMint := fromMint
-	if common.IsCoreMint(otherMint) {
-		otherMint = toMint
-	}
+	isSell := !common.IsCoreMint(fromMint)
+	isBuy := !common.IsCoreMint(toMint)
 
+	var destinationCurrencyMetadataRecord *currency.MetadataRecord
 	var initializesMint bool
-	currencyMetadataRecord, err := s.data.GetCurrencyMetadata(ctx, otherMint.PublicKey().ToBase58())
-	if err == currency.ErrNotFound {
-		return handleStatefulSwapError(streamer, NewSwapValidationError("mint not found"))
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting destination timelock record")
-		return handleStatefulSwapError(streamer, err)
-	}
-	switch currencyMetadataRecord.State {
-	case currency.MetadataStateAvailable:
-		initializesMint = false
-	case currency.MetadataStateWaitingForInitialPurchase:
-		initializesMint = true
-	default:
-		return handleStatefulSwapError(streamer, NewSwapDeniedError("mint is being initialized"))
+	if isBuy {
+		destinationCurrencyMetadataRecord, err = s.data.GetCurrencyMetadata(ctx, toMint.PublicKey().ToBase58())
+		if err == currency.ErrNotFound {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("mint not found"))
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting destination currency metadata record")
+			return handleStatefulSwapError(streamer, err)
+		}
+		switch destinationCurrencyMetadataRecord.State {
+		case currency.MetadataStateAvailable:
+			initializesMint = false
+		case currency.MetadataStateWaitingForInitialPurchase:
+			if !common.IsCoreMint(fromMint) {
+				return handleStatefulSwapError(streamer, NewSwapDeniedError("new currency can only be created from the core mint"))
+			}
+			initializesMint = true
+		default:
+			return handleStatefulSwapError(streamer, NewSwapDeniedError("mint is being initialized"))
+		}
 	}
 
-	if !initializesMint && !common.IsCoreMint(fromMint) {
+	if isSell {
+		sourceCurrencyMetadataRecord, err := s.data.GetCurrencyMetadata(ctx, fromMint.PublicKey().ToBase58())
+		if err == currency.ErrNotFound {
+			return handleStatefulSwapError(streamer, NewSwapValidationError("mint not found"))
+		} else if err != nil {
+			log.With(zap.Error(err)).Warn("failure getting source currency metadata record")
+			return handleStatefulSwapError(streamer, err)
+		}
+
 		liveReserveState, err := s.mintDataProvider.GetLiveReserveState(ctx, fromMint)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure getting live reserve state")
@@ -317,7 +325,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			CurrentSupplyInQuarks: liveReserveState.SupplyFromBonding,
 			SellAmountInQuarks:    initiateReserveSwapReq.SwapAmount,
 			ValueMintDecimals:     uint8(common.CoreMintDecimals),
-			SellFeeBps:            currencyMetadataRecord.SellFeeBps,
+			SellFeeBps:            sourceCurrencyMetadataRecord.SellFeeBps,
 		})
 		if estimatedFees == 0 {
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("swap would not generate a sell fee"))
@@ -370,7 +378,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapValidationError("owner must be swap authority"))
 		}
 
-		if owner.PublicKey().ToBase58() != currencyMetadataRecord.CreatedBy {
+		if owner.PublicKey().ToBase58() != destinationCurrencyMetadataRecord.CreatedBy {
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("only the currency creator can buy initial tokens"))
 		}
 
@@ -379,7 +387,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		}
 
 		// The VM is not supported yet, so we need to work around GetVmConfigForMint
-		destinationVaultRecord, err := s.data.GetKey(ctx, currencyMetadataRecord.Authority)
+		destinationVaultRecord, err := s.data.GetKey(ctx, destinationCurrencyMetadataRecord.Authority)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure getting destination vm authority vault record")
 			return handleStatefulSwapError(streamer, err)
@@ -450,7 +458,17 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			initiateReserveSwapReq.FeeAmount,
 			selectedNonce,
 		)
-	} else if common.IsCoreMint(fromMint) {
+	} else if isBuy && isSell {
+		swapHandler = NewReserveBuySellSwapHandler(
+			s.data,
+			owner,
+			swapAuthority,
+			fromMint,
+			toMint,
+			initiateReserveSwapReq.SwapAmount,
+			selectedNonce,
+		)
+	} else if isBuy {
 		swapHandler = NewReserveBuySwapHandler(
 			s.data,
 			owner,
@@ -459,22 +477,12 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
 		)
-	} else if common.IsCoreMint(toMint) {
+	} else {
 		swapHandler = NewReserveSellSwapHandler(
 			s.data,
 			owner,
 			swapAuthority,
 			fromMint,
-			initiateReserveSwapReq.SwapAmount,
-			selectedNonce,
-		)
-	} else {
-		swapHandler = NewReserveBuySellSwapHandler(
-			s.data,
-			owner,
-			swapAuthority,
-			fromMint,
-			toMint,
 			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
 		)
@@ -639,8 +647,8 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		}
 
 		if initializesMint {
-			currencyMetadataRecord.State = currency.MetadataStateFundingAuthority
-			err = s.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
+			destinationCurrencyMetadataRecord.State = currency.MetadataStateFundingAuthority
+			err = s.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failure saving currency metadata record")
 				return err

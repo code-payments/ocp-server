@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/code-payments/ocp-server/metrics"
-	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
@@ -52,23 +51,11 @@ func recordSwapCountEvent(ctx context.Context, state swap.State, count uint64) {
 }
 
 func recordSwapFinalizedEvent(ctx context.Context, swapRecord *swap.Record, quarksBought uint64) {
-	if !common.IsCoreMintUsdStableCoin() {
-		return
-	}
-
-	var usdMarketValue float64
-	if common.CoreMintAccount.PublicKey().ToBase58() == swapRecord.FromMint {
-		usdMarketValue = float64(swapRecord.SwapAmount) / float64(common.CoreMintQuarksPerUnit)
-	} else {
-		usdMarketValue = float64(quarksBought) / float64(common.CoreMintQuarksPerUnit)
-	}
-
 	metrics.RecordEvent(ctx, swapFinalizedEventName, map[string]interface{}{
-		"id":               swapRecord.Id,
-		"from_mint":        swapRecord.FromMint,
-		"to_mint":          swapRecord.ToMint,
-		"quarks_sold":      swapRecord.SwapAmount,
-		"quarks_bought":    quarksBought,
-		"usd_market_value": usdMarketValue,
+		"id":            swapRecord.Id,
+		"from_mint":     swapRecord.FromMint,
+		"to_mint":       swapRecord.ToMint,
+		"quarks_sold":   swapRecord.SwapAmount,
+		"quarks_bought": quarksBought,
 	})
 }

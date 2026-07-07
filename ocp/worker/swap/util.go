@@ -532,12 +532,10 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 	if !common.IsCoreMintUsdStableCoin() {
 		return 0, false, errors.New("core mint is not a usd stable coin")
 	}
-	if !common.IsCoreMint(fromMint) && !common.IsCoreMint(toMint) {
-		return 0, false, errors.New("core mint must be involved in swap")
-	}
 
+	var destinationCurrencyMetadataRecord *currency.MetadataRecord
 	if !common.IsCoreMint(toMint) {
-		destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+		destinationCurrencyMetadataRecord, err = p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
 		if err != nil {
 			return 0, false, err
 		}
@@ -599,8 +597,26 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 		nativeAmountWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
 		usdMarketValueWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
 
-		if common.IsCoreMint(toMint) {
-			usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, p.exchangeRateStore, p.reserveStore, common.CoreMintAccount, uint64(deltaQuarksIntoOmnibus), time.Now())
+		if !common.IsCoreMint(fromMint) {
+			coreMintQuarksFromSell := uint64(deltaQuarksIntoOmnibus)
+			if !common.IsCoreMint(toMint) {
+				destinationCurrencyAccounts, err := common.GetLaunchpadCurrencyAccounts(destinationCurrencyMetadataRecord)
+				if err != nil {
+					return 0, false, err
+				}
+
+				coreMintQuarksIntoDestinationPool, err := transaction_util.GetDeltaQuarksFromTokenBalances(destinationCurrencyAccounts.VaultBase, tokenBalances)
+				if err != nil {
+					return 0, false, err
+				}
+				if coreMintQuarksIntoDestinationPool <= 0 {
+					return 0, false, errors.New("delta quarks into destination pool base vault is not positive")
+				}
+
+				coreMintQuarksFromSell = uint64(coreMintQuarksIntoDestinationPool)
+			}
+
+			usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, p.exchangeRateStore, p.reserveStore, common.CoreMintAccount, coreMintQuarksFromSell, time.Now())
 			if err != nil {
 				return 0, false, err
 			}
@@ -610,11 +626,17 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 				big.NewFloat(0.99).SetPrec(128),
 			).Float64()
 
-			exchangeCurrency = currency_lib.USD
-			nativeAmountWithoutFees = usdMarketValueWithoutFees
+			// A sell settles into the core mint, so its native value is reported in USD. A
+			// cross-currency swap keeps the client's original exchange currency and
+			// native amount (discounted by the sell fee below); only its USD market
+			// value is reconciled to the realized core mint.
+			if common.IsCoreMint(toMint) {
+				exchangeCurrency = currency_lib.USD
+				nativeAmountWithoutFees = usdMarketValueWithoutFees
+			}
 
-			// Update funding intent record with actual USD market value for
-			// consistent USD cost basis
+			// Reconcile the source funding payment's cost basis to the core mint actually
+			// realized by the sell.
 			fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue = usdMarketValueWithoutFees
 			err = p.data.SaveIntent(ctx, fundingIntentRecord)
 			if err != nil {
