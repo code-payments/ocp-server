@@ -20,9 +20,11 @@ import (
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/coinbase"
+	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
@@ -297,9 +299,6 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		case currency.MetadataStateAvailable:
 			initializesMint = false
 		case currency.MetadataStateWaitingForInitialPurchase:
-			if !common.IsCoreMint(fromMint) {
-				return handleStatefulSwapError(streamer, NewSwapDeniedError("new currency can only be created from the core mint"))
-			}
 			initializesMint = true
 		default:
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("mint is being initialized"))
@@ -333,6 +332,8 @@ func (s *transactionServer) handleReserveStatefulSwap(
 	}
 
 	var destinationVmAuthority *common.Account
+	var treasury *common.Account
+	var purchaseCoreQuarks uint64
 	if !initializesMint {
 		if owner.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58() {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
@@ -382,20 +383,73 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("only the currency creator can buy initial tokens"))
 		}
 
-		if !common.IsCoreMint(fromMint) {
-			return handleStatefulSwapError(streamer, NewSwapValidationError("source mint must be the core mint"))
-		}
+		expectedPurchaseQuarks := s.conf.newCurrencyPurchaseQuarks.Get(ctx)
+		expectedFeeQuarks := s.conf.newCurrencyFeeQuarks.Get(ctx)
+		purchaseCoreQuarks = expectedPurchaseQuarks
 
-		// The VM is not supported yet, so we need to work around GetVmConfigForMint
-		destinationVaultRecord, err := s.data.GetKey(ctx, destinationCurrencyMetadataRecord.Authority)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("failure getting destination vm authority vault record")
-			return handleStatefulSwapError(streamer, err)
-		}
-		destinationVmAuthority, err = common.NewAccountFromPrivateKeyString(destinationVaultRecord.PrivateKey)
-		if err != nil {
-			log.With(zap.Error(err)).Warn("invalid destination vm authority private key")
-			return handleStatefulSwapError(streamer, err)
+		if common.IsCoreMint(fromMint) {
+			if initiateReserveSwapReq.SwapAmount != expectedPurchaseQuarks {
+				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("swap amount must be %d quarks", expectedPurchaseQuarks))
+			}
+			if initiateReserveSwapReq.FeeAmount != expectedFeeQuarks {
+				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("fee amount must be %d quarks", expectedFeeQuarks))
+			}
+
+			// The VM is not supported yet, so we need to work around GetVmConfigForMint
+			destinationVaultRecord, err := s.data.GetKey(ctx, destinationCurrencyMetadataRecord.Authority)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure getting destination vm authority vault record")
+				return handleStatefulSwapError(streamer, err)
+			}
+			destinationVmAuthority, err = common.NewAccountFromPrivateKeyString(destinationVaultRecord.PrivateKey)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("invalid destination vm authority private key")
+				return handleStatefulSwapError(streamer, err)
+			}
+		} else {
+			if initiateReserveSwapReq.FundingSource != transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT {
+				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported for new currency purchases", initiateReserveSwapReq.FundingSource))
+			}
+
+			expectedFullUsdValue := float64(expectedPurchaseQuarks+expectedFeeQuarks) / float64(common.CoreMintQuarksPerUnit)
+			expectedFeeUsdValue := float64(expectedFeeQuarks) / float64(common.CoreMintQuarksPerUnit)
+
+			fullAmountExchangeData := initiateReserveSwapReq.FullAmountExchangeData
+			if fullAmountExchangeData == nil {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("full amount exchange data is required"))
+			}
+			if ok, message := currency_util.ValidateClientExchangeData(fullAmountExchangeData); !ok {
+				return handleStatefulSwapError(streamer, NewSwapValidationError(message))
+			}
+
+			exchangeDataMint, err := common.NewAccountFromProto(fullAmountExchangeData.Mint)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("invalid full amount exchange data mint")
+				return handleStatefulSwapError(streamer, err)
+			}
+			if !bytes.Equal(exchangeDataMint.PublicKey().ToBytes(), fromMint.PublicKey().ToBytes()) {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("full amount exchange data mint must be the source mint"))
+			}
+			if fullAmountExchangeData.Quarks != initiateReserveSwapReq.SwapAmount+initiateReserveSwapReq.FeeAmount {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("full amount exchange data quarks must be the full swap and fee amount"))
+			}
+			if fullAmountExchangeData.CoreMintFiatExchangeRate.ExchangeRate.CurrencyCode != string(currency_lib.USD) {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("full amount exchange data must be in usd"))
+			}
+			if fullAmountExchangeData.NativeAmount != expectedFullUsdValue {
+				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("full amount must be valued at %.2f usd", expectedFullUsdValue))
+			}
+
+			if ok, _ := currency_util.ValidateClientUsdFeeValue(
+				fromMint,
+				initiateReserveSwapReq.FeeAmount,
+				expectedFeeUsdValue,
+				fullAmountExchangeData.LaunchpadCurrencyReserveState,
+			); !ok {
+				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("fee amount must be valued at %.2f usd", expectedFeeUsdValue))
+			}
+
+			treasury = s.swapTreasury
 		}
 	}
 
@@ -448,7 +502,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 	}()
 
 	var swapHandler SwapHandler
-	if initializesMint {
+	if initializesMint && common.IsCoreMint(fromMint) {
 		swapHandler, err = NewReserveCreateAndBuySwapHandler(
 			ctx,
 			s.data,
@@ -456,6 +510,19 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			toMint,
 			initiateReserveSwapReq.SwapAmount,
 			initiateReserveSwapReq.FeeAmount,
+			selectedNonce,
+		)
+	} else if initializesMint {
+		swapHandler, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(
+			ctx,
+			s.data,
+			owner,
+			fromMint,
+			toMint,
+			initiateReserveSwapReq.SwapAmount,
+			initiateReserveSwapReq.FeeAmount,
+			treasury,
+			purchaseCoreQuarks,
 			selectedNonce,
 		)
 	} else if isBuy && isSell {
@@ -586,11 +653,17 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		copy(txn.Signatures[i][:], protoSignature.Value)
 	}
 
-	err = txn.Sign(
+	serverSigners := []ed25519.PrivateKey{
 		common.GetSubsidizer().PrivateKey().ToBytes(),
 		sourceVmConfig.Authority.PrivateKey().ToBytes(),
-		destinationVmAuthority.PrivateKey().ToBytes(),
-	)
+	}
+	if destinationVmAuthority != nil {
+		serverSigners = append(serverSigners, destinationVmAuthority.PrivateKey().ToBytes())
+	}
+	if treasury != nil {
+		serverSigners = append(serverSigners, treasury.PrivateKey().ToBytes())
+	}
+	err = txn.Sign(serverSigners...)
 	if err != nil {
 		log.With(zap.Error(err)).Info("failure signing transaction")
 		return handleStatefulSwapError(streamer, err)
@@ -647,7 +720,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		}
 
 		if initializesMint {
-			destinationCurrencyMetadataRecord.State = currency.MetadataStateFundingAuthority
+			destinationCurrencyMetadataRecord.State = currency.MetadataStatePrePurchaseSetup
 			err = s.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failure saving currency metadata record")
@@ -773,7 +846,7 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		return handleStatefulSwapError(streamer, NewSwapValidationError("swap amount must be positive"))
 	}
 
-	expectedFeeQuarks := uint64(s.conf.createOnSendWithdrawalUsdFee.Get(ctx) * float64(common.CoreMintQuarksPerUnit))
+	expectedFeeQuarks := s.conf.createOnSendWithdrawalFeeQuarks.Get(ctx)
 	if initiateStablecoinSwapReq.FeeAmount != expectedFeeQuarks {
 		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("fee amount must be %d quarks", expectedFeeQuarks))
 	}

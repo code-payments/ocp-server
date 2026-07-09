@@ -7,6 +7,7 @@ import (
 	"github.com/code-payments/ocp-server/config/env"
 	"github.com/code-payments/ocp-server/config/memory"
 	"github.com/code-payments/ocp-server/config/wrapper"
+	"github.com/code-payments/ocp-server/ocp/common"
 )
 
 const (
@@ -30,8 +31,21 @@ const (
 	FeeCollectorOwnerPublicKeyConfigEnvName = envConfigPrefix + "FEE_COLLECTOR_OWNER_PUBLIC_KEY"
 	defaultFeeCollectorPublicKey            = "invalid" // Ensure something valid is set
 
-	CreateOnSendWithdrawalUsdFeeConfigEnvName = envConfigPrefix + "CREATE_ON_SEND_WITHDRAWAL_USD_FEE"
-	defaultCreateOnSendWithdrawalUsdFee       = 0.50
+	CreateOnSendWithdrawalFeeQuarksConfigEnvName = envConfigPrefix + "CREATE_ON_SEND_WITHDRAWAL_FEE_QUARKS"
+
+	SwapTreasuryOwnerPublicKeyConfigEnvName = envConfigPrefix + "SWAP_TREASURY_OWNER_PUBLIC_KEY"
+	defaultSwapTreasuryOwnerPublicKey       = "invalid" // Ensure something valid is set
+
+	NewCurrencyPurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_PURCHASE_QUARKS"
+
+	NewCurrencyFeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_FEE_QUARKS"
+)
+
+// Assumes a USD stable coin core mint
+var (
+	defaultCreateOnSendWithdrawalFeeQuarks = common.CoreMintQuarksPerUnit / 2 // $0.50
+	defaultNewCurrencyPurchaseQuarks       = 10 * common.CoreMintQuarksPerUnit
+	defaultNewCurrencyFeeQuarks            = 10 * common.CoreMintQuarksPerUnit
 )
 
 type conf struct {
@@ -43,8 +57,11 @@ type conf struct {
 	submitIntentTimeout          config.Duration
 	swapTimeout                  config.Duration
 	clientReceiveTimeout         config.Duration
-	feeCollectorOwnerPublicKey   config.String
-	createOnSendWithdrawalUsdFee config.Float64
+	feeCollectorOwnerPublicKey      config.String
+	createOnSendWithdrawalFeeQuarks config.Uint64
+	swapTreasuryOwnerPublicKey      config.String
+	newCurrencyPurchaseQuarks       config.Uint64
+	newCurrencyFeeQuarks            config.Uint64
 }
 
 // ConfigProvider defines how config values are pulled
@@ -62,8 +79,11 @@ func WithEnvConfigs() ConfigProvider {
 			submitIntentTimeout:          env.NewDurationConfig(SubmitIntentTimeoutConfigEnvName, defaultSubmitIntentTimeout),
 			swapTimeout:                  env.NewDurationConfig(SwapTimeoutConfigEnvName, defaultSwapTimeout),
 			clientReceiveTimeout:         env.NewDurationConfig(ClientReceiveTimeoutConfigEnvName, defaultClientReceiveTimeout),
-			feeCollectorOwnerPublicKey:   env.NewStringConfig(FeeCollectorOwnerPublicKeyConfigEnvName, defaultFeeCollectorPublicKey),
-			createOnSendWithdrawalUsdFee: env.NewFloat64Config(CreateOnSendWithdrawalUsdFeeConfigEnvName, defaultCreateOnSendWithdrawalUsdFee),
+			feeCollectorOwnerPublicKey:      env.NewStringConfig(FeeCollectorOwnerPublicKeyConfigEnvName, defaultFeeCollectorPublicKey),
+			createOnSendWithdrawalFeeQuarks: env.NewUint64Config(CreateOnSendWithdrawalFeeQuarksConfigEnvName, defaultCreateOnSendWithdrawalFeeQuarks),
+			swapTreasuryOwnerPublicKey:      env.NewStringConfig(SwapTreasuryOwnerPublicKeyConfigEnvName, defaultSwapTreasuryOwnerPublicKey),
+			newCurrencyPurchaseQuarks:       env.NewUint64Config(NewCurrencyPurchaseQuarksConfigEnvName, defaultNewCurrencyPurchaseQuarks),
+			newCurrencyFeeQuarks:            env.NewUint64Config(NewCurrencyFeeQuarksConfigEnvName, defaultNewCurrencyFeeQuarks),
 		}
 	}
 }
@@ -74,6 +94,7 @@ type testOverrides struct {
 	enableAmlChecks            bool
 	clientReceiveTimeout       time.Duration
 	feeCollectorOwnerPublicKey string
+	swapTreasuryOwnerPublicKey string
 }
 
 func withManualTestOverrides(overrides *testOverrides) ConfigProvider {
@@ -86,8 +107,11 @@ func withManualTestOverrides(overrides *testOverrides) ConfigProvider {
 			submitIntentTimeout:          wrapper.NewDurationConfig(memory.NewConfig(defaultSubmitIntentTimeout), defaultSubmitIntentTimeout),
 			swapTimeout:                  wrapper.NewDurationConfig(memory.NewConfig(defaultSwapTimeout), defaultSwapTimeout),
 			clientReceiveTimeout:         wrapper.NewDurationConfig(memory.NewConfig(overrides.clientReceiveTimeout), defaultClientReceiveTimeout),
-			feeCollectorOwnerPublicKey:   wrapper.NewStringConfig(memory.NewConfig(overrides.feeCollectorOwnerPublicKey), defaultFeeCollectorPublicKey),
-			createOnSendWithdrawalUsdFee: wrapper.NewFloat64Config(memory.NewConfig(defaultCreateOnSendWithdrawalUsdFee), defaultCreateOnSendWithdrawalUsdFee),
+			feeCollectorOwnerPublicKey:      wrapper.NewStringConfig(memory.NewConfig(overrides.feeCollectorOwnerPublicKey), defaultFeeCollectorPublicKey),
+			createOnSendWithdrawalFeeQuarks: wrapper.NewUint64Config(memory.NewConfig(defaultCreateOnSendWithdrawalFeeQuarks), defaultCreateOnSendWithdrawalFeeQuarks),
+			swapTreasuryOwnerPublicKey:      wrapper.NewStringConfig(memory.NewConfig(overrides.swapTreasuryOwnerPublicKey), defaultSwapTreasuryOwnerPublicKey),
+			newCurrencyPurchaseQuarks:       wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyPurchaseQuarks), defaultNewCurrencyPurchaseQuarks),
+			newCurrencyFeeQuarks:            wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyFeeQuarks), defaultNewCurrencyFeeQuarks),
 		}
 	}
 }

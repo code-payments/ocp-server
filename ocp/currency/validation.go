@@ -6,6 +6,9 @@ import (
 	"math/big"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	currencypb "github.com/code-payments/ocp-protobuf-api/generated/go/currency/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
@@ -152,6 +155,42 @@ func ValidateClientExchangeData(proto *transactionpb.VerifiedExchangeData) (bool
 	}
 
 	return validateLaunchpadCurrencyVerifiedExchangeData(proto)
+}
+
+// ValidateClientUsdFeeValue validates that a quark amount of a mint is valued
+// at the expected USD amount for a fee.
+func ValidateClientUsdFeeValue(
+	mint *common.Account,
+	quarks uint64,
+	expectedUsdValue float64,
+	clientReserveState *currencypb.VerifiedLaunchpadCurrencyReserveState,
+) (bool, string) {
+	// Values are always in USD, and we assume a USD stablecoin for simplicity
+	if !common.IsCoreMintUsdStableCoin() {
+		return false, "usd value validation requires a usd stable coin core mint"
+	}
+
+	coreMintFiatExchangeRate := &currencypb.CoreMintFiatExchangeRate{
+		CurrencyCode: string(currency_lib.USD),
+		ExchangeRate: 1.0,
+		Timestamp:    timestamppb.Now(),
+	}
+
+	marshalled, err := auth.ForceConsistentMarshal(coreMintFiatExchangeRate)
+	if err != nil {
+		return false, "failed to marshal exchange rate"
+	}
+
+	return ValidateClientExchangeData(&transactionpb.VerifiedExchangeData{
+		Mint:         mint.ToProto(),
+		Quarks:       quarks,
+		NativeAmount: expectedUsdValue,
+		CoreMintFiatExchangeRate: &currencypb.VerifiedCoreMintFiatExchangeRate{
+			ExchangeRate: coreMintFiatExchangeRate,
+			Signature:    &commonpb.Signature{Value: ed25519.Sign(common.GetSubsidizer().PrivateKey().ToBytes(), marshalled)},
+		},
+		LaunchpadCurrencyReserveState: clientReserveState,
+	})
 }
 
 func validateCoreMintVerifiedExchangeData(proto *transactionpb.VerifiedExchangeData) (bool, string) {

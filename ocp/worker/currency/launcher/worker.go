@@ -96,8 +96,8 @@ func (p *runtime) handle(ctx context.Context, record *currency.MetadataRecord) e
 	switch record.State {
 	case currency.MetadataStateWaitingForInitialPurchase:
 		err = p.handleStateWaitingForInitialPurchase(ctx, record)
-	case currency.MetadataStateFundingAuthority:
-		err = p.handleStateFundingAuthority(ctx, record)
+	case currency.MetadataStatePrePurchaseSetup:
+		err = p.handleStatePrePurchaseSetup(ctx, record)
 	case currency.MetadataStateCompletingInitialization:
 		err = p.handleStateCompletingInitialization(ctx, record)
 	case currency.MetadataStateFinalValidation:
@@ -127,8 +127,8 @@ func (p *runtime) handleStateWaitingForInitialPurchase(ctx context.Context, curr
 }
 
 // Note: Assumes unique authority per currency
-func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStateFundingAuthority)
+func (p *runtime) handleStatePrePurchaseSetup(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {
+	err := p.validateCurrencyMetadataState(currencyMetadataRecord, currency.MetadataStatePrePurchaseSetup)
 	if err != nil {
 		return err
 	}
@@ -171,6 +171,30 @@ func (p *runtime) handleStateFundingAuthority(ctx context.Context, currencyMetad
 	vmMetadataRecord, err := p.data.GetVmMetadataByMint(ctx, currencyMetadataRecord.Mint)
 	if err != nil {
 		return errors.Wrap(err, "error getting vm metadata record")
+	}
+
+	// Initial purchases funded outside the core mint require the currency to
+	// be fully initialized on the blockchain before the purchase transaction
+	// can be executed.
+	fromMint, err := common.NewAccountFromPublicKeyString(swapRecords[0].FromMint)
+	if err != nil {
+		return errors.Wrap(err, "invalid swap source mint")
+	}
+	if !common.IsCoreMint(fromMint) {
+		accounts, err := p.getNewCurrencyAccounts(ctx, currencyMetadataRecord, vmMetadataRecord)
+		if err != nil {
+			return errors.Wrap(err, "error getting currency accounts")
+		}
+
+		ok, err := validateMintExists(ctx, p.data, accounts.Mint)
+		if err != nil {
+			return errors.Wrap(err, "error checking if currency is initialized")
+		} else if !ok {
+			err = p.initCurrencyOnBlockchain(ctx, currencyMetadataRecord, vmMetadataRecord, accounts)
+			if err != nil {
+				return errors.Wrap(err, "error initializing currency on blockchain")
+			}
+		}
 	}
 
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {

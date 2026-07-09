@@ -598,7 +598,7 @@ func testCountMetadataByState(t *testing.T, s metadata.Store) {
 		currency.MetadataStateUnknown,
 		currency.MetadataStateAvailable,
 		currency.MetadataStateWaitingForInitialPurchase,
-		currency.MetadataStateFundingAuthority,
+		currency.MetadataStatePrePurchaseSetup,
 		currency.MetadataStateExecutingInitialPurchase,
 		currency.MetadataStateCompletingInitialization,
 		currency.MetadataStateFinalValidation,

@@ -158,7 +158,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 		if !isVmSwapPda {
 			feeAmount = &transactionpb.ExchangeDataWithoutRate{
 				Currency:     string(currency_lib.USD),
-				NativeAmount: s.conf.createOnSendWithdrawalUsdFee.Get(ctx),
+				NativeAmount: float64(s.conf.createOnSendWithdrawalFeeQuarks.Get(ctx)) / float64(common.CoreMintQuarksPerUnit),
 			}
 		}
 		return &transactionpb.CanWithdrawToAccountResponse{

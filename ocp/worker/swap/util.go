@@ -124,7 +124,7 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 		}
 		err = p.validateCurrencyMetadataState(
 			destinationCurrencyMetadataRecord,
-			currency.MetadataStateFundingAuthority,
+			currency.MetadataStatePrePurchaseSetup,
 			currency.MetadataStateExecutingInitialPurchase,
 			currency.MetadataStateAvailable,
 		)
@@ -146,7 +146,7 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 
 		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 			switch destinationCurrencyMetadataRecord.State {
-			case currency.MetadataStateFundingAuthority, currency.MetadataStateExecutingInitialPurchase:
+			case currency.MetadataStatePrePurchaseSetup, currency.MetadataStateExecutingInitialPurchase:
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 				if err != nil {
@@ -316,7 +316,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 		}
 		err = p.validateCurrencyMetadataState(
 			destinationCurrencyMetadataRecord,
-			currency.MetadataStateFundingAuthority,
+			currency.MetadataStatePrePurchaseSetup,
 			currency.MetadataStateExecutingInitialPurchase,
 			currency.MetadataStateAvailable,
 		)
@@ -365,7 +365,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 
 		if swapRecord.Kind == swap.KindReserve && !common.IsCoreMint(toMint) {
 			switch destinationCurrencyMetadataRecord.State {
-			case currency.MetadataStateFundingAuthority, currency.MetadataStateExecutingInitialPurchase:
+			case currency.MetadataStatePrePurchaseSetup, currency.MetadataStateExecutingInitialPurchase:
 				destinationCurrencyMetadataRecord.State = currency.MetadataStateAbandoning
 				err = p.data.SaveCurrencyMetadata(ctx, destinationCurrencyMetadataRecord)
 				if err != nil {
@@ -550,14 +550,26 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 				return 0, false, err
 			}
 
-			if deltaQuarksIntoVault <= 0 {
-				return 0, false, errors.New("delta quarks into pool vault is not positives")
+			var quarksBought uint64
+			if common.IsCoreMint(fromMint) {
+				// The currency was initialized within the swap transaction, so
+				// the delta includes seeding the vault with the full token supply
+				if deltaQuarksIntoVault <= 0 {
+					return 0, false, errors.New("delta quarks into pool vault is not positive")
+				}
+				quarksBought = currencycreator.DefaultMintMaxQuarkSupply - uint64(deltaQuarksIntoVault)
+			} else {
+				// The currency was initialized prior to the swap transaction
+				if deltaQuarksIntoVault >= 0 {
+					return 0, false, errors.New("delta quarks out of pool vault is not negative")
+				}
+				quarksBought = uint64(-deltaQuarksIntoVault)
 			}
 
 			// This swap is initializing the VM and the funds will be deposited
 			// after memory accounts become available. Balances should only be
 			// reflected after finalized deposit into a VTA.
-			return currencycreator.DefaultMintMaxQuarkSupply - uint64(deltaQuarksIntoVault), true, nil
+			return quarksBought, true, nil
 		}
 	}
 
@@ -761,6 +773,10 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		return nil
 	}
 
+	if isMintInit {
+		return nil
+	}
+
 	owner, err := common.NewAccountFromPublicKeyString(swapRecord.Owner)
 	if err != nil {
 		return err
@@ -826,7 +842,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 		).Float64()
 	}
 
-	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetMint, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived, isMintInit)
+	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetMint, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
 }
 
 func (p *runtime) markNonceReleasedDueToSubmittedTransaction(ctx context.Context, record *swap.Record) error {

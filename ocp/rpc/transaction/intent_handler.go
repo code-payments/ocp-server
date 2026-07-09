@@ -25,6 +25,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
@@ -250,7 +251,7 @@ func (h *OpenAccountsIntentHandler) AllowCreation(ctx context.Context, intentRec
 	// Part 5: Validate reserved intent IDs
 	//
 
-	_, err = validateSwapFunding(ctx, h.data, intentRecord)
+	_, err = validateSwapFunding(ctx, h.conf, h.data, intentRecord)
 	return err
 }
 
@@ -670,7 +671,7 @@ func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, inte
 	// Part 7: Validate reserved intent IDs
 	//
 
-	h.cachedSwapRecord, err = validateSwapFunding(ctx, h.data, intentRecord)
+	h.cachedSwapRecord, err = validateSwapFunding(ctx, h.conf, h.data, intentRecord)
 	if err != nil {
 		return err
 	}
@@ -1218,7 +1219,7 @@ func (h *ReceivePaymentsPubliclyIntentHandler) AllowCreation(ctx context.Context
 	// Part 7: Validate reserved intent IDs
 	//
 
-	_, err = validateSwapFunding(ctx, h.data, intentRecord)
+	_, err = validateSwapFunding(ctx, h.conf, h.data, intentRecord)
 	if err != nil {
 		return err
 	}
@@ -1538,7 +1539,7 @@ func (h *PublicDistributionIntentHandler) AllowCreation(ctx context.Context, int
 	// Part 5: Validate reserved intent IDs
 	//
 
-	_, err = validateSwapFunding(ctx, h.data, intentRecord)
+	_, err = validateSwapFunding(ctx, h.conf, h.data, intentRecord)
 	if err != nil {
 		return err
 	}
@@ -2086,7 +2087,7 @@ func validateFeePayments(
 	var expectedUsdValue float64
 	switch expectedFeeType {
 	case transactionpb.FeePaymentAction_CREATE_ON_SEND_WITHDRAWAL:
-		expectedUsdValue = conf.createOnSendWithdrawalUsdFee.Get(ctx)
+		expectedUsdValue = float64(conf.createOnSendWithdrawalFeeQuarks.Get(ctx)) / float64(common.CoreMintQuarksPerUnit)
 	default:
 		return errors.New("unhandled fee type")
 	}
@@ -2257,7 +2258,7 @@ func validateDistributedPool(ctx context.Context, data ocp_data.Provider, poolVa
 	return nil
 }
 
-func validateSwapFunding(ctx context.Context, data ocp_data.Provider, intentRecord *intent.Record) (*swap.Record, error) {
+func validateSwapFunding(ctx context.Context, conf *conf, data ocp_data.Provider, intentRecord *intent.Record) (*swap.Record, error) {
 	swapRecord, err := data.GetSwapByFundingId(ctx, intentRecord.IntentId)
 	if err != nil && err != swap.ErrNotFound {
 		return nil, err
@@ -2292,6 +2293,32 @@ func validateSwapFunding(ctx context.Context, data ocp_data.Provider, intentReco
 
 		if intentRecord.SendPublicPaymentMetadata.Quantity != swapRecord.SwapAmount+swapRecord.FeeAmount {
 			return nil, NewIntentValidationErrorf("must fund swap with %d quarks", swapRecord.SwapAmount+swapRecord.FeeAmount)
+		}
+
+		fromMintAccount, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+		if err != nil {
+			return nil, err
+		}
+		toMintAccount, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+		if err != nil {
+			return nil, err
+		}
+		if !common.IsCoreMint(fromMintAccount) && !common.IsCoreMint(toMintAccount) {
+			destinationCurrencyMetadataRecord, err := data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+			if err != nil {
+				return nil, err
+			}
+
+			initializesMint := destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable
+			if initializesMint {
+				expectedUsdValue := float64(conf.newCurrencyPurchaseQuarks.Get(ctx)+conf.newCurrencyFeeQuarks.Get(ctx)) / float64(common.CoreMintQuarksPerUnit)
+				if intentRecord.SendPublicPaymentMetadata.ExchangeCurrency != currency_lib.USD {
+					return nil, NewIntentValidationError("swap funding must be valued in usd")
+				}
+				if intentRecord.SendPublicPaymentMetadata.NativeAmount != expectedUsdValue {
+					return nil, NewIntentValidationErrorf("swap funding must be valued at %.2f usd", expectedUsdValue)
+				}
+			}
 		}
 	}
 	if !isIntentReservedForSwap && intentRecord.IntentType != intent.SendPublicPayment {
