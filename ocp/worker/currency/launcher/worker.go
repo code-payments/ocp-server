@@ -424,6 +424,19 @@ func (p *runtime) handleStateAbandoning(ctx context.Context, currencyMetadataRec
 		return err
 	}
 
+	mintAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Mint)
+	if err != nil {
+		return errors.Wrap(err, "invalid mint")
+	}
+
+	ok, err := validateMintExists(ctx, p.data, mintAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if currency is initialized")
+	} else if ok {
+		// todo: requires manual intervention
+		return errors.New("currency exists")
+	}
+
 	authorityVaultRecord, err := p.data.GetKey(ctx, currencyMetadataRecord.Authority)
 	if err != nil {
 		return errors.Wrap(err, "error getting authority vault record")
