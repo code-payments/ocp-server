@@ -567,7 +567,7 @@ func (p *runtime) initCurrencyOnBlockchain(ctx context.Context, currencyMetadata
 
 	txn := solana.NewLegacyTransaction(
 		accounts.Authority.PublicKey().ToBytes(),
-		compute_budget.SetComputeUnitLimit(300_000), // todo: optimize
+		compute_budget.SetComputeUnitLimit(200_000),
 		compute_budget.SetComputeUnitPrice(10_000),
 		initCurrencyIxn,
 		initPoolIxn,

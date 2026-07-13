@@ -939,7 +939,7 @@ func NewReserveTreasuryFundedCreateAndBuySwapHandler(
 		purchaseCoreQuarks: purchaseCoreQuarks,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 250_000, // todo: optimize
+		computeUnitLimit: 250_000,
 		computeUnitPrice: 10_000,
 	}
 
