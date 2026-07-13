@@ -44,7 +44,7 @@ func New(log *zap.Logger, data ocp_data.Provider, reserveStore reserve.Store, ho
 func (p *runtime) Start(ctx context.Context, interval time.Duration) error {
 	for _, state := range []currency.MetadataState{
 		currency.MetadataStateWaitingForInitialPurchase,
-		currency.MetadataStateFundingAuthority,
+		currency.MetadataStatePrePurchaseSetup,
 		currency.MetadataStateCompletingInitialization,
 		currency.MetadataStateFinalValidation,
 		currency.MetadataStateAbandoning,

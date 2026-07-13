@@ -17,7 +17,6 @@ import (
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/common"
-	"github.com/code-payments/ocp-server/ocp/currency"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/currency/exchange"
@@ -321,7 +320,7 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 			return errors.Wrap(err, "invalid owner account")
 		}
 
-		isInitialPurchase, usdMarketValue, err := isInitialCurrencyCreatorDeposit(ctx, data, exchangeRateStore, reserveStore, ownerAccount, mint, userVirtualTimelockVaultAccount, uint64(deltaQuarksIntoOmnibus))
+		isInitialPurchase, usdMarketValue, err := isInitialCurrencyCreatorDeposit(ctx, data, ownerAccount, mint, userVirtualTimelockVaultAccount, uint64(deltaQuarksIntoOmnibus), tokenBalances.Slot)
 		if err != nil {
 			return errors.Wrap(err, "error checking for initial currency creator deposit")
 		}
@@ -483,12 +482,15 @@ func getSyncedVmDepositCacheKey(signature string, vmDepositAta *common.Account) 
 }
 
 // isInitialCurrencyCreatorDeposit detects whether this external deposit is the
-// initial purchase from a currency creator. It checks three conditions:
+// initial purchase from a currency creator, and if so, calculates the USD market
+// value of the deposit. It checks the following conditions:
 //  1. The mint is a launchpad currency (not the core mint)
 //  2. The depositor is the currency creator
 //  3. This is their first deposit for this currency
-//  4. The deposit amount matches the expected output of the first swap within 1 quark error tolerance
-func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, owner, mint, destination *common.Account, depositQuarks uint64) (bool, float64, error) {
+//  4. A finalized reserve swap exists for the currency creator
+//  5. The deposit occurred in a slot after the swap transaction, guaranteeing
+//     it contains the purchased funds
+func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider, owner, mint, destination *common.Account, depositQuarks, depositSlot uint64) (bool, float64, error) {
 	if common.IsCoreMint(mint) {
 		return false, 0, nil
 	}
@@ -522,18 +524,21 @@ func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider
 
 	initialSwap := swapRecords[0]
 
-	usdMarketValue, err := currency.CalculateUsdMarketValueFromTokenAmount(ctx, data, exchangeRateStore, reserveStore, common.CoreMintAccount, initialSwap.SwapAmount, initialSwap.CreatedAt)
+	swapTxn, err := data.GetBlockchainTransaction(ctx, initialSwap.TransactionSignature, solana.CommitmentFinalized)
 	if err != nil {
-		return false, 0, errors.Wrap(err, "error calculating usd market value")
+		return false, 0, errors.Wrap(err, "error getting swap transaction")
+	}
+	if depositSlot <= swapTxn.Slot {
+		return false, 0, nil
 	}
 
-	expectedQuarks := currencycreator.EstimateBuy(&currencycreator.EstimateBuyArgs{
-		CurrentSupplyInQuarks: 0,
-		BuyAmountInQuarks:     initialSwap.SwapAmount,
+	sellValueInQuarks, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
+		CurrentSupplyInQuarks: depositQuarks,
+		SellAmountInQuarks:    depositQuarks,
 		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+		SellFeeBps:            0,
 	})
+	usdMarketValue := float64(sellValueInQuarks) / float64(common.CoreMintQuarksPerUnit)
 
-	minExpectedQuarks := expectedQuarks - 1
-	maxExpectedQuarks := expectedQuarks + 1
-	return depositQuarks >= minExpectedQuarks && depositQuarks <= maxExpectedQuarks, usdMarketValue, nil
+	return true, usdMarketValue, nil
 }

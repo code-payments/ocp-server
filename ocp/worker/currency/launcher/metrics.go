@@ -25,7 +25,7 @@ func (p *runtime) metricsGaugeWorker(ctx context.Context) error {
 			for _, state := range []currency.MetadataState{
 				currency.MetadataStateUnknown,
 				currency.MetadataStateWaitingForInitialPurchase,
-				currency.MetadataStateFundingAuthority,
+				currency.MetadataStatePrePurchaseSetup,
 				currency.MetadataStateExecutingInitialPurchase,
 				currency.MetadataStateCompletingInitialization,
 				currency.MetadataStateFinalValidation,

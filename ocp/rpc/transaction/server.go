@@ -49,6 +49,7 @@ type transactionServer struct {
 	localAccountLocks   map[string]*sync.Mutex
 
 	feeCollector *common.Account
+	swapTreasury *common.Account
 
 	transactionpb.UnimplementedTransactionServer
 }
@@ -123,6 +124,15 @@ func NewTransactionServer(
 
 	var err error
 	s.feeCollector, err = common.NewAccountFromPublicKeyString(s.conf.feeCollectorOwnerPublicKey.Get(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	swapTreasuryVaultRecord, err := data.GetKey(ctx, s.conf.swapTreasuryOwnerPublicKey.Get(ctx))
+	if err != nil {
+		return nil, err
+	}
+	s.swapTreasury, err = common.NewAccountFromPrivateKeyString(swapTreasuryVaultRecord.PrivateKey)
 	if err != nil {
 		return nil, err
 	}

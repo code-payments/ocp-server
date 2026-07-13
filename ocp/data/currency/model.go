@@ -13,7 +13,7 @@ const (
 	MetadataStateUnknown MetadataState = iota
 	MetadataStateAvailable
 	MetadataStateWaitingForInitialPurchase
-	MetadataStateFundingAuthority
+	MetadataStatePrePurchaseSetup
 	MetadataStateExecutingInitialPurchase
 	MetadataStateCompletingInitialization
 	MetadataStateFinalValidation
@@ -344,8 +344,8 @@ func (s MetadataState) String() string {
 		return "available"
 	case MetadataStateWaitingForInitialPurchase:
 		return "waiting_for_initial_purchase"
-	case MetadataStateFundingAuthority:
-		return "funding_authority"
+	case MetadataStatePrePurchaseSetup:
+		return "pre_purchase_setup"
 	case MetadataStateExecutingInitialPurchase:
 		return "executing_initial_purchase"
 	case MetadataStateCompletingInitialization:

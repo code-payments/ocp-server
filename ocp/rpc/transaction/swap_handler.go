@@ -892,6 +892,231 @@ func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) (
 	}, nil
 }
 
+type ReserveTreasuryFundedCreateAndBuySwapHandler struct {
+	data ocp_data.Provider
+
+	buyer              *common.Account
+	fromMint           *common.Account
+	swapAmount         uint64
+	feeAmount          uint64
+	treasury           *common.Account
+	purchaseCoreQuarks uint64
+
+	alts             []solana.AddressLookupTable
+	selectedNonce    *transaction_util.Nonce
+	computeUnitLimit uint32
+	computeUnitPrice uint64
+
+	sourceVmConfig                    *common.VmConfig
+	sourceCurrencyAccounts            *common.LaunchpadCurrencyAccounts
+	destinationCurrencyMetadataRecord *currency.MetadataRecord
+	destinationCurrencyAccounts       *common.LaunchpadCurrencyAccounts
+	destinationVmMetadataRecord       *vm_metadata.Record
+	destinationVmConfig               *common.VmConfig
+}
+
+func NewReserveTreasuryFundedCreateAndBuySwapHandler(
+	ctx context.Context,
+	data ocp_data.Provider,
+	buyer *common.Account,
+	fromMint *common.Account,
+	toMint *common.Account,
+	swapAmount, feeAmount uint64,
+	treasury *common.Account,
+	purchaseCoreQuarks uint64,
+	selectedNonce *transaction_util.Nonce,
+) (SwapHandler, error) {
+	var err error
+
+	h := &ReserveTreasuryFundedCreateAndBuySwapHandler{
+		data: data,
+
+		buyer:              buyer,
+		fromMint:           fromMint,
+		swapAmount:         swapAmount,
+		feeAmount:          feeAmount,
+		treasury:           treasury,
+		purchaseCoreQuarks: purchaseCoreQuarks,
+
+		selectedNonce:    selectedNonce,
+		computeUnitLimit: 250_000,
+		computeUnitPrice: 10_000,
+	}
+
+	h.sourceVmConfig, err = common.GetVmConfigForMint(ctx, data, fromMint)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceCurrencyMetadataRecord, err := data.GetCurrencyMetadata(ctx, fromMint.PublicKey().ToBase58())
+	if err != nil {
+		return nil, err
+	}
+
+	h.sourceCurrencyAccounts, err = common.GetLaunchpadCurrencyAccounts(sourceCurrencyMetadataRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	h.destinationCurrencyMetadataRecord, err = data.GetCurrencyMetadata(ctx, toMint.PublicKey().ToBase58())
+	if err != nil {
+		return nil, err
+	}
+
+	h.destinationCurrencyAccounts, err = common.GetLaunchpadCurrencyAccounts(h.destinationCurrencyMetadataRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	// The VM is not supported yet, so we need to work around GetVmConfigForMint
+	h.destinationVmMetadataRecord, err = data.GetVmMetadataByMint(ctx, toMint.PublicKey().ToBase58())
+	if err != nil {
+		return nil, err
+	}
+	vmAccount, err := common.NewAccountFromPublicKeyString(h.destinationVmMetadataRecord.Vm)
+	if err != nil {
+		return nil, err
+	}
+	omnibusAccount, err := common.NewAccountFromPublicKeyString(h.destinationVmMetadataRecord.Omnibus)
+	if err != nil {
+		return nil, err
+	}
+	h.destinationVmConfig = &common.VmConfig{
+		Authority: h.destinationCurrencyAccounts.Authority,
+		Vm:        vmAccount,
+		Omnibus:   omnibusAccount,
+		Mint:      toMint,
+	}
+
+	return h, nil
+}
+
+func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	alt, err := transaction_util.GetAltForMint(ctx, h.data, h.fromMint)
+	if err != nil {
+		return nil, err
+	}
+	h.alts = []solana.AddressLookupTable{alt}
+	return h.alts, nil
+}
+
+func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrency{
+			ReserveNewCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrencyServerParameter{
+				Payer:                  common.GetSubsidizer().ToProto(),
+				Nonce:                  h.selectedNonce.Account.ToProto(),
+				Blockhash:              &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+				Alts:                   transaction_util.ToProtoAlts(h.alts),
+				ComputeUnitLimit:       h.computeUnitLimit,
+				ComputeUnitPrice:       h.computeUnitPrice,
+				MemoValue:              "",
+				Authority:              h.destinationCurrencyAccounts.Authority.ToProto(),
+				Name:                   h.destinationCurrencyMetadataRecord.Name,
+				Symbol:                 h.destinationCurrencyMetadataRecord.Symbol,
+				Seed:                   h.destinationCurrencyAccounts.Seed.ToProto(),
+				SellFeeBps:             currencycreator.DefaultSellFeeBps,
+				VmLockDurationInDays:   uint32(timelock_token.DefaultNumDaysLocked),
+				FeeDestination:         common.CoreMintFeesAccount.ToProto(),
+				Treasury:               h.treasury.ToProto(),
+				TreasuryPurchaseAmount: h.purchaseCoreQuarks,
+			},
+		},
+	}
+}
+
+func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+	buyerVmSwapAccounts, err := h.buyer.GetVmSwapAccounts(h.sourceVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	buyerVmDepositAccounts, err := h.buyer.GetVmDepositAccounts(h.destinationVmConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	treasuryCoreMintAtaAddress, err := token.GetAssociatedAccount(h.treasury.PublicKey().ToBytes(), common.CoreMintAccount.PublicKey().ToBytes())
+	if err != nil {
+		return nil, err
+	}
+
+	createTreasuryFromMintAtaIxn, treasuryFromMintAtaAddress, err := token.CreateAssociatedTokenAccountIdempotent(
+		common.GetSubsidizer().PublicKey().ToBytes(),
+		h.treasury.PublicKey().ToBytes(),
+		h.fromMint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// The entire swap and fee amount is collected by the treasury, then converted
+	// into core mint sent to the fee destination
+	transferForSwapWithFeeIxn := vm.NewTransferForSwapWithFeeInstruction(
+		&vm.TransferForSwapWithFeeInstructionAccounts{
+			VmAuthority:     h.sourceVmConfig.Authority.PublicKey().ToBytes(),
+			Vm:              h.sourceVmConfig.Vm.PublicKey().ToBytes(),
+			Swapper:         h.buyer.PublicKey().ToBytes(),
+			SwapPda:         buyerVmSwapAccounts.Pda.PublicKey().ToBytes(),
+			SwapAta:         buyerVmSwapAccounts.Ata.PublicKey().ToBytes(),
+			SwapDestination: treasuryFromMintAtaAddress,
+			FeeDestination:  treasuryFromMintAtaAddress,
+		},
+		&vm.TransferForSwapWithFeeInstructionArgs{
+			SwapAmount: h.swapAmount,
+			FeeAmount:  h.feeAmount,
+			Bump:       buyerVmSwapAccounts.PdaBump,
+		},
+	)
+
+	sellIxn := currencycreator.NewSellTokensInstruction(
+		&currencycreator.SellTokensInstructionAccounts{
+			Seller:       h.treasury.PublicKey().ToBytes(),
+			Pool:         h.sourceCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
+			TargetMint:   h.fromMint.PublicKey().ToBytes(),
+			BaseMint:     common.CoreMintAccount.PublicKey().ToBytes(),
+			VaultTarget:  h.sourceCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
+			VaultBase:    h.sourceCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
+			SellerTarget: treasuryFromMintAtaAddress,
+			SellerBase:   common.CoreMintFeesAccount.PublicKey().ToBytes(),
+		},
+		&currencycreator.SellTokensInstructionArgs{
+			InAmount:     h.swapAmount + h.feeAmount,
+			MinAmountOut: 0,
+		},
+	)
+
+	// The purchase is funded by the server-controlled treasury holding core mint
+	// tokens, which guarantees the full purchase value regardless of from mint
+	// price volatility
+	buyIxn := currencycreator.NewBuyTokensInstruction(
+		&currencycreator.BuyTokensInstructionAccounts{
+			Buyer:       h.treasury.PublicKey().ToBytes(),
+			Pool:        h.destinationCurrencyAccounts.LiquidityPool.PublicKey().ToBytes(),
+			TargetMint:  h.destinationCurrencyAccounts.Mint.PublicKey().ToBytes(),
+			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
+			VaultTarget: h.destinationCurrencyAccounts.VaultMint.PublicKey().ToBytes(),
+			VaultBase:   h.destinationCurrencyAccounts.VaultBase.PublicKey().ToBytes(),
+			BuyerTarget: buyerVmDepositAccounts.Ata.PublicKey().ToBytes(),
+			BuyerBase:   treasuryCoreMintAtaAddress,
+		},
+		&currencycreator.BuyTokensInstructionArgs{
+			InAmount:     h.purchaseCoreQuarks,
+			MinAmountOut: 0,
+		},
+	)
+
+	return []solana.Instruction{
+		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
+		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
+		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+		createTreasuryFromMintAtaIxn,
+		transferForSwapWithFeeIxn,
+		sellIxn,
+		buyIxn,
+	}, nil
+}
+
 type CoinbaseStableSwapperSwapHandler struct {
 	data ocp_data.Provider
 

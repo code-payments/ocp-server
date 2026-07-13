@@ -299,7 +299,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 				return errors.Wrap(err, "error marking swap as finalized")
 			}
 
-			recordSwapFinalizedEvent(ctx, record, quarksBought)
+			recordSwapFinalizedEvent(ctx, record, quarksBought, isMintInit)
 
 			go p.notifySwapFinalized(ctx, record, isMintInit)
 

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/code-payments/ocp-server/metrics"
+	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 )
 
@@ -50,12 +51,18 @@ func recordSwapCountEvent(ctx context.Context, state swap.State, count uint64) {
 	})
 }
 
-func recordSwapFinalizedEvent(ctx context.Context, swapRecord *swap.Record, quarksBought uint64) {
+func recordSwapFinalizedEvent(ctx context.Context, swapRecord *swap.Record, quarksBought uint64, isMintInit bool) {
+	quarksSold := swapRecord.SwapAmount
+
+	if isMintInit && swapRecord.FromMint != common.CoreMintAccount.PublicKey().ToBase58() {
+		quarksSold += swapRecord.FeeAmount
+	}
+
 	metrics.RecordEvent(ctx, swapFinalizedEventName, map[string]interface{}{
 		"id":            swapRecord.Id,
 		"from_mint":     swapRecord.FromMint,
 		"to_mint":       swapRecord.ToMint,
-		"quarks_sold":   swapRecord.SwapAmount,
+		"quarks_sold":   quarksSold,
 		"quarks_bought": quarksBought,
 	})
 }

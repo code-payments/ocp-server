@@ -13,5 +13,5 @@ type Swap interface {
 	OnSwapSubmitted(ctx context.Context, owner *common.Account, fromMint, toMint *common.Account) error
 
 	// OnSwapFinalized allows for notifications based on events processed by the swap worker
-	OnSwapFinalized(ctx context.Context, owner *common.Account, isBuy bool, mint *common.Account, currencyName string, region currency.Code, valueReceived float64, isMintInit bool) error
+	OnSwapFinalized(ctx context.Context, owner *common.Account, isBuy bool, mint *common.Account, currencyName string, region currency.Code, valueReceived float64) error
 }

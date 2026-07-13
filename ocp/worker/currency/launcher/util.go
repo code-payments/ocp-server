@@ -74,7 +74,7 @@ func (p *runtime) validateCurrencyMetadataState(record *currency.MetadataRecord,
 }
 
 func (p *runtime) markCurrencyMetadataExecutingInitialPurchase(ctx context.Context, record *currency.MetadataRecord) error {
-	err := p.validateCurrencyMetadataState(record, currency.MetadataStateFundingAuthority)
+	err := p.validateCurrencyMetadataState(record, currency.MetadataStatePrePurchaseSetup)
 	if err != nil {
 		return err
 	}
@@ -481,6 +481,112 @@ func (p *runtime) deriveNewAlt(ctx context.Context, accounts *newCurrencyAccount
 	accounts.AltRecentSlot = recentSlot
 
 	return nil
+}
+
+// Initializes the currency, liquidity pool, VM and creator's VM deposit ATA on
+// the blockchain ahead of the initial purchase. This is only required for flows
+// where the initial purchase transaction doesn't atomically perform initialization
+// (ie. purchases funded outside the core mint).
+func (p *runtime) initCurrencyOnBlockchain(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, vmMetadataRecord *vm_metadata.Record, accounts *newCurrencyAccounts) error {
+	seedAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Seed)
+	if err != nil {
+		return errors.Wrap(err, "invalid seed")
+	}
+
+	creatorAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.CreatedBy)
+	if err != nil {
+		return errors.Wrap(err, "invalid creator")
+	}
+
+	vmConfig := &common.VmConfig{
+		Authority: accounts.Authority,
+		Vm:        accounts.Vm,
+		Omnibus:   accounts.Omnibus,
+		Mint:      accounts.Mint,
+	}
+	creatorVmDepositAccounts, err := creatorAccount.GetVmDepositAccounts(vmConfig)
+	if err != nil {
+		return errors.Wrap(err, "error getting creator vm deposit accounts")
+	}
+
+	initCurrencyIxn := currencycreator.NewInitializeCurrencyInstruction(
+		&currencycreator.InitializeCurrencyInstructionAccounts{
+			Authority: accounts.Authority.PublicKey().ToBytes(),
+			Mint:      accounts.Mint.PublicKey().ToBytes(),
+			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializeCurrencyInstructionArgs{
+			Name:     currencyMetadataRecord.Name,
+			Symbol:   currencyMetadataRecord.Symbol,
+			Seed:     seedAccount.PublicKey().ToBytes(),
+			Bump:     accounts.CurrencyConfigBump,
+			MintBump: accounts.MintBump,
+		},
+	)
+
+	initPoolIxn := currencycreator.NewInitializePoolInstruction(
+		&currencycreator.InitializePoolInstructionAccounts{
+			Authority:   accounts.Authority.PublicKey().ToBytes(),
+			Currency:    accounts.CurrencyConfig.PublicKey().ToBytes(),
+			TargetMint:  accounts.Mint.PublicKey().ToBytes(),
+			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
+			Pool:        accounts.LiquidityPool.PublicKey().ToBytes(),
+			VaultTarget: accounts.VaultMint.PublicKey().ToBytes(),
+			VaultBase:   accounts.VaultBase.PublicKey().ToBytes(),
+		},
+		&currencycreator.InitializePoolInstructionArgs{
+			SellFee:         currencyMetadataRecord.SellFeeBps,
+			Bump:            accounts.LiquidityPoolBump,
+			VaultTargetBump: accounts.VaultMintBump,
+			VaultBaseBump:   accounts.VaultBaseBump,
+		},
+	)
+
+	initVmIxn := vm.NewInitVmInstruction(
+		&vm.InitVmInstructionAccounts{
+			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
+			Vm:          accounts.Vm.PublicKey().ToBytes(),
+			VmOmnibus:   accounts.Omnibus.PublicKey().ToBytes(),
+			Mint:        accounts.Mint.PublicKey().ToBytes(),
+		},
+		&vm.InitVmInstructionArgs{
+			LockDuration:  vmMetadataRecord.DaysLocked,
+			VmBump:        accounts.VmBump,
+			VmOmnibusBump: accounts.OmnibusBump,
+		},
+	)
+
+	createCreatorVmDepositAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(
+		accounts.Authority.PublicKey().ToBytes(),
+		creatorVmDepositAccounts.Pda.PublicKey().ToBytes(),
+		accounts.Mint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return errors.Wrap(err, "error creating creator vm deposit ata ixn")
+	}
+
+	txn := solana.NewLegacyTransaction(
+		accounts.Authority.PublicKey().ToBytes(),
+		compute_budget.SetComputeUnitLimit(200_000),
+		compute_budget.SetComputeUnitPrice(10_000),
+		initCurrencyIxn,
+		initPoolIxn,
+		initVmIxn,
+		createCreatorVmDepositAtaIxn,
+	)
+
+	bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
+	if err != nil {
+		return errors.Wrap(err, "error getting latest blockhash")
+	}
+	txn.SetBlockhash(bh)
+
+	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+	if err != nil {
+		return errors.Wrap(err, "error signing transaction")
+	}
+
+	return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
 }
 
 func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
