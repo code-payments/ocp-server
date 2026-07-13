@@ -351,7 +351,7 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 	// Section: Submission
 	//
 
-	err = s.swapIntegration.OnSwapSubmitted(ctx, owner, fromMint, toMint)
+	err = s.swapIntegration.OnSwapSubmitted(ctx, owner, fromMint, toMint, initiateStablecoinSwapReq.SwapAmount)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to notify user of swap processing")
 	}
