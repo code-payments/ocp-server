@@ -82,6 +82,8 @@ type MetadataRecord struct {
 
 	Alt string
 
+	IsDiscoverable bool
+
 	State   MetadataState
 	Version uint64
 
@@ -231,6 +233,8 @@ func (m *MetadataRecord) Clone() *MetadataRecord {
 
 		Alt: m.Alt,
 
+		IsDiscoverable: m.IsDiscoverable,
+
 		State:   m.State,
 		Version: m.Version,
 
@@ -272,6 +276,8 @@ func (m *MetadataRecord) CopyTo(dst *MetadataRecord) {
 	dst.SellFeeBps = m.SellFeeBps
 
 	dst.Alt = m.Alt
+
+	dst.IsDiscoverable = m.IsDiscoverable
 
 	dst.State = m.State
 	dst.Version = m.Version

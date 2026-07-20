@@ -11,7 +11,7 @@ import (
 type Store interface {
 	// SaveMetadata creates or updates currency creator metadata in the store.
 	// On insert, Version is set to 1. On update, only mutable fields (Description,
-	// ImageUrl, BillColors, SocialLinks, Alt, State) are updated and Version is incremented.
+	// ImageUrl, BillColors, SocialLinks, Alt, IsDiscoverable, State) are updated and Version is incremented.
 	// ErrStaleMetadataVersion is returned when the provided version doesn't match.
 	SaveMetadata(ctx context.Context, record *currency.MetadataRecord) error
 
