@@ -58,6 +58,20 @@ func (p *runtime) sweep(runtimeCtx context.Context) error {
 				).Warn("skipping currency with invalid metadata")
 				continue
 			}
+
+			hasFees, err := p.hasFeesToBurn(tracedCtx, item)
+			if err != nil {
+				trace.OnError(err)
+				p.log.With(
+					zap.Error(err),
+					zap.String("mint", item.Mint),
+				).Warn("failure checking for fees to burn")
+				continue
+			}
+			if !hasFees {
+				continue
+			}
+
 			targets = append(targets, target)
 		}
 
@@ -99,6 +113,23 @@ func (p *runtime) makeBurnTarget(record *currency.MetadataRecord) (*burnTarget, 
 			&currencycreator.BurnFeesInstructionArgs{},
 		),
 	}, nil
+}
+
+func (p *runtime) hasFeesToBurn(ctx context.Context, record *currency.MetadataRecord) (bool, error) {
+	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, record.LiquidityPool, solana.CommitmentFinalized)
+	if err == solana.ErrNoAccountInfo {
+		return false, nil
+	} else if err != nil {
+		return false, errors.Wrap(err, "error getting liquidity pool account info")
+	}
+
+	var pool currencycreator.LiquidityPoolAccount
+	err = pool.Unmarshal(ai.Data)
+	if err != nil {
+		return false, errors.Wrap(err, "invalid liquidity pool account data")
+	}
+
+	return pool.FeesAccumulated > 0, nil
 }
 
 // packBurnBatches greedily packs burn targets into the fewest transactions
