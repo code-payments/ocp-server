@@ -117,10 +117,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].holderData.CurrentHolders == candidates[j].holderData.CurrentHolders {
-			return candidates[i].reserveState.SupplyFromBonding > candidates[j].reserveState.SupplyFromBonding
-		}
-		return candidates[i].holderData.CurrentHolders > candidates[j].holderData.CurrentHolders
+		return candidates[i].reserveState.SupplyFromBonding > candidates[j].reserveState.SupplyFromBonding
 	})
 
 	if len(candidates) > maxDiscoveredCurrencies {
