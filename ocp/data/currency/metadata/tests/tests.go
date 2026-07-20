@@ -69,6 +69,8 @@ func testMetadataRoundTrip(t *testing.T, s metadata.Store) {
 
 		Alt: "EkAeTCceLWbmZrAzVZanDJBtHSnkAWndMFgmTnUnVLRR",
 
+		IsDiscoverable: true,
+
 		CreatedBy: "jyyy4RpW3X5ApbW5G6vx9ZVPxhoUKGRLbZ4LxC47LYG",
 		CreatedAt: time.Now(),
 	}
@@ -84,6 +86,7 @@ func testMetadataRoundTrip(t *testing.T, s metadata.Store) {
 	actual, err := s.GetMetadata(context.Background(), expected.Mint)
 	require.NoError(t, err)
 	assertEquivalentRecords(t, cloned, actual)
+	assert.True(t, actual.IsDiscoverable)
 	assert.EqualValues(t, currency.MetadataStateUnknown, actual.State)
 	assert.EqualValues(t, 1, actual.Version)
 }
@@ -728,6 +731,8 @@ func testMetadataSaveWithVersioning(t *testing.T, s metadata.Store) {
 
 		Alt: "veralt11111111111111111111111111111111111111111",
 
+		IsDiscoverable: true,
+
 		CreatedBy: "vercreator1",
 		CreatedAt: time.Now(),
 	}
@@ -736,6 +741,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s metadata.Store) {
 	require.NoError(t, s.SaveMetadata(context.Background(), record))
 	assert.EqualValues(t, 1, record.Version)
 	assert.EqualValues(t, currency.MetadataStateUnknown, record.State)
+	assert.True(t, record.IsDiscoverable)
 
 	// Update mutable fields and save again with correct version
 	record.State = currency.MetadataStateAvailable
@@ -749,6 +755,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s metadata.Store) {
 		{Type: currency.SocialLinkTypeDiscord, Value: "updateddiscord"},
 	}
 	record.Alt = "updatedalt1111111111111111111111111111111111111"
+	record.IsDiscoverable = false
 	require.NoError(t, s.SaveMetadata(context.Background(), record))
 	assert.EqualValues(t, 2, record.Version)
 	assert.EqualValues(t, currency.MetadataStateAvailable, record.State)
@@ -768,6 +775,7 @@ func testMetadataSaveWithVersioning(t *testing.T, s metadata.Store) {
 		{Type: currency.SocialLinkTypeDiscord, Value: "updateddiscord"},
 	}, actual.SocialLinks)
 	assert.Equal(t, "updatedalt1111111111111111111111111111111111111", actual.Alt)
+	assert.False(t, actual.IsDiscoverable)
 
 	// Verify immutable fields were preserved
 	assert.Equal(t, "Versioned", actual.Name)
@@ -827,6 +835,7 @@ func assertEquivalentRecords(t *testing.T, obj1, obj2 *currency.MetadataRecord) 
 	assert.Equal(t, obj1.VaultCoreBump, obj2.VaultCoreBump)
 	assert.Equal(t, obj1.SellFeeBps, obj2.SellFeeBps)
 	assert.Equal(t, obj1.Alt, obj2.Alt)
+	assert.Equal(t, obj1.IsDiscoverable, obj2.IsDiscoverable)
 	assert.Equal(t, obj1.State, obj2.State)
 	assert.Equal(t, obj1.CreatedBy, obj2.CreatedBy)
 	assert.Equal(t, obj1.CreatedAt.Unix(), obj2.CreatedAt.Unix())

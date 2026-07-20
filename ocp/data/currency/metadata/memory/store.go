@@ -50,6 +50,7 @@ func (s *store) SaveMetadata(ctx context.Context, data *currency.MetadataRecord)
 			cloned.BillColors = append([]string(nil), data.BillColors...)
 			cloned.SocialLinks = append([]currency.SocialLink(nil), data.SocialLinks...)
 			cloned.Alt = data.Alt
+			cloned.IsDiscoverable = data.IsDiscoverable
 			cloned.State = data.State
 			cloned.Version = item.Version + 1
 

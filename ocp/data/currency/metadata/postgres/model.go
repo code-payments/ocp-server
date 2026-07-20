@@ -53,6 +53,8 @@ type model struct {
 
 	Alt string `db:"alt"`
 
+	IsDiscoverable bool `db:"is_discoverable"`
+
 	State   uint8  `db:"state"`
 	Version uint64 `db:"version"`
 
@@ -98,6 +100,8 @@ func toModel(obj *currency.MetadataRecord) (*model, error) {
 		SellFeeBps: obj.SellFeeBps,
 
 		Alt: obj.Alt,
+
+		IsDiscoverable: obj.IsDiscoverable,
 
 		State:   uint8(obj.State),
 		Version: obj.Version,
@@ -147,6 +151,8 @@ func fromModel(obj *model) *currency.MetadataRecord {
 
 		Alt: obj.Alt,
 
+		IsDiscoverable: obj.IsDiscoverable,
+
 		State:   currency.MetadataState(obj.State),
 		Version: obj.Version,
 
@@ -176,15 +182,15 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		err := tx.QueryRowxContext(ctx,
 			`INSERT INTO `+tableName+`
-			(name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23 + 1, $24, $25)
+			(name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, is_discoverable, state, version, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24 + 1, $25, $26)
 
 			ON CONFLICT (mint)
 			DO UPDATE
-				SET description = $3, image_url = $4, bill_colors = $5, social_links = $6, alt = $21, state = $22, version = `+tableName+`.version + 1
-				WHERE `+tableName+`.mint = $9 AND `+tableName+`.version = $23
+				SET description = $3, image_url = $4, bill_colors = $5, social_links = $6, alt = $21, is_discoverable = $22, state = $23, version = `+tableName+`.version + 1
+				WHERE `+tableName+`.mint = $9 AND `+tableName+`.version = $24
 
-			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at`,
+			RETURNING id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, is_discoverable, state, version, created_by, created_at`,
 			m.Name,
 			m.Symbol,
 			m.Description,
@@ -206,6 +212,7 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.VaultCoreBump,
 			m.SellFeeBps,
 			m.Alt,
+			m.IsDiscoverable,
 			m.State,
 			m.Version,
 			m.CreatedBy,
@@ -225,7 +232,7 @@ func dbGetAllMetadataByState(ctx context.Context, db *sqlx.DB, state currency.Me
 	res := []*model{}
 
 	query := `SELECT
-		id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at
+		id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, is_discoverable, state, version, created_by, created_at
 		FROM ` + tableName + `
 		WHERE state = $1`
 
@@ -246,7 +253,7 @@ func dbGetAllMetadataByState(ctx context.Context, db *sqlx.DB, state currency.Me
 func dbGetMetadataByMint(ctx context.Context, db *sqlx.DB, mint string) (*model, error) {
 	res := &model{}
 	err := db.GetContext(ctx, res,
-		`SELECT id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, state, version, created_by, created_at
+		`SELECT id, name, symbol, description, image_url, bill_colors, social_links, seed, authority, mint, mint_bump, decimals, currency_config, currency_config_bump, liquidity_pool, liquidity_pool_bump, vault_mint, vault_mint_bump, vault_core, vault_core_bump, sell_fee_bps, alt, is_discoverable, state, version, created_by, created_at
 		FROM `+tableName+`
 		WHERE mint = $1`,
 		mint,

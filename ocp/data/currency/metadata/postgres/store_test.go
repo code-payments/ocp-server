@@ -53,6 +53,8 @@ const (
 
 		alt TEXT NOT NULL,
 
+		is_discoverable BOOLEAN NOT NULL DEFAULT TRUE,
+
 		state INTEGER NOT NULL,
 		version BIGINT NOT NULL,
 

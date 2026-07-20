@@ -85,6 +85,10 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 			continue
 		}
 
+		if !record.IsDiscoverable {
+			continue
+		}
+
 		reserveState, ok := cachedReserves[record.Mint]
 		if !ok || reserveState.SupplyFromBonding < minDiscoverySupply {
 			continue
