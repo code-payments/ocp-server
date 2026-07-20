@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	burnFeesComputeUnitLimit = 200_000
+	burnFeesComputeUnitLimit = 100_000
 	computeUnitPrice         = 10_000
 )
 
