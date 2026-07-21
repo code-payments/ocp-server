@@ -60,7 +60,7 @@ func MakeOpenAccountTransaction(
 
 	instructions := []solana.Instruction{
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(100_000),
+		compute_budget.SetComputeUnitLimit(openAccountComputeUnitLimit(timelockAccounts.StateBump, timelockAccounts.VaultBump, timelockAccounts.UnlockBump)),
 		initializeInstruction,
 	}
 	return MakeNoncedTransaction(nonce, instructions...)
@@ -148,7 +148,7 @@ func MakeInternalWithdrawTransaction(
 
 	instructions := []solana.Instruction{
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(100_000),
+		compute_budget.SetComputeUnitLimit(internalExecComputeUnitLimit(mergedMemoryBanks.NumBanks())),
 		execInstruction,
 	}
 	return MakeNoncedTransaction(nonce, instructions...)
@@ -201,7 +201,7 @@ func MakeExternalWithdrawTransaction(
 
 	instructions := []solana.Instruction{
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(100_000),
+		compute_budget.SetComputeUnitLimit(externalExecComputeUnitLimit(mergedMemoryBanks.NumBanks())),
 		execInstruction,
 	}
 	return MakeNoncedTransaction(nonce, instructions...)
@@ -253,7 +253,7 @@ func MakeInternalTransferWithAuthorityTransaction(
 
 	instructions := []solana.Instruction{
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(100_000),
+		compute_budget.SetComputeUnitLimit(internalExecComputeUnitLimit(mergedMemoryBanks.NumBanks())),
 		execInstruction,
 	}
 	return MakeNoncedTransaction(nonce, instructions...)
@@ -310,15 +310,7 @@ func MakeExternalTransferWithAuthorityTransaction(
 		},
 	)
 
-	computeLimit := 100_000
-	if isCreateOnSend {
-		computeLimit = 125_000
-	}
-
-	instructions := []solana.Instruction{
-		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(uint32(computeLimit)),
-	}
+	var instructions []solana.Instruction
 	if isCreateOnSend {
 		if externalDestinationOwner == nil {
 			return solana.Transaction{}, errors.New("destination owner is required")
@@ -335,7 +327,24 @@ func MakeExternalTransferWithAuthorityTransaction(
 			return solana.Transaction{}, errors.New("invalid destination owner")
 		}
 
-		instructions = append(instructions, createIdempotentInstruction)
+		_, ataBump, err := token.GetAssociatedAccountAndBump(
+			externalDestinationOwner.PublicKey().ToBytes(),
+			mint.PublicKey().ToBytes(),
+		)
+		if err != nil {
+			return solana.Transaction{}, err
+		}
+
+		instructions = []solana.Instruction{
+			compute_budget.SetComputeUnitPrice(10_000),
+			compute_budget.SetComputeUnitLimit(externalExecWithAtaCreateComputeUnitLimit(mergedMemoryBanks.NumBanks(), ataBump)),
+			createIdempotentInstruction,
+		}
+	} else {
+		instructions = []solana.Instruction{
+			compute_budget.SetComputeUnitPrice(10_000),
+			compute_budget.SetComputeUnitLimit(externalExecComputeUnitLimit(mergedMemoryBanks.NumBanks())),
+		}
 	}
 	instructions = append(instructions, execInstruction)
 	return MakeNoncedTransaction(nonce, instructions...)
@@ -399,4 +408,14 @@ func MergeMemoryBanks(accounts ...*common.Account) (*MergedMemoryBankResult, err
 		D:       orderedBanks[3],
 		Indices: indices,
 	}, nil
+}
+
+func (r *MergedMemoryBankResult) NumBanks() int {
+	var count int
+	for _, bank := range []*ed25519.PublicKey{r.A, r.B, r.C, r.D} {
+		if bank != nil {
+			count++
+		}
+	}
+	return count
 }

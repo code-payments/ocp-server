@@ -32,6 +32,17 @@ func GetAssociatedAccount(wallet, mint ed25519.PublicKey) (ed25519.PublicKey, er
 	)
 }
 
+// GetAssociatedAccountAndBump returns the associated account address and bump
+// seed for an SPL token.
+func GetAssociatedAccountAndBump(wallet, mint ed25519.PublicKey) (ed25519.PublicKey, uint8, error) {
+	return solana.FindProgramAddressAndBump(
+		AssociatedTokenAccountProgramKey,
+		wallet,
+		ProgramKey,
+		mint,
+	)
+}
+
 // Reference: https://github.com/solana-program/associated-token-account/blob/0588a2c3558cc93c31d27bcc96f97cf559a767bc/program/src/instruction.rs#L9-L17
 func CreateAssociatedTokenAccount(subsidizer, wallet, mint ed25519.PublicKey) (solana.Instruction, ed25519.PublicKey, error) {
 	addr, err := GetAssociatedAccount(wallet, mint)
