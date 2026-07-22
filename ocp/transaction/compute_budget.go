@@ -11,8 +11,7 @@ package transaction
 // CUs each, so create-on-send carries the one remaining bump-dependent term.
 const (
 	// todo: optimize
-	baseInternalExecComputeUnits = 60_000
-	baseExternalExecComputeUnits = 65_000
+	baseExecComputeUnits = 55_000
 
 	// vm check + 4 timelock/vault message derivations
 	numCreateDerivationsInternalExec = 5
@@ -21,16 +20,16 @@ const (
 	numCreateDerivationsExternalExec = 4
 
 	// todo: optimize
-	baseReserveBuySwapComputeUnits     = 90_000
-	baseReserveSellSwapComputeUnits    = 100_000
-	baseReserveBuySellSwapComputeUnits = 150_000
+	baseReserveBuySwapComputeUnits     = 80_000 + baseAtaCreateComputeUnits
+	baseReserveSellSwapComputeUnits    = 90_000 + baseAtaCreateComputeUnits
+	baseReserveBuySellSwapComputeUnits = 130_000 + 2*baseAtaCreateComputeUnits
 
 	// todo: optimize
 	baseExternalDepositComputeUnits = 25_000
 	baseCloseVmDepositComputeUnits  = 10_000
 
 	// todo: optimize
-	baseInitTimelockComputeUnits = 10_000
+	baseInitTimelockComputeUnits = 20_000 + withdrawReceiptFindComputeUnits
 
 	// init_timelock: vm + memory checks
 	numCreateDerivationsInitTimelock = 2
@@ -42,7 +41,7 @@ const (
 	withdrawReceiptFindComputeUnits = 36_000
 
 	// todo: optimize
-	baseAtaCreateComputeUnits = 15_000
+	baseAtaCreateComputeUnits = 20_000
 
 	cuPerPdaDerivation = 1_500
 
@@ -68,22 +67,21 @@ func openAccountComputeUnitLimit(timelockStateBump, vaultBump, unlockBump uint8)
 		numCreateDerivationsInitTimelock*cuPerPdaDerivation +
 		findPdaComputeUnits(timelockStateBump) +
 		findPdaComputeUnits(vaultBump) +
-		findPdaComputeUnits(unlockBump) +
-		withdrawReceiptFindComputeUnits
+		findPdaComputeUnits(unlockBump)
 	return WithComputeUnitMargin(computeUnits)
 }
 
 func internalExecComputeUnitLimit(numMemoryBanks int) uint32 {
-	return execComputeUnitLimit(baseInternalExecComputeUnits, numCreateDerivationsInternalExec, numMemoryBanks, 0)
+	return execComputeUnitLimit(baseExecComputeUnits, numCreateDerivationsInternalExec, numMemoryBanks, 0)
 }
 
 func externalExecComputeUnitLimit(numMemoryBanks int) uint32 {
-	return execComputeUnitLimit(baseExternalExecComputeUnits, numCreateDerivationsExternalExec, numMemoryBanks, 0)
+	return execComputeUnitLimit(baseExecComputeUnits, numCreateDerivationsExternalExec, numMemoryBanks, 0)
 }
 
 func externalExecWithAtaCreateComputeUnitLimit(numMemoryBanks int, ataBump uint8) uint32 {
 	return execComputeUnitLimit(
-		baseExternalExecComputeUnits,
+		baseExecComputeUnits,
 		numCreateDerivationsExternalExec,
 		numMemoryBanks,
 		baseAtaCreateComputeUnits+findPdaComputeUnits(ataBump),
@@ -100,14 +98,14 @@ func execComputeUnitLimit(baseComputeUnits, numCreateDerivations uint32, numMemo
 // reserve buy swap transaction, whose only bump-dependent cost is creating
 // the temporary core mint ATA.
 func ReserveBuySwapComputeUnitLimit(temporaryAtaBump uint8) uint32 {
-	return WithComputeUnitMargin(baseReserveBuySwapComputeUnits + baseAtaCreateComputeUnits + findPdaComputeUnits(temporaryAtaBump))
+	return WithComputeUnitMargin(baseReserveBuySwapComputeUnits + findPdaComputeUnits(temporaryAtaBump))
 }
 
 // ReserveSellSwapComputeUnitLimit computes the compute unit limit for a
 // reserve sell swap transaction, whose only bump-dependent cost is creating
 // the temporary source currency ATA.
 func ReserveSellSwapComputeUnitLimit(temporaryAtaBump uint8) uint32 {
-	return WithComputeUnitMargin(baseReserveSellSwapComputeUnits + baseAtaCreateComputeUnits + findPdaComputeUnits(temporaryAtaBump))
+	return WithComputeUnitMargin(baseReserveSellSwapComputeUnits + findPdaComputeUnits(temporaryAtaBump))
 }
 
 // ReserveBuySellSwapComputeUnitLimit computes the compute unit limit for a
@@ -116,7 +114,6 @@ func ReserveSellSwapComputeUnitLimit(temporaryAtaBump uint8) uint32 {
 func ReserveBuySellSwapComputeUnitLimit(temporaryCoreAtaBump, temporarySourceAtaBump uint8) uint32 {
 	return WithComputeUnitMargin(
 		baseReserveBuySellSwapComputeUnits +
-			2*baseAtaCreateComputeUnits +
 			findPdaComputeUnits(temporaryCoreAtaBump) +
 			findPdaComputeUnits(temporarySourceAtaBump),
 	)
