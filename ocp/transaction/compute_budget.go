@@ -1,14 +1,5 @@
 package transaction
 
-// Compute unit limits for exec transactions, modeled against the VM program
-// version that validates PDAs with create_program_address using stored bumps
-// (a flat 1,500 CUs per derivation, independent of bump value). Deploying
-// these limits against the older find_program_address-based VM program would
-// under-budget VMs with low-bump PDAs.
-//
-// The ATA program still derives the associated token address with
-// find_program_address, which walks candidate bumps from 255 down at 1,500
-// CUs each, so create-on-send carries the one remaining bump-dependent term.
 const (
 	// todo: optimize
 	baseExecComputeUnits = 55_000
