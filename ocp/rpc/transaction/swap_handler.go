@@ -70,7 +70,6 @@ func NewReserveBuySwapHandler(
 		amount:          amount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 120_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_v0",
 	}
@@ -151,6 +150,15 @@ func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.
 	if err != nil {
 		return nil, err
 	}
+
+	_, temporaryCoreMintAtaBump, err := token.GetAssociatedAccountAndBump(
+		h.temporaryHolder.PublicKey().ToBytes(),
+		common.CoreMintAccount.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	h.computeUnitLimit = transaction_util.ReserveBuySwapComputeUnitLimit(temporaryCoreMintAtaBump)
 
 	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
 		&vm.TransferForSwapInstructionAccounts{
@@ -258,7 +266,6 @@ func NewReserveSellSwapHandler(
 		amount:          amount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 145_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "sell_v0",
 	}
@@ -339,6 +346,15 @@ func (h *ReserveSellSwapHandler) MakeInstructions(ctx context.Context) ([]solana
 	if err != nil {
 		return nil, err
 	}
+
+	_, temporarySourceCurrencyAtaBump, err := token.GetAssociatedAccountAndBump(
+		h.temporaryHolder.PublicKey().ToBytes(),
+		h.mint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	h.computeUnitLimit = transaction_util.ReserveSellSwapComputeUnitLimit(temporarySourceCurrencyAtaBump)
 
 	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
 		&vm.TransferForSwapInstructionAccounts{
@@ -449,7 +465,6 @@ func NewReserveBuySellSwapHandler(
 		amount:          amount,
 
 		selectedNonce:    selectedNonce,
-		computeUnitLimit: 250_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_sell_v0",
 	}
@@ -557,6 +572,22 @@ func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]sol
 	if err != nil {
 		return nil, err
 	}
+
+	_, temporaryCoreMintAtaBump, err := token.GetAssociatedAccountAndBump(
+		h.temporaryHolder.PublicKey().ToBytes(),
+		common.CoreMintAccount.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	_, temporarySourceCurrencyAtaBump, err := token.GetAssociatedAccountAndBump(
+		h.temporaryHolder.PublicKey().ToBytes(),
+		h.fromMint.PublicKey().ToBytes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	h.computeUnitLimit = transaction_util.ReserveBuySellSwapComputeUnitLimit(temporaryCoreMintAtaBump, temporarySourceCurrencyAtaBump)
 
 	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
 		&vm.TransferForSwapInstructionAccounts{

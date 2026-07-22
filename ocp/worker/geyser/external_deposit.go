@@ -120,7 +120,7 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		vmConfig.Authority.PublicKey().ToBytes(),
 		memov2.Instruction(codeVmDepositMemoValue),
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(45_000),
+		compute_budget.SetComputeUnitLimit(transaction_util.ExternalDepositComputeUnitLimit()),
 		vm.NewDepositFromPdaInstruction(
 			&vm.DepositFromPdaInstructionAccounts{
 				VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),
@@ -437,7 +437,7 @@ func closeVmDepositAccount(ctx context.Context, data ocp_data.Provider, userAuth
 	txn := solana.NewLegacyTransaction(
 		vmConfig.Authority.PublicKey().ToBytes(),
 		compute_budget.SetComputeUnitPrice(10_000),
-		compute_budget.SetComputeUnitLimit(25_000),
+		compute_budget.SetComputeUnitLimit(transaction_util.CloseVmDepositComputeUnitLimit()),
 		vm.NewCloseDepositAccountIfEmptyInstruction(
 			&vm.CloseDepositAccountIfEmptyInstructionAccounts{
 				VmAuthority: vmConfig.Authority.PublicKey().ToBytes(),

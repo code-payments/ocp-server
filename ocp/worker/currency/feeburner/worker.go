@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	burnFeesComputeUnitLimit = 100_000
-	computeUnitPrice         = 10_000
+	perBurnComputeUnits = 5_000
+	baseComputeUnits    = 300
+
+	computeUnitPrice = 10_000
 )
 
 type burnTarget struct {
@@ -161,7 +163,7 @@ func (p *runtime) makeBurnTransaction(batch []*burnTarget) solana.Transaction {
 	ixns := make([]solana.Instruction, 0, len(batch)+2)
 	ixns = append(
 		ixns,
-		compute_budget.SetComputeUnitLimit(uint32(len(batch))*burnFeesComputeUnitLimit),
+		compute_budget.SetComputeUnitLimit(transaction_util.WithComputeUnitMargin(baseComputeUnits+uint32(len(batch))*perBurnComputeUnits)),
 		compute_budget.SetComputeUnitPrice(computeUnitPrice),
 	)
 	for _, target := range batch {
