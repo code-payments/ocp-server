@@ -112,6 +112,46 @@ func TestNewAccountFromEntropy(t *testing.T) {
 	}
 }
 
+func TestNewAccountFromMnemonic(t *testing.T) {
+	// The canonical "abandon ... about" mnemonic, whose Solana account at
+	// m/44'/501'/0'/0' (empty passphrase) is a well-known address shared with
+	// standard wallets (Phantom, Solana CLI).
+	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+	account, err := NewAccountFromMnemonic(mnemonic)
+	require.NoError(t, err)
+	require.NotNil(t, account.PrivateKey())
+	assert.Equal(t, "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk", account.PublicKey().ToBase58())
+
+	// The mnemonic derivation is equivalent to the entropy it encodes.
+	fromEntropy, err := NewAccountFromEntropy(make([]byte, 16))
+	require.NoError(t, err)
+	assert.Equal(t, fromEntropy.PublicKey().ToBase58(), account.PublicKey().ToBase58())
+	assert.Equal(t, fromEntropy.PrivateKey().ToBase58(), account.PrivateKey().ToBase58())
+
+	// Surrounding and repeated whitespace is tolerated.
+	untidy, err := NewAccountFromMnemonic("  abandon\tabandon  abandon abandon abandon abandon abandon abandon abandon abandon abandon about\n")
+	require.NoError(t, err)
+	assert.Equal(t, account.PublicKey().ToBase58(), untidy.PublicKey().ToBase58())
+
+	// A different mnemonic is unrelated.
+	other, err := NewAccountFromMnemonic("legal winner thank year wave sausage worth useful legal winner thank yellow")
+	require.NoError(t, err)
+	assert.NotEqual(t, account.PublicKey().ToBase58(), other.PublicKey().ToBase58())
+
+	for _, invalid := range []string{
+		"",
+		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",                          // 11 words
+		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",            // 13 words
+		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",                  // Bad checksum
+		"notaword abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",                   // Word outside the wordlist
+		"legal winner thank year wave sausage worth useful legal winner thank yellow legal winner thank year wave sausage", // 18 words
+	} {
+		_, err := NewAccountFromMnemonic(invalid)
+		assert.Error(t, err)
+	}
+}
+
 // TestNewAccountFromEntropy_SpecVectors anchors each stage of the derivation
 // pipeline to its canonical specification test vector, guarding against a
 // dependency behaving non-standardly.
