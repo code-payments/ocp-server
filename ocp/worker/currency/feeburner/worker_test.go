@@ -32,7 +32,7 @@ func TestPackBurnBatches(t *testing.T) {
 		targets = append(targets, target)
 	}
 
-	batches := p.packBurnBatches(targets)
+	batches := p.packBurnBatches(targets, defaultMaxBurnsPerBatch)
 
 	var flattened []*burnTarget
 	for _, batch := range batches {
@@ -46,11 +46,15 @@ func TestPackBurnBatches(t *testing.T) {
 	for i, batch := range batches {
 		txn := p.makeBurnTransaction(batch)
 		assert.LessOrEqual(t, len(txn.Marshal()), solana.MaxTransactionSize, fmt.Sprintf("batch %d exceeds size limit", i))
+		assert.LessOrEqual(t, len(batch), defaultMaxBurnsPerBatch, fmt.Sprintf("batch %d exceeds max burns", i))
 	}
 
-	// Every batch except the last must be full: adding the next target would
-	// exceed the transaction size limit
+	// Every batch except the last must be full: it hit the max burn count, or
+	// adding the next target would exceed the transaction size limit
 	for i := 0; i < len(batches)-1; i++ {
+		if len(batches[i]) == defaultMaxBurnsPerBatch {
+			continue
+		}
 		overfilled := append(append([]*burnTarget{}, batches[i]...), batches[i+1][0])
 		txn := p.makeBurnTransaction(overfilled)
 		assert.Greater(t, len(txn.Marshal()), solana.MaxTransactionSize, fmt.Sprintf("batch %d is not fully packed", i))
@@ -65,5 +69,5 @@ func TestPackBurnBatches_Empty(t *testing.T) {
 		subsidizer: testutil.NewRandomAccount(t),
 	}
 
-	assert.Empty(t, p.packBurnBatches(nil))
+	assert.Empty(t, p.packBurnBatches(nil, defaultMaxBurnsPerBatch))
 }
