@@ -34,6 +34,8 @@ func (p *runtime) sweep(runtimeCtx context.Context) error {
 	defer trace.End()
 	tracedCtx := metrics.NewContext(runtimeCtx, trace)
 
+	maxBurnsPerBatch := max(1, int(p.conf.maxBurnsPerBatch.Get(tracedCtx)))
+
 	var cursor query.Cursor
 	for {
 		items, err := p.data.GetAllCurrencyMetadataByState(
@@ -77,7 +79,7 @@ func (p *runtime) sweep(runtimeCtx context.Context) error {
 			targets = append(targets, target)
 		}
 
-		for _, batch := range p.packBurnBatches(targets) {
+		for _, batch := range p.packBurnBatches(targets, maxBurnsPerBatch) {
 			err := p.burnFeesForBatch(tracedCtx, batch)
 			if err != nil {
 				trace.OnError(err)
@@ -135,11 +137,16 @@ func (p *runtime) hasFeesToBurn(ctx context.Context, record *currency.MetadataRe
 }
 
 // packBurnBatches greedily packs burn targets into the fewest transactions
-// that fit within the transaction size limit.
-func (p *runtime) packBurnBatches(targets []*burnTarget) [][]*burnTarget {
+// that fit within the transaction size limit and maxBurnsPerBatch.
+func (p *runtime) packBurnBatches(targets []*burnTarget, maxBurnsPerBatch int) [][]*burnTarget {
 	var batches [][]*burnTarget
 	var current []*burnTarget
 	for _, target := range targets {
+		if len(current) >= maxBurnsPerBatch {
+			batches = append(batches, current)
+			current = nil
+		}
+
 		candidate := append(current, target)
 		txn := p.makeBurnTransaction(candidate)
 		if len(txn.Marshal()) > solana.MaxTransactionSize {
