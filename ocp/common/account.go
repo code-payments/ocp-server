@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"strings"
 
 	"filippo.io/edwards25519"
 	slip10 "github.com/anyproto/go-slip10"
@@ -164,7 +165,29 @@ func NewAccountFromEntropy(entropy []byte) (*Account, error) {
 		return nil, errors.Wrap(err, "error deriving mnemonic from entropy")
 	}
 
-	seed := bip39.NewSeed(mnemonic, "")
+	return NewAccountFromMnemonic(mnemonic)
+}
+
+// NewAccountFromMnemonic deterministically derives an account from a 12 word
+// BIP-39 mnemonic phrase following the standard Solana key derivation used by
+// Code and other wallets:
+//
+//	mnemonic -> BIP-39 seed (PBKDF2) -> SLIP-0010 ed25519 key at m/44'/501'/0'/0'
+//
+// Words are expected to be space delimited and the checksum must be valid. An
+// empty passphrase is assumed.
+func NewAccountFromMnemonic(mnemonic string) (*Account, error) {
+	words := strings.Fields(mnemonic)
+	if len(words) != 12 {
+		return nil, errors.New("mnemonic must be 12 words")
+	}
+	normalized := strings.Join(words, " ")
+
+	if !bip39.IsMnemonicValid(normalized) {
+		return nil, errors.New("mnemonic is invalid")
+	}
+
+	seed := bip39.NewSeed(normalized, "")
 
 	node, err := slip10.DeriveForPath(solanaDerivationPath, seed)
 	if err != nil {
@@ -174,7 +197,7 @@ func NewAccountFromEntropy(entropy []byte) (*Account, error) {
 
 	derivedKey, err := NewKeyFromBytes(privateKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "error creating private key from entropy")
+		return nil, errors.Wrap(err, "error creating private key from mnemonic")
 	}
 
 	return NewAccountFromPrivateKey(derivedKey)
