@@ -339,8 +339,21 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
 		}
 
+		// A buy fee is only charged when buying a currency with the core mint.
+		// Legacy clients don't provide a fee amount, and get the flow that
+		// doesn't collect one.
 		if initiateReserveSwapReq.FeeAmount != 0 {
-			return handleStatefulSwapError(streamer, NewSwapValidationError("fee amount must be 0"))
+			if !isBuy || isSell {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("fee amount must be 0"))
+			}
+
+			expectedFeeAmount := currency_util.ExpectedBuyFeeQuarks(initiateReserveSwapReq.SwapAmount)
+			if expectedFeeAmount == 0 {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("swap amount is too small to charge a fee"))
+			}
+			if !currency_util.IsExpectedFeeQuarks(initiateReserveSwapReq.FeeAmount, expectedFeeAmount) {
+				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("fee amount must be %d quarks", expectedFeeAmount))
+			}
 		}
 
 		destinationVmConfig, err := common.GetVmConfigForMint(ctx, s.data, toMint)
@@ -542,6 +555,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			swapAuthority,
 			toMint,
 			initiateReserveSwapReq.SwapAmount,
+			initiateReserveSwapReq.FeeAmount,
 			selectedNonce,
 		)
 	} else {

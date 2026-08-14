@@ -41,7 +41,8 @@ type ReserveBuySwapHandler struct {
 	buyer           *common.Account
 	temporaryHolder *common.Account
 	mint            *common.Account
-	amount          uint64
+	swapAmount      uint64
+	feeAmount       uint64
 
 	alts             []solana.AddressLookupTable
 	selectedNonce    *transaction_util.Nonce
@@ -49,8 +50,9 @@ type ReserveBuySwapHandler struct {
 	computeUnitPrice uint64
 	memoValue        string
 
-	memoryAccount *common.Account
-	memoryIndex   uint16
+	feeDestination *common.Account
+	memoryAccount  *common.Account
+	memoryIndex    uint16
 }
 
 func NewReserveBuySwapHandler(
@@ -58,21 +60,28 @@ func NewReserveBuySwapHandler(
 	buyer *common.Account,
 	temporaryHolder *common.Account,
 	mint *common.Account,
-	amount uint64,
+	swapAmount, feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
 ) SwapHandler {
-	return &ReserveBuySwapHandler{
+	h := &ReserveBuySwapHandler{
 		data: data,
 
 		buyer:           buyer,
 		temporaryHolder: temporaryHolder,
 		mint:            mint,
-		amount:          amount,
+		swapAmount:      swapAmount,
+		feeAmount:       feeAmount,
 
 		selectedNonce:    selectedNonce,
 		computeUnitPrice: 10_000,
 		memoValue:        "buy_v0",
 	}
+
+	if feeAmount > 0 {
+		h.feeDestination = common.CoreMintFeesAccount
+	}
+
+	return h
 }
 
 func (h *ReserveBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
@@ -80,24 +89,37 @@ func (h *ReserveBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLo
 	if err != nil {
 		return nil, err
 	}
+
 	h.alts = []solana.AddressLookupTable{alt}
+
+	// The fee destination is only available in the core mint's ALT
+	if h.feeDestination != nil {
+		h.alts = append(h.alts, transaction_util.GetAltForCoreMint())
+	}
+
 	return h.alts, nil
 }
 
 func (h *ReserveBuySwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
+	serverParameters := &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
+		Payer:            common.GetSubsidizer().ToProto(),
+		Nonce:            h.selectedNonce.Account.ToProto(),
+		Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+		Alts:             transaction_util.ToProtoAlts(h.alts),
+		ComputeUnitLimit: h.computeUnitLimit,
+		ComputeUnitPrice: h.computeUnitPrice,
+		MemoValue:        h.memoValue,
+		MemoryAccount:    h.memoryAccount.ToProto(),
+		MemoryIndex:      uint32(h.memoryIndex),
+	}
+
+	if h.feeDestination != nil {
+		serverParameters.FeeDestination = h.feeDestination.ToProto()
+	}
+
 	return &transactionpb.StatefulSwapResponse_ServerParameters{
 		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
-			ReserveExistingCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
-				Payer:            common.GetSubsidizer().ToProto(),
-				Nonce:            h.selectedNonce.Account.ToProto(),
-				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
-				Alts:             transaction_util.ToProtoAlts(h.alts),
-				ComputeUnitLimit: h.computeUnitLimit,
-				ComputeUnitPrice: h.computeUnitPrice,
-				MemoValue:        h.memoValue,
-				MemoryAccount:    h.memoryAccount.ToProto(),
-				MemoryIndex:      uint32(h.memoryIndex),
-			},
+			ReserveExistingCurrency: serverParameters,
 		},
 	}
 }
@@ -158,22 +180,45 @@ func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.
 	if err != nil {
 		return nil, err
 	}
-	h.computeUnitLimit = transaction_util.ReserveBuySwapComputeUnitLimit(temporaryCoreMintAtaBump)
 
-	transferFromSourceVmSwapAtaIxn := vm.NewTransferForSwapInstruction(
-		&vm.TransferForSwapInstructionAccounts{
-			VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
-			Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
-			Swapper:     h.buyer.PublicKey().ToBytes(),
-			SwapPda:     sourceTimelockAccounts.VmSwapAccounts.Pda.PublicKey().ToBytes(),
-			SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
-			Destination: temporaryCoreMintAta.PublicKey().ToBytes(),
-		},
-		&vm.TransferForSwapInstructionArgs{
-			Amount: h.amount,
-			Bump:   sourceTimelockAccounts.VmSwapAccounts.PdaBump,
-		},
-	)
+	var transferFromSourceVmSwapAtaIxn solana.Instruction
+	if h.feeDestination != nil {
+		h.computeUnitLimit = transaction_util.ReserveBuyWithFeeSwapComputeUnitLimit(temporaryCoreMintAtaBump)
+
+		transferFromSourceVmSwapAtaIxn = vm.NewTransferForSwapWithFeeInstruction(
+			&vm.TransferForSwapWithFeeInstructionAccounts{
+				VmAuthority:     sourceVmConfig.Authority.PublicKey().ToBytes(),
+				Vm:              sourceVmConfig.Vm.PublicKey().ToBytes(),
+				Swapper:         h.buyer.PublicKey().ToBytes(),
+				SwapPda:         sourceTimelockAccounts.VmSwapAccounts.Pda.PublicKey().ToBytes(),
+				SwapAta:         sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
+				SwapDestination: temporaryCoreMintAta.PublicKey().ToBytes(),
+				FeeDestination:  h.feeDestination.PublicKey().ToBytes(),
+			},
+			&vm.TransferForSwapWithFeeInstructionArgs{
+				SwapAmount: h.swapAmount,
+				FeeAmount:  h.feeAmount,
+				Bump:       sourceTimelockAccounts.VmSwapAccounts.PdaBump,
+			},
+		)
+	} else {
+		h.computeUnitLimit = transaction_util.ReserveBuySwapComputeUnitLimit(temporaryCoreMintAtaBump)
+
+		transferFromSourceVmSwapAtaIxn = vm.NewTransferForSwapInstruction(
+			&vm.TransferForSwapInstructionAccounts{
+				VmAuthority: sourceVmConfig.Authority.PublicKey().ToBytes(),
+				Vm:          sourceVmConfig.Vm.PublicKey().ToBytes(),
+				Swapper:     h.buyer.PublicKey().ToBytes(),
+				SwapPda:     sourceTimelockAccounts.VmSwapAccounts.Pda.PublicKey().ToBytes(),
+				SwapAta:     sourceTimelockAccounts.VmSwapAccounts.Ata.PublicKey().ToBytes(),
+				Destination: temporaryCoreMintAta.PublicKey().ToBytes(),
+			},
+			&vm.TransferForSwapInstructionArgs{
+				Amount: h.swapAmount,
+				Bump:   sourceTimelockAccounts.VmSwapAccounts.PdaBump,
+			},
+		)
+	}
 
 	buyAndDepositIntoDestinationVmIxn := currencycreator.NewBuyAndDepositIntoVmInstruction(
 		&currencycreator.BuyAndDepositIntoVmInstructionAccounts{
@@ -192,7 +237,7 @@ func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.
 			VtaOwner:    h.buyer.PublicKey().ToBytes(),
 		},
 		&currencycreator.BuyAndDepositIntoVmInstructionArgs{
-			InAmount:      h.amount,
+			InAmount:      h.swapAmount,
 			MinOutAmount:  0,
 			VmMemoryIndex: h.memoryIndex,
 		},

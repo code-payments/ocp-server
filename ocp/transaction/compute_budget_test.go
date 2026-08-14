@@ -31,6 +31,10 @@ func TestReserveSwapComputeUnitLimits(t *testing.T) {
 	// 15% margin
 	assert.EqualValues(t, 116_725, ReserveBuySwapComputeUnitLimit(255))
 
+	// base 80,000 + fee transfer CPI (2,600) + ATA create (20,000) + ATA find
+	// (1,500) = 104,100, plus 15% margin
+	assert.EqualValues(t, 119_715, ReserveBuyWithFeeSwapComputeUnitLimit(255))
+
 	// base 90,000 + ATA create (20,000) + ATA find (1,500) = 111,500, plus
 	// 15% margin
 	assert.EqualValues(t, 128_225, ReserveSellSwapComputeUnitLimit(255))

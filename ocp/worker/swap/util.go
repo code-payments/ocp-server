@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
-	"math/big"
 	"slices"
 	"time"
 
@@ -609,7 +608,13 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 		nativeAmountWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
 		usdMarketValueWithoutFees = fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue
 
-		if !common.IsCoreMint(fromMint) {
+		if common.IsCoreMint(fromMint) {
+			// A buy with the core mint is funded for the swap and the buy fee,
+			// but only the swap amount bought tokens. The funding payment's own
+			// value is left as is, since it reflects what the user spent.
+			nativeAmountWithoutFees = currency_util.DiscountValueForBuyFee(nativeAmountWithoutFees, swapRecord.SwapAmount, swapRecord.FeeAmount)
+			usdMarketValueWithoutFees = currency_util.DiscountValueForBuyFee(usdMarketValueWithoutFees, swapRecord.SwapAmount, swapRecord.FeeAmount)
+		} else {
 			coreMintQuarksFromSell := uint64(deltaQuarksIntoOmnibus)
 			if !common.IsCoreMint(toMint) {
 				destinationCurrencyAccounts, err := common.GetLaunchpadCurrencyAccounts(destinationCurrencyMetadataRecord)
@@ -633,10 +638,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 				return 0, false, err
 			}
 
-			usdMarketValueWithoutFees, _ = new(big.Float).Quo(
-				big.NewFloat(usdMarketValue).SetPrec(128),
-				big.NewFloat(0.99).SetPrec(128),
-			).Float64()
+			usdMarketValueWithoutFees = currency_util.GrossUpSellFee(usdMarketValue)
 
 			// A sell settles into the core mint, so its native value is reported in USD. A
 			// cross-currency swap keeps the client's original exchange currency and
@@ -673,14 +675,8 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 	nativeAmount := nativeAmountWithoutFees
 	usdMarketValue := usdMarketValueWithoutFees
 	if !common.IsCoreMint(fromMint) {
-		nativeAmount, _ = new(big.Float).Mul(
-			big.NewFloat(0.99).SetPrec(128),
-			big.NewFloat(nativeAmountWithoutFees).SetPrec(128),
-		).Float64()
-		usdMarketValue, _ = new(big.Float).Mul(
-			big.NewFloat(0.99).SetPrec(128),
-			big.NewFloat(usdMarketValueWithoutFees).SetPrec(128),
-		).Float64()
+		nativeAmount = currency_util.ApplySellFee(nativeAmountWithoutFees)
+		usdMarketValue = currency_util.ApplySellFee(usdMarketValueWithoutFees)
 	}
 
 	exchangeRate := currency_util.CalculateExchangeRate(toMint, uint64(deltaQuarksIntoOmnibus), nativeAmount)
@@ -819,6 +815,12 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 
 		currencyCode = fundingIntentRecord.SendPublicPaymentMetadata.ExchangeCurrency
 		nativeAmount = fundingIntentRecord.SendPublicPaymentMetadata.NativeAmount
+
+		if common.IsCoreMint(fromMint) {
+			// A buy with the core mint is funded for the swap and the buy fee,
+			// but only the swap amount bought tokens
+			nativeAmount = currency_util.DiscountValueForBuyFee(nativeAmount, swapRecord.SwapAmount, swapRecord.FeeAmount)
+		}
 	case swap.FundingSourceExternalWallet, swap.FundingSourceCoinbaseOnramp:
 		if !common.IsCoreMint(fromMint) {
 			return errors.New("unexpected source mint")
@@ -836,10 +838,7 @@ func (p *runtime) notifySwapFinalized(ctx context.Context, swapRecord *swap.Reco
 
 	valueReceived := nativeAmount
 	if !common.IsCoreMint(fromMint) {
-		valueReceived, _ = new(big.Float).Mul(
-			big.NewFloat(0.99).SetPrec(128),
-			big.NewFloat(valueReceived).SetPrec(128),
-		).Float64()
+		valueReceived = currency_util.ApplySellFee(valueReceived)
 	}
 
 	return p.integration.OnSwapFinalized(ctx, owner, isBuy, targetMint, targetCurrencyMetadataRecord.Name, currencyCode, valueReceived)
