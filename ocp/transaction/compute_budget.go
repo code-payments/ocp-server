@@ -15,6 +15,14 @@ const (
 	baseReserveSellSwapComputeUnits    = 90_000 + baseAtaCreateComputeUnits
 	baseReserveBuySellSwapComputeUnits = 130_000 + 2*baseAtaCreateComputeUnits
 
+	// transfer_for_swap_with_fee makes a second token transfer to the fee
+	// destination on top of the one made by transfer_for_swap. Measured on
+	// mainnet: the token program consumes 145 CUs for a transfer, and the CPI
+	// invoke plus account serialization make up the remainder. The
+	// transfer_for_swap instruction consumes 5,869 CUs against the 8,395 CUs
+	// of transfer_for_swap_with_fee.
+	baseReserveBuyWithFeeSwapComputeUnits = baseReserveBuySwapComputeUnits + 2_600
+
 	// todo: optimize
 	baseExternalDepositComputeUnits = 25_000
 	baseCloseVmDepositComputeUnits  = 10_000
@@ -90,6 +98,13 @@ func execComputeUnitLimit(baseComputeUnits, numCreateDerivations uint32, numMemo
 // the temporary core mint ATA.
 func ReserveBuySwapComputeUnitLimit(temporaryAtaBump uint8) uint32 {
 	return WithComputeUnitMargin(baseReserveBuySwapComputeUnits + findPdaComputeUnits(temporaryAtaBump))
+}
+
+// ReserveBuyWithFeeSwapComputeUnitLimit computes the compute unit limit for a
+// reserve buy swap transaction that also collects a buy fee, whose only
+// bump-dependent cost is creating the temporary core mint ATA.
+func ReserveBuyWithFeeSwapComputeUnitLimit(temporaryAtaBump uint8) uint32 {
+	return WithComputeUnitMargin(baseReserveBuyWithFeeSwapComputeUnits + findPdaComputeUnits(temporaryAtaBump))
 }
 
 // ReserveSellSwapComputeUnitLimit computes the compute unit limit for a
