@@ -18,6 +18,7 @@ import (
 func RunStoreTests(t *testing.T, s reserve.Store, teardown func()) {
 	for _, tf := range []func(t *testing.T, s reserve.Store){
 		testReserveRoundTrip,
+		testGetReservesForDay,
 		testGetReservesInRange,
 		testLiveReserveRoundTrip,
 		testGetAllLiveReserves,
@@ -71,6 +72,43 @@ func testReserveRoundTrip(t *testing.T, s reserve.Store) {
 	// A different mint is independent.
 	_, err = s.GetReserveAtTime(context.Background(), "other-mint", now)
 	assert.Equal(t, currency.ErrNotFound, err)
+}
+
+func testGetReservesForDay(t *testing.T, s reserve.Store) {
+	ctx := context.Background()
+	day := time.Date(2022, 05, 10, 0, 0, 0, 0, time.UTC)
+
+	// mintA: a prior-day record plus two on `day` (close = 800 at 20:00).
+	require.NoError(t, s.PutHistoricalReserve(ctx, &currency.ReserveRecord{Mint: "mintA", SupplyFromBonding: 100, Time: day.Add(-15 * time.Hour)}))
+	require.NoError(t, s.PutHistoricalReserve(ctx, &currency.ReserveRecord{Mint: "mintA", SupplyFromBonding: 500, Time: day.Add(10 * time.Hour)}))
+	require.NoError(t, s.PutHistoricalReserve(ctx, &currency.ReserveRecord{Mint: "mintA", SupplyFromBonding: 800, Time: day.Add(20 * time.Hour)}))
+	// mintB: a single record on `day`.
+	require.NoError(t, s.PutHistoricalReserve(ctx, &currency.ReserveRecord{Mint: "mintB", SupplyFromBonding: 10000, Time: day.Add(12 * time.Hour)}))
+	// mintC: a record only on the next day — should be omitted for a `day` query.
+	require.NoError(t, s.PutHistoricalReserve(ctx, &currency.ReserveRecord{Mint: "mintC", SupplyFromBonding: 5000, Time: day.AddDate(0, 0, 1).Add(8 * time.Hour)}))
+
+	queryT := time.Date(2022, 05, 10, 23, 59, 59, 0, time.UTC)
+	res, err := s.GetReservesForDay(ctx, []string{"mintA", "mintB", "mintC", "mintD"}, queryT)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+
+	// mintA: close of the day = 800 at 20:00.
+	require.Contains(t, res, "mintA")
+	assert.EqualValues(t, 800, res["mintA"].SupplyFromBonding)
+	assert.Equal(t, day.Add(20*time.Hour).Unix(), res["mintA"].Time.Unix())
+
+	// mintB: its single same-day record.
+	require.Contains(t, res, "mintB")
+	assert.EqualValues(t, 10000, res["mintB"].SupplyFromBonding)
+
+	// mintC has no record on `day`; mintD has none at all — both omitted.
+	assert.NotContains(t, res, "mintC")
+	assert.NotContains(t, res, "mintD")
+
+	// Empty input yields an empty map, not an error.
+	empty, err := s.GetReservesForDay(ctx, nil, queryT)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }
 
 func testGetReservesInRange(t *testing.T, s reserve.Store) {
