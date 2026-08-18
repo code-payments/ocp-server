@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -60,6 +61,9 @@ const (
 	// codeConditionalCheckFailed is the DynamoDB cancellation reason code for a
 	// transaction item whose ConditionExpression evaluated false.
 	codeConditionalCheckFailed = "ConditionalCheckFailed"
+
+	// maxBatchGetItems is DynamoDB's per-call BatchGetItem key limit.
+	maxBatchGetItems = 100
 )
 
 // rollupResolutions are the coarse resolutions maintained alongside the raw
@@ -161,6 +165,64 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 		return nil, currency.ErrNotFound
 	}
 	return historyRecord(mint, out.Items[0])
+}
+
+// GetReservesForDay returns each mint's reserve state as of the UTC day of t —
+// the close of that mint's day rollup bucket. Because a rollup bucket has a
+// deterministic key (mint#day, bucketStart), this is a single batched key get
+// rather than a per-mint query. Mints with no record on that day are omitted.
+func (s *store) GetReservesForDay(ctx context.Context, mints []string, t time.Time) (map[string]*currency.ReserveRecord, error) {
+	bucket := skN(bucketStart(t, resDay))
+
+	// Dedup so a repeated mint isn't fetched twice.
+	seen := make(map[string]struct{}, len(mints))
+	keys := make([]map[string]types.AttributeValue, 0, len(mints))
+	for _, mint := range mints {
+		if _, ok := seen[mint]; ok {
+			continue
+		}
+		seen[mint] = struct{}{}
+		keys = append(keys, map[string]types.AttributeValue{
+			attrPK: avS(historyPK(mint, resDay)),
+			attrSK: bucket,
+		})
+	}
+
+	res := make(map[string]*currency.ReserveRecord, len(keys))
+	for start := 0; start < len(keys); start += maxBatchGetItems {
+		end := start + maxBatchGetItems
+		if end > len(keys) {
+			end = len(keys)
+		}
+
+		req := map[string]types.KeysAndAttributes{
+			s.historyTable: {Keys: keys[start:end]},
+		}
+		// Drain UnprocessedKeys (DynamoDB may return a partial batch under load).
+		for len(req[s.historyTable].Keys) > 0 {
+			out, err := s.client.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req})
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range out.Responses[s.historyTable] {
+				mint, err := mintFromDayPK(item)
+				if err != nil {
+					return nil, err
+				}
+				rec, err := historyRecord(mint, item)
+				if err != nil {
+					return nil, err
+				}
+				res[mint] = rec
+			}
+			if unprocessed, ok := out.UnprocessedKeys[s.historyTable]; ok && len(unprocessed.Keys) > 0 {
+				req = map[string]types.KeysAndAttributes{s.historyTable: unprocessed}
+			} else {
+				break
+			}
+		}
+	}
+	return res, nil
 }
 
 func (s *store) GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
@@ -411,6 +473,18 @@ func bucketStart(t time.Time, res string) time.Time {
 }
 
 func historyPK(mint, res string) string { return mint + "#" + res }
+
+// mintFromDayPK recovers the mint from a day-rollup item's pk ("<mint>#day").
+// Mints are base58, which never contains '#', so the resolution suffix is
+// unambiguous.
+func mintFromDayPK(item map[string]types.AttributeValue) (string, error) {
+	pk := asS(item[attrPK])
+	suffix := "#" + resDay
+	if !strings.HasSuffix(pk, suffix) {
+		return "", fmt.Errorf("unexpected day-rollup pk %q", pk)
+	}
+	return strings.TrimSuffix(pk, suffix), nil
+}
 
 // skN encodes t's unix-nanos as the numeric sort key, which sorts in
 // chronological order.

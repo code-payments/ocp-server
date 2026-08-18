@@ -29,6 +29,16 @@ type Store interface {
 	// provided time.
 	GetReserveAtTime(ctx context.Context, mint string, t time.Time) (*currency.ReserveRecord, error)
 
+	// GetReservesForDay gets the reserve state for each of the given currency
+	// creator mints as of the UTC day of t — the close of that day (the mint's most
+	// recent record within the day), keyed by mint. Mints with no record on that day
+	// are omitted from the result rather than reported as an error.
+	//
+	// Unlike GetReserveAtTime this is day-granularity: it does not fall back to an
+	// earlier day, and for a mid-day t the returned record may be later than t (the
+	// day's close). It is served as a single batched key get against the day rollups.
+	GetReservesForDay(ctx context.Context, mints []string, t time.Time) (map[string]*currency.ReserveRecord, error)
+
 	// GetReservesInRange gets the reserve records for a range of time given a
 	// currency creator mint and interval.
 	//

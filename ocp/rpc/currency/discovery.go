@@ -72,11 +72,17 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 		log.With(zap.Error(err)).Warn("failure getting cached holder counts")
 		return status.Error(codes.Internal, "")
 	}
+	cachedMarketCaps, err := s.mintDataProvider.GetAllCachedMarketCaps(ctx)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting cached market caps")
+		return status.Error(codes.Internal, "")
+	}
 
 	type discoveredMint struct {
-		record       *currency.MetadataRecord
-		reserveState *ocp_currency.LiveReserveStateData
-		holderData   *ocp_currency.LiveHolderCountData
+		record        *currency.MetadataRecord
+		reserveState  *ocp_currency.LiveReserveStateData
+		holderData    *ocp_currency.LiveHolderCountData
+		marketCapData *ocp_currency.LiveMarketCapData
 	}
 
 	var candidates []*discoveredMint
@@ -99,14 +105,20 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 			continue
 		}
 
+		marketCapData, ok := cachedMarketCaps[record.Mint]
+		if !ok {
+			continue
+		}
+
 		if !categoryFilterFunc(record) {
 			continue
 		}
 
 		candidates = append(candidates, &discoveredMint{
-			record:       record,
-			reserveState: reserveState,
-			holderData:   holderData,
+			record:        record,
+			reserveState:  reserveState,
+			holderData:    holderData,
+			marketCapData: marketCapData,
 		})
 	}
 
@@ -128,7 +140,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 	for _, candidate := range candidates {
 		log := log.With(zap.String("mint", candidate.record.Mint))
 
-		protoMint, err := s.mintDataProvider.ToProtoMint(ctx, candidate.record, false, false)
+		protoMint, err := s.mintDataProvider.ToProtoMint(ctx, candidate.record, false, false, false)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure converting metadata to proto mint")
 			continue
@@ -136,6 +148,7 @@ func (s *currencyServer) Discover(req *currencypb.DiscoverRequest, stream curren
 
 		ocp_currency.SetLaunchpadReserveData(protoMint, candidate.reserveState)
 		ocp_currency.SetHolderMetrics(protoMint, candidate.holderData)
+		ocp_currency.SetMarketCapMetrics(protoMint, candidate.marketCapData)
 
 		protoMints = append(protoMints, protoMint)
 	}

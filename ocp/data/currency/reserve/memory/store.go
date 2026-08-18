@@ -87,6 +87,35 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 	return results[0].Clone(), nil
 }
 
+func (s *store) GetReservesForDay(ctx context.Context, mints []string, t time.Time) (map[string]*currency.ReserveRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res := make(map[string]*currency.ReserveRecord, len(mints))
+	for _, mint := range mints {
+		// The close of t's UTC day for this mint: its most recent record that day.
+		var latest *currency.ReserveRecord
+		for _, item := range s.historical {
+			if item.Mint != mint || !sameUTCDay(item.Time, t) {
+				continue
+			}
+			if latest == nil || item.Time.After(latest.Time) {
+				latest = item
+			}
+		}
+		if latest != nil {
+			res[mint] = latest.Clone()
+		}
+	}
+	return res, nil
+}
+
+func sameUTCDay(a, b time.Time) bool {
+	ay, am, ad := a.UTC().Date()
+	by, bm, bd := b.UTC().Date()
+	return ay == by && am == bm && ad == bd
+}
+
 func (s *store) GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
 	if interval > query.IntervalMonth {
 		return nil, currency.ErrInvalidInterval

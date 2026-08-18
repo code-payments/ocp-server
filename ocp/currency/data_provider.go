@@ -50,6 +50,13 @@ type LiveHolderCountData struct {
 	LastWeekDelta  int64
 }
 
+// LiveMarketCapData represents live market cap data for a currency
+type LiveMarketCapData struct {
+	Mint             *common.Account
+	CurrentMarketCap float64
+	LastWeekDelta    float64
+}
+
 type cachedProtoMint struct {
 	mint          *currencypb.Mint
 	lastUpdatedAt time.Time
@@ -77,6 +84,7 @@ type MintDataProvider struct {
 	exchangeRates     *LiveExchangeRateData
 	launchpadReserves map[string]*LiveReserveStateData
 	holderCounts      map[string]*LiveHolderCountData
+	marketCaps        map[string]*LiveMarketCapData
 
 	streamsMu sync.RWMutex
 	streams   map[string]*LiveMintDataStream
@@ -131,6 +139,7 @@ func NewMintDataProvider(
 		currencyMetadata:              make(map[string]*currency.MetadataRecord),
 		launchpadReserves:             make(map[string]*LiveReserveStateData),
 		holderCounts:                  make(map[string]*LiveHolderCountData),
+		marketCaps:                    make(map[string]*LiveMarketCapData),
 		streams:                       make(map[string]*LiveMintDataStream),
 		exchangeRatesReady:            make(chan struct{}),
 		reserveStatesReady:            make(chan struct{}),
@@ -176,7 +185,7 @@ func (m *MintDataProvider) Stop() {
 func (m *MintDataProvider) ToProtoMint(
 	ctx context.Context,
 	metadataRecord *currency.MetadataRecord,
-	includeLiveReserveState, includeLiveHolderMetrics bool,
+	includeLiveReserveState, includeLiveHolderMetrics, includeLiveMarketCapMetrics bool,
 ) (*currencypb.Mint, error) {
 	mint, err := common.NewAccountFromPublicKeyString(metadataRecord.Mint)
 	if err != nil {
@@ -278,6 +287,13 @@ func (m *MintDataProvider) ToProtoMint(
 		}
 	}
 
+	if includeLiveMarketCapMetrics {
+		err = m.InjectLiveMarketCapMetrics(ctx, protoMint)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return protoMint, nil
 }
 
@@ -341,6 +357,39 @@ func SetHolderMetrics(protoMint *currencypb.Mint, holderData *LiveHolderCountDat
 			{
 				Range: currencypb.PredefinedRange_LAST_WEEK,
 				Delta: holderData.LastWeekDelta,
+			},
+		},
+	}
+}
+
+func (m *MintDataProvider) InjectLiveMarketCapMetrics(ctx context.Context, protoMint *currencypb.Mint) error {
+	if protoMint.LaunchpadMetadata == nil {
+		return errors.New("only launchpad currencies supported for market cap")
+	}
+
+	mint, err := common.NewAccountFromProto(protoMint.Address)
+	if err != nil {
+		return errors.New("invalid proto mint")
+	}
+
+	marketCapData, err := m.GetLiveMarketCap(ctx, mint)
+	if err != nil {
+		return err
+	}
+
+	SetMarketCapMetrics(protoMint, marketCapData)
+	return nil
+}
+
+// SetMarketCapMetrics applies market cap data to a proto Mint without fetching
+// from the provider.
+func SetMarketCapMetrics(protoMint *currencypb.Mint, marketCapData *LiveMarketCapData) {
+	protoMint.MarketCapMetrics = &currencypb.MarketCapMetrics{
+		CurrentMarketCap: marketCapData.CurrentMarketCap,
+		MarketCapDeltas: []*currencypb.MarketCapMetrics_DeltaMarketCap{
+			{
+				Range: currencypb.PredefinedRange_LAST_WEEK,
+				Delta: marketCapData.LastWeekDelta,
 			},
 		},
 	}
@@ -411,7 +460,7 @@ func (m *MintDataProvider) GetProtoMint(ctx context.Context, mint *common.Accoun
 			return nil, currency.ErrNotFound
 		}
 
-		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord, true, false)
+		protoMetadata, err = m.ToProtoMint(ctx, metadataRecord, true, false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -538,6 +587,24 @@ func (m *MintDataProvider) GetAllCachedHolderCounts(ctx context.Context) (map[st
 	return out, nil
 }
 
+// GetAllCachedMarketCaps returns a snapshot of all currently cached market cap
+// data keyed by mint address. It blocks until the first successful poll has
+// completed.
+func (m *MintDataProvider) GetAllCachedMarketCaps(ctx context.Context) (map[string]*LiveMarketCapData, error) {
+	if err := m.waitForReserveStates(ctx); err != nil {
+		return nil, err
+	}
+
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	out := make(map[string]*LiveMarketCapData, len(m.marketCaps))
+	for k, v := range m.marketCaps {
+		out[k] = v
+	}
+	return out, nil
+}
+
 // GetLiveReserveState returns a current pre-signed live launchpad currency reserve state for a mint
 func (m *MintDataProvider) GetLiveReserveState(ctx context.Context, mint *common.Account) (*LiveReserveStateData, error) {
 	m.stateMu.RLock()
@@ -565,6 +632,40 @@ func (m *MintDataProvider) GetLiveReserveState(ctx context.Context, mint *common
 	defer m.stateMu.RUnlock()
 
 	data, ok = m.launchpadReserves[mint.PublicKey().ToBase58()]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return data, nil
+}
+
+// GetLiveMarketCap returns live market cap data for a mint, blocking until the
+// reserve poller has retrieved the state it's derived from.
+func (m *MintDataProvider) GetLiveMarketCap(ctx context.Context, mint *common.Account) (*LiveMarketCapData, error) {
+	m.stateMu.RLock()
+	data, ok := m.marketCaps[mint.PublicKey().ToBase58()]
+	m.stateMu.RUnlock()
+
+	if !ok {
+		isSupported, err := common.IsSupportedMint(ctx, m.data, mint)
+		if err != nil {
+			return nil, err
+		}
+		if !isSupported {
+			return nil, common.ErrUnsupportedMint
+		}
+	} else {
+		return data, nil
+	}
+
+	err := m.waitForReserveState(ctx, mint)
+	if err != nil {
+		return nil, err
+	}
+
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+
+	data, ok = m.marketCaps[mint.PublicKey().ToBase58()]
 	if !ok {
 		return nil, errors.New("not found")
 	}
@@ -937,6 +1038,23 @@ func (m *MintDataProvider) fetchAndUpdateReserveStates(ctx context.Context) {
 		return
 	}
 
+	mints := make([]string, 0, len(liveReserves))
+	for mintAddr := range liveReserves {
+		mints = append(mints, mintAddr)
+	}
+
+	// Market cap is derived from supply, so the weekly delta comes from the supply
+	// held a week ago.
+	var includeWeeklyDeltas bool
+	oneWeekAgo := time.Now().Add(-7 * 24 * time.Hour)
+	endOfWeekAgoDay := time.Date(oneWeekAgo.Year(), oneWeekAgo.Month(), oneWeekAgo.Day(), 23, 59, 59, 0, time.UTC)
+	historicalReserves, err := m.reserveStore.GetReservesForDay(ctx, mints, endOfWeekAgoDay)
+	if err != nil && err != currency.ErrNotFound {
+		m.log.With(zap.Error(err)).Warn("failed to fetch historical reserves for weekly market cap delta")
+	} else {
+		includeWeeklyDeltas = true
+	}
+
 	var updatedStates []*LiveReserveStateData
 	for mintAddr, record := range liveReserves {
 		mint, err := common.NewAccountFromPublicKeyString(mintAddr)
@@ -963,8 +1081,25 @@ func (m *MintDataProvider) fetchAndUpdateReserveStates(ctx context.Context) {
 			SignedState:       signedState,
 		}
 
+		var pastSupplyFromBonding uint64
+		if historicalReserves != nil {
+			if pastRecord, ok := historicalReserves[mintAddr]; ok {
+				pastSupplyFromBonding = pastRecord.SupplyFromBonding
+			}
+		}
+
+		currentMarketCap := CalculateMarketCap(record.SupplyFromBonding, 1.0)
+		marketCapData := &LiveMarketCapData{
+			Mint:             mint,
+			CurrentMarketCap: currentMarketCap,
+		}
+		if includeWeeklyDeltas {
+			marketCapData.LastWeekDelta = currentMarketCap - CalculateMarketCap(pastSupplyFromBonding, 1.0)
+		}
+
 		m.stateMu.Lock()
 		m.launchpadReserves[mintAddr] = stateData
+		m.marketCaps[mintAddr] = marketCapData
 		m.stateMu.Unlock()
 
 		m.markReserveStateReady(mint)

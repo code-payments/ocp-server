@@ -2,7 +2,7 @@
 // reserve lookups in front of a wrapped store.
 //
 // Point-in-time reads are keyed by mint and a coarse time bucket that doubles as
-// the freshness window. Range and live reads pass straight through. Live writes
+// the freshness window. Range, day and live reads pass straight through. Live writes
 // are guarded against the last successfully saved slot per mint: a write whose
 // slot is not greater is rejected with currency.ErrStaleReserveState without a
 // round-trip to the backing store. Everything else passes straight through.
@@ -73,6 +73,10 @@ func (s *store) GetReserveAtTime(ctx context.Context, mint string, t time.Time) 
 	s.cache.Insert(key, record, reserveWeight)
 
 	return record, nil
+}
+
+func (s *store) GetReservesForDay(ctx context.Context, mints []string, t time.Time) (map[string]*currency.ReserveRecord, error) {
+	return s.backing.GetReservesForDay(ctx, mints, t)
 }
 
 func (s *store) GetReservesInRange(ctx context.Context, mint string, interval query.Interval, start time.Time, end time.Time, ordering query.Ordering) ([]*currency.ReserveRecord, error) {
