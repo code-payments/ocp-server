@@ -25,6 +25,7 @@ import (
 	currency_metadata "github.com/code-payments/ocp-server/ocp/data/currency/metadata"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
+	"github.com/code-payments/ocp-server/ocp/data/history"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/rendezvous"
@@ -43,6 +44,7 @@ import (
 	currency_metadata_memory_client "github.com/code-payments/ocp-server/ocp/data/currency/metadata/memory"
 	deposit_memory_client "github.com/code-payments/ocp-server/ocp/data/deposit/memory"
 	fulfillment_memory_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/memory"
+	history_memory_client "github.com/code-payments/ocp-server/ocp/data/history/memory"
 	intent_memory_client "github.com/code-payments/ocp-server/ocp/data/intent/memory"
 	nonce_memory_client "github.com/code-payments/ocp-server/ocp/data/nonce/memory"
 	rendezvous_memory_client "github.com/code-payments/ocp-server/ocp/data/rendezvous/memory"
@@ -61,6 +63,7 @@ import (
 	currency_metadata_postgres_client "github.com/code-payments/ocp-server/ocp/data/currency/metadata/postgres"
 	deposit_postgres_client "github.com/code-payments/ocp-server/ocp/data/deposit/postgres"
 	fulfillment_postgres_client "github.com/code-payments/ocp-server/ocp/data/fulfillment/postgres"
+	history_postgres_client "github.com/code-payments/ocp-server/ocp/data/history/postgres"
 	intent_postgres_client "github.com/code-payments/ocp-server/ocp/data/intent/postgres"
 	nonce_postgres_client "github.com/code-payments/ocp-server/ocp/data/nonce/postgres"
 	rendezvous_postgres_client "github.com/code-payments/ocp-server/ocp/data/rendezvous/postgres"
@@ -220,6 +223,15 @@ type DatabaseData interface {
 	GetAllTimelocksByState(ctx context.Context, state timelock_token.TimelockState, opts ...query.Option) ([]*timelock.Record, error)
 	GetTimelockCountByState(ctx context.Context, state timelock_token.TimelockState) (uint64, error)
 
+	// Transaction History
+	// --------------------------------------------------------------------------------
+	SaveTransactionHistory(ctx context.Context, record *history.Record) error
+	GetAllTransactionHistoryByOwner(ctx context.Context, owner string, opts ...query.Option) ([]*history.Record, error)
+	GetAllTransactionHistoryByOwnerMint(ctx context.Context, owner, mint string, opts ...query.Option) ([]*history.Record, error)
+	GetAllTransactionHistoryByIds(ctx context.Context, ids []uint64) ([]*history.Record, error)
+	GetAllTransactionHistoryByReference(ctx context.Context, referenceType history.ReferenceType, referenceId string) ([]*history.Record, error)
+	GetAllTransactionHistoryByGiftCardVault(ctx context.Context, vault string) ([]*history.Record, error)
+
 	// Transactions
 	// --------------------------------------------------------------------------------
 	GetTransaction(ctx context.Context, sig string) (*transaction.Record, error)
@@ -263,23 +275,24 @@ type DatabaseData interface {
 }
 
 type DatabaseProvider struct {
-	accounts     account.Store
-	actions      action.Store
-	balance      balance.Store
-	currencies   currency_metadata.Store
-	deposits     deposit.Store
-	fulfillments fulfillment.Store
-	intents      intent.Store
-	nonces       nonce.Store
-	rendezvous   rendezvous.Store
-	swaps        swap.Store
-	tasks        task.Store
-	timelocks    timelock.Store
-	transactions transaction.Store
-	vault        vault.Store
-	vmMetadata   vm_metadata.Store
-	vmRam        vm_ram.Store
-	vmStorage    vm_storage.Store
+	accounts           account.Store
+	actions            action.Store
+	balance            balance.Store
+	currencies         currency_metadata.Store
+	deposits           deposit.Store
+	fulfillments       fulfillment.Store
+	intents            intent.Store
+	nonces             nonce.Store
+	rendezvous         rendezvous.Store
+	swaps              swap.Store
+	tasks              task.Store
+	timelocks          timelock.Store
+	transactionHistory history.Store
+	transactions       transaction.Store
+	vault              vault.Store
+	vmMetadata         vm_metadata.Store
+	vmRam              vm_ram.Store
+	vmStorage          vm_storage.Store
 
 	timelockCache cache.Cache
 
@@ -308,23 +321,24 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 	db.SetConnMaxLifetime(time.Hour)
 
 	return &DatabaseProvider{
-		accounts:     account_postgres_client.New(db),
-		actions:      action_postgres_client.New(db),
-		balance:      balance_postgres_client.New(db),
-		currencies:   currency_metadata_postgres_client.New(db),
-		deposits:     deposit_postgres_client.New(db),
-		fulfillments: fulfillment_postgres_client.New(db),
-		intents:      intent_postgres_client.New(db),
-		nonces:       nonce_postgres_client.New(db),
-		rendezvous:   rendezvous_postgres_client.New(db),
-		swaps:        swap_postgres_client.New(db),
-		tasks:        task_postgres_client.New(db),
-		timelocks:    timelock_postgres_client.New(db),
-		transactions: transaction_postgres_client.New(db),
-		vault:        vault_postgres_client.New(db),
-		vmMetadata:   vm_metadata_postgres_client.New(db),
-		vmRam:        vm_ram_postgres_client.New(db),
-		vmStorage:    vm_storage_postgres_client.New(db),
+		accounts:           account_postgres_client.New(db),
+		actions:            action_postgres_client.New(db),
+		balance:            balance_postgres_client.New(db),
+		currencies:         currency_metadata_postgres_client.New(db),
+		deposits:           deposit_postgres_client.New(db),
+		fulfillments:       fulfillment_postgres_client.New(db),
+		intents:            intent_postgres_client.New(db),
+		nonces:             nonce_postgres_client.New(db),
+		rendezvous:         rendezvous_postgres_client.New(db),
+		swaps:              swap_postgres_client.New(db),
+		tasks:              task_postgres_client.New(db),
+		timelocks:          timelock_postgres_client.New(db),
+		transactionHistory: history_postgres_client.New(db),
+		transactions:       transaction_postgres_client.New(db),
+		vault:              vault_postgres_client.New(db),
+		vmMetadata:         vm_metadata_postgres_client.New(db),
+		vmRam:              vm_ram_postgres_client.New(db),
+		vmStorage:          vm_storage_postgres_client.New(db),
 
 		timelockCache: cache.NewCache(maxTimelockCacheBudget),
 
@@ -334,23 +348,24 @@ func NewDatabaseProvider(dbConfig *pg.Config) (DatabaseData, error) {
 
 func NewTestDatabaseProvider() DatabaseData {
 	return &DatabaseProvider{
-		accounts:     account_memory_client.New(),
-		actions:      action_memory_client.New(),
-		balance:      balance_memory_client.New(),
-		currencies:   currency_metadata_memory_client.New(),
-		deposits:     deposit_memory_client.New(),
-		fulfillments: fulfillment_memory_client.New(),
-		intents:      intent_memory_client.New(),
-		nonces:       nonce_memory_client.New(),
-		rendezvous:   rendezvous_memory_client.New(),
-		swaps:        swap_memory_client.New(),
-		tasks:        task_memory_client.New(),
-		timelocks:    timelock_memory_client.New(),
-		transactions: transaction_memory_client.New(),
-		vault:        vault_memory_client.New(),
-		vmMetadata:   vm_metadata_memory_client.New(),
-		vmRam:        vm_ram_memory_client.New(),
-		vmStorage:    vm_storage_memory_client.New(),
+		accounts:           account_memory_client.New(),
+		actions:            action_memory_client.New(),
+		balance:            balance_memory_client.New(),
+		currencies:         currency_metadata_memory_client.New(),
+		deposits:           deposit_memory_client.New(),
+		fulfillments:       fulfillment_memory_client.New(),
+		intents:            intent_memory_client.New(),
+		nonces:             nonce_memory_client.New(),
+		rendezvous:         rendezvous_memory_client.New(),
+		swaps:              swap_memory_client.New(),
+		tasks:              task_memory_client.New(),
+		timelocks:          timelock_memory_client.New(),
+		transactionHistory: history_memory_client.New(),
+		transactions:       transaction_memory_client.New(),
+		vault:              vault_memory_client.New(),
+		vmMetadata:         vm_metadata_memory_client.New(),
+		vmRam:              vm_ram_memory_client.New(),
+		vmStorage:          vm_storage_memory_client.New(),
 
 		timelockCache: nil, // Shouldn't be used for tests
 	}
@@ -603,7 +618,6 @@ func (dp *DatabaseProvider) GetUsdCostBasisBatch(ctx context.Context, mint strin
 	return dp.intents.GetUsdCostBasisBatch(ctx, mint, owners...)
 }
 
-
 // Nonces
 // --------------------------------------------------------------------------------
 func (dp *DatabaseProvider) GetNonce(ctx context.Context, address string) (*nonce.Record, error) {
@@ -811,6 +825,37 @@ func (dp *DatabaseProvider) GetAllTimelocksByState(ctx context.Context, state ti
 }
 func (dp *DatabaseProvider) GetTimelockCountByState(ctx context.Context, state timelock_token.TimelockState) (uint64, error) {
 	return dp.timelocks.GetCountByState(ctx, state)
+}
+
+// Transaction History
+// --------------------------------------------------------------------------------
+func (dp *DatabaseProvider) SaveTransactionHistory(ctx context.Context, record *history.Record) error {
+	return dp.transactionHistory.Save(ctx, record)
+}
+func (dp *DatabaseProvider) GetAllTransactionHistoryByOwner(ctx context.Context, owner string, opts ...query.Option) ([]*history.Record, error) {
+	req, err := query.DefaultPaginationHandler(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return dp.transactionHistory.GetAllByOwner(ctx, owner, req.Cursor, req.Limit, req.SortBy)
+}
+func (dp *DatabaseProvider) GetAllTransactionHistoryByOwnerMint(ctx context.Context, owner, mint string, opts ...query.Option) ([]*history.Record, error) {
+	req, err := query.DefaultPaginationHandler(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return dp.transactionHistory.GetAllByOwnerMint(ctx, owner, mint, req.Cursor, req.Limit, req.SortBy)
+}
+func (dp *DatabaseProvider) GetAllTransactionHistoryByIds(ctx context.Context, ids []uint64) ([]*history.Record, error) {
+	return dp.transactionHistory.GetAllByIds(ctx, ids)
+}
+func (dp *DatabaseProvider) GetAllTransactionHistoryByReference(ctx context.Context, referenceType history.ReferenceType, referenceId string) ([]*history.Record, error) {
+	return dp.transactionHistory.GetAllByReference(ctx, referenceType, referenceId)
+}
+func (dp *DatabaseProvider) GetAllTransactionHistoryByGiftCardVault(ctx context.Context, vault string) ([]*history.Record, error) {
+	return dp.transactionHistory.GetAllByGiftCardVault(ctx, vault)
 }
 
 // Transactions
