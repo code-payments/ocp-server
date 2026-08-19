@@ -29,6 +29,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/task"
+	history_util "github.com/code-payments/ocp-server/ocp/history"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 	"github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/pointer"
@@ -640,6 +641,28 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		err = s.data.SaveIntent(ctx, intentRecord)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure saving intent record")
+			return err
+		}
+
+		// Save transaction history records for the intent
+		historyRecords, err := history_util.BuildRecordsForIntent(ctx, s.data, intentRecord, submitActionsReq.Metadata, actionRecords, s.conf.createOnSendWithdrawalFeeQuarks.Get(ctx))
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure building transaction history records")
+			return err
+		}
+		for _, historyRecord := range historyRecords {
+			err = s.data.SaveTransactionHistory(ctx, historyRecord)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure saving transaction history record")
+				return err
+			}
+		}
+
+		// Apply state transitions the intent triggers on other flows' transaction
+		// history records
+		err = history_util.ApplyStateTransitionsForIntent(ctx, s.data, intentRecord)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure applying transaction history state transitions")
 			return err
 		}
 

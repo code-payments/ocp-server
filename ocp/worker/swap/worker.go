@@ -294,7 +294,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 				return errors.Wrap(err, "error updating balances")
 			}
 
-			err = p.markSwapFinalized(ctx, record)
+			err = p.markSwapFinalized(ctx, record, quarksBought)
 			if err != nil {
 				return errors.Wrap(err, "error marking swap as finalized")
 			}

@@ -20,6 +20,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
+	history_util "github.com/code-payments/ocp-server/ocp/history"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
 	"github.com/code-payments/ocp-server/solana"
@@ -60,11 +61,103 @@ func (p *runtime) markSwapSubmitting(ctx context.Context, record *swap.Record) e
 		return err
 	}
 
-	record.State = swap.StateSubmitting
-	return p.data.SaveSwap(ctx, record)
+	// The funding has come through and been validated, so the swap enters
+	// transaction history
+	exchangeCurrency, nativeAmount, fiatExchangeRate, err := p.getFundedSwapValue(ctx, record)
+	if err != nil {
+		return err
+	}
+	isCurrencyLaunch, err := p.isCurrencyLaunch(ctx, record)
+	if err != nil {
+		return err
+	}
+	var launchTerms *history_util.CurrencyLaunchTerms
+	if isCurrencyLaunch {
+		launchTerms = &history_util.CurrencyLaunchTerms{
+			PurchaseQuarks: p.conf.newCurrencyPurchaseQuarks.Get(ctx),
+			FeeQuarks:      p.conf.newCurrencyFeeQuarks.Get(ctx),
+		}
+	}
+	historyRecord, err := history_util.BuildRecordForFundedSwap(record, exchangeCurrency, nativeAmount, fiatExchangeRate, launchTerms)
+	if err != nil {
+		return err
+	}
+
+	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		err := p.data.SaveTransactionHistory(ctx, historyRecord)
+		if err != nil {
+			return err
+		}
+
+		record.State = swap.StateSubmitting
+		return p.data.SaveSwap(ctx, record)
+	})
 }
 
-func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record) error {
+// isCurrencyLaunch reports whether a swap is a currency's initial purchase.
+// The swap record doesn't carry it, but the destination currency only reaches
+// an available state once its initial purchase has completed, so a destination
+// that hasn't is one this swap is launching.
+func (p *runtime) isCurrencyLaunch(ctx context.Context, swapRecord *swap.Record) (bool, error) {
+	if swapRecord.Kind != swap.KindReserve {
+		return false, nil
+	}
+
+	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
+	if err != nil {
+		return false, err
+	}
+
+	// Only a launchpad currency is ever launched, so a swap into the core mint
+	// is a sell and has no currency metadata to consult
+	if common.IsCoreMint(toMint) {
+		return false, nil
+	}
+
+	destinationCurrencyMetadataRecord, err := p.data.GetCurrencyMetadata(ctx, swapRecord.ToMint)
+	if err != nil {
+		return false, err
+	}
+	return destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable, nil
+}
+
+// getFundedSwapValue derives the value funding a swap, along with the client's
+// verified fiat exchange rate. The derivation mirrors
+// buildRefundRecordsForCancelledSwap: intent funded swaps inherit the funding
+// payment's exchange data, while externally funded swaps are valued in USD at
+// the current market rate.
+func (p *runtime) getFundedSwapValue(ctx context.Context, swapRecord *swap.Record) (currency_lib.Code, float64, float64, error) {
+	switch swapRecord.FundingSource {
+	case swap.FundingSourceSubmitIntent:
+		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		if fundingIntentRecord.IntentType != intent.SendPublicPayment {
+			return "", 0, 0, errors.New("unexpected intent type")
+		}
+		metadata := fundingIntentRecord.SendPublicPaymentMetadata
+		return metadata.ExchangeCurrency, metadata.NativeAmount, metadata.ExchangeRate, nil
+	case swap.FundingSourceExternalWallet, swap.FundingSourceCoinbaseOnramp:
+		fromMint, err := common.NewAccountFromPublicKeyString(swapRecord.FromMint)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		if !common.IsCoreMint(fromMint) {
+			return "", 0, 0, errors.New("unexpected source mint")
+		}
+
+		usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, p.data, p.exchangeRateStore, p.reserveStore, common.CoreMintAccount, swapRecord.SwapAmount+swapRecord.FeeAmount, time.Now())
+		if err != nil {
+			return "", 0, 0, err
+		}
+		return currency_lib.USD, usdMarketValue, 1.0, nil
+	default:
+		return "", 0, 0, errors.New("unsupported funding source")
+	}
+}
+
+func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record, quarksBought uint64) error {
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return err
@@ -101,6 +194,11 @@ func (p *runtime) markSwapFinalized(ctx context.Context, swapRecord *swap.Record
 					return err
 				}
 			}
+		}
+
+		err = history_util.MarkSwapAsCompleted(ctx, p.data, swapRecord.SwapId, quarksBought)
+		if err != nil {
+			return err
 		}
 
 		swapRecord.TransactionBlob = nil
@@ -152,6 +250,11 @@ func (p *runtime) markSwapFailed(ctx context.Context, swapRecord *swap.Record) e
 					return err
 				}
 			}
+		}
+
+		err = history_util.MarkSwapAsFailed(ctx, p.data, swapRecord.SwapId)
+		if err != nil {
+			return err
 		}
 
 		swapRecord.TransactionBlob = nil
@@ -357,6 +460,13 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 			}
 
 			err = p.data.SaveExternalDeposit(ctx, refundDepositRecord)
+			if err != nil {
+				return err
+			}
+
+			// The swap was funded and entered transaction history, so its
+			// record must reflect the refund
+			err = history_util.MarkSwapAsFailed(ctx, p.data, swapRecord.SwapId)
 			if err != nil {
 				return err
 			}

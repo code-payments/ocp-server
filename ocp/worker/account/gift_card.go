@@ -22,6 +22,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
+	history_util "github.com/code-payments/ocp-server/ocp/history"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/retry"
 )
@@ -170,6 +171,17 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 
 		// Add a intent record to show the funds being returned back to the issuer
 		err = insertAutoReturnIntentRecord(ctx, data, giftCardIssuedIntent, isVoidedByUser)
+		if err != nil {
+			return err
+		}
+
+		// Transition the issuer's transaction history record to reflect the
+		// returned funds
+		if isVoidedByUser {
+			err = history_util.MarkGiftCardIssuanceAsVoided(ctx, data, giftCardVaultAccount.PublicKey().ToBase58())
+		} else {
+			err = history_util.MarkGiftCardIssuanceAsReturned(ctx, data, giftCardVaultAccount.PublicKey().ToBase58())
+		}
 		if err != nil {
 			return err
 		}

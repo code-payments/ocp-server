@@ -25,6 +25,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
+	history_util "github.com/code-payments/ocp-server/ocp/history"
 	"github.com/code-payments/ocp-server/ocp/integration"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	vm_util "github.com/code-payments/ocp-server/ocp/vm"
@@ -39,6 +40,16 @@ import (
 const (
 	// todo: something better?
 	codeVmDepositMemoValue = "vm_deposit"
+
+	// The minimum value worth moving from a VM deposit ATA into the VM. Below
+	// it the deposit isn't initiated at all, so the funds stay in the deposit
+	// ATA and are swept by a later deposit once enough has accumulated.
+	//
+	// The floor belongs here rather than on the observing side, because a
+	// deposit that has already settled on chain has to be recorded: a balance
+	// is the sum of an account's deposit records, so declining to record one
+	// would leave the balance short of what the chain holds.
+	minExternalDepositUsdValue = 0.01
 )
 
 var (
@@ -46,7 +57,7 @@ var (
 )
 
 func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, integration integration.Geyser, userAuthority, mint *common.Account) error {
-	err := maybeInitiateExternalDepositIntoVm(ctx, data, userAuthority, mint)
+	err := maybeInitiateExternalDepositIntoVm(ctx, data, exchangeRateStore, reserveStore, userAuthority, mint)
 	if err != nil {
 		return errors.Wrap(err, "error depositing into the vm")
 	}
@@ -70,7 +81,7 @@ func fixMissingExternalDeposits(ctx context.Context, data ocp_data.Provider, exc
 	return markDepositsAsSynced(ctx, data, userAuthority, mint)
 }
 
-func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, userAuthority, mint *common.Account) error {
+func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, userAuthority, mint *common.Account) error {
 	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
 	if err != nil {
 		return err
@@ -91,10 +102,20 @@ func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provi
 	if balance == 0 {
 		return nil
 	}
-	return initiateExternalDepositIntoVm(ctx, data, userAuthority, mint, balance)
+	return initiateExternalDepositIntoVm(ctx, data, exchangeRateStore, reserveStore, userAuthority, mint, balance)
 }
 
-func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, userAuthority, mint *common.Account, balance uint64) error {
+func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, exchangeRateStore exchange.Store, reserveStore reserve.Store, userAuthority, mint *common.Account, balance uint64) error {
+	// Checked before any of the setup a deposit needs, since the point is to
+	// not do the work at all for an amount that isn't worth moving
+	usdMarketValue, err := currency_util.CalculateUsdMarketValueFromTokenAmount(ctx, data, exchangeRateStore, reserveStore, mint, balance, time.Now())
+	if err != nil {
+		return errors.Wrap(err, "error calculating usd market value")
+	}
+	if usdMarketValue < minExternalDepositUsdValue {
+		return nil
+	}
+
 	vmConfig, err := common.GetVmConfigForMint(ctx, data, mint)
 	if err != nil {
 		return errors.Wrap(err, "error getting vm config")
@@ -358,6 +379,14 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 			err = data.SaveIntent(ctx, intentRecord)
 			if err != nil {
 				return errors.Wrap(err, "error saving intent record")
+			}
+
+			historyRecord := history_util.BuildRecordForExternalDeposit(intentRecord, signature)
+			if historyRecord != nil {
+				err = data.SaveTransactionHistory(ctx, historyRecord)
+				if err != nil {
+					return errors.Wrap(err, "error saving transaction history record")
+				}
 			}
 
 			// For tracking in cached balances
