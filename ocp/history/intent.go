@@ -33,7 +33,7 @@ func BuildRecordsForIntent(ctx context.Context, data ocp_data.DatabaseData, inte
 	case intent.SendPublicPayment:
 		return buildRecordsForSendPublicPaymentIntent(ctx, data, intentRecord, protoMetadata, actionRecords, withdrawalFeeQuarks)
 	case intent.ReceivePaymentsPublicly:
-		return buildRecordsForReceivePaymentsPubliclyIntent(ctx, data, intentRecord)
+		return buildRecordsForReceivePaymentsPubliclyIntent(intentRecord)
 	default:
 		// todo: Support remaining money movement intent types
 		return nil, nil
@@ -249,7 +249,7 @@ func buildRecordsForWithdrawalIntent(ctx context.Context, data ocp_data.Database
 	return []*history.Record{withdrawn, deposited}, nil
 }
 
-func buildRecordsForReceivePaymentsPubliclyIntent(ctx context.Context, data ocp_data.DatabaseData, intentRecord *intent.Record) ([]*history.Record, error) {
+func buildRecordsForReceivePaymentsPubliclyIntent(intentRecord *intent.Record) ([]*history.Record, error) {
 	metadata := intentRecord.ReceivePaymentsPubliclyMetadata
 
 	// Voids and auto-returns are server-initiated intents that are reflected
@@ -258,26 +258,18 @@ func buildRecordsForReceivePaymentsPubliclyIntent(ctx context.Context, data ocp_
 		return nil, nil
 	}
 
-	// The issuer is the claim's counterparty, and is only discoverable through
-	// the intent that issued the gift card.
-	giftCardIssuedIntentRecord, err := data.GetOriginalGiftCardIssuedIntent(ctx, metadata.Source)
-	if err != nil {
-		return nil, err
-	}
-
 	return []*history.Record{{
-		ReferenceId:              intentRecord.IntentId,
-		ReferenceType:            history.IntentReference,
-		Type:                     history.IndirectlyReceived,
-		OwnerAccount:             intentRecord.InitiatorOwnerAccount,
-		CounterpartyOwnerAccount: pointer.String(giftCardIssuedIntentRecord.InitiatorOwnerAccount),
-		ExchangeCurrency:         metadata.OriginalExchangeCurrency,
-		NativeAmount:             metadata.OriginalNativeAmount,
-		MintAccount:              intentRecord.MintAccount,
-		Quantity:                 metadata.Quantity,
-		GiftCardVault:            pointer.String(metadata.Source),
-		AppMetadata:              intentRecord.AppMetadata,
-		State:                    history.StateCompleted,
-		CreatedAt:                intentRecord.CreatedAt,
+		ReferenceId:      intentRecord.IntentId,
+		ReferenceType:    history.IntentReference,
+		Type:             history.IndirectlyReceived,
+		OwnerAccount:     intentRecord.InitiatorOwnerAccount,
+		ExchangeCurrency: metadata.OriginalExchangeCurrency,
+		NativeAmount:     metadata.OriginalNativeAmount,
+		MintAccount:      intentRecord.MintAccount,
+		Quantity:         metadata.Quantity,
+		GiftCardVault:    pointer.String(metadata.Source),
+		AppMetadata:      intentRecord.AppMetadata,
+		State:            history.StateCompleted,
+		CreatedAt:        intentRecord.CreatedAt,
 	}}, nil
 }
