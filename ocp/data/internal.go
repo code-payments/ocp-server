@@ -121,6 +121,14 @@ type DatabaseData interface {
 
 	// Balance
 	// --------------------------------------------------------------------------------
+	CreateBalance(ctx context.Context, record *balance.Record) error
+	GetBalance(ctx context.Context, tokenAccount string) (*balance.Record, error)
+	GetBalanceBatch(ctx context.Context, tokenAccounts ...string) (map[string]*balance.Record, error)
+	GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error)
+	GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error)
+	GetAllBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error)
+	ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error
+	BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error
 	GetCachedBalanceVersion(ctx context.Context, account string) (uint64, error)
 	AdvanceCachedBalanceVersion(ctx context.Context, account string, currentVersion uint64) error
 	CheckNotClosedForBalanceUpdate(ctx context.Context, account string) error
@@ -460,6 +468,30 @@ func (dp *DatabaseProvider) HasFeeAction(ctx context.Context, intent string, fee
 
 // Balance
 // --------------------------------------------------------------------------------
+func (dp *DatabaseProvider) CreateBalance(ctx context.Context, record *balance.Record) error {
+	return dp.balance.Create(ctx, record)
+}
+func (dp *DatabaseProvider) GetBalance(ctx context.Context, tokenAccount string) (*balance.Record, error) {
+	return dp.balance.Get(ctx, tokenAccount)
+}
+func (dp *DatabaseProvider) GetBalanceBatch(ctx context.Context, tokenAccounts ...string) (map[string]*balance.Record, error) {
+	return dp.balance.GetBatch(ctx, tokenAccounts...)
+}
+func (dp *DatabaseProvider) GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error) {
+	return dp.balance.GetAllByOwner(ctx, owner)
+}
+func (dp *DatabaseProvider) GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error) {
+	return dp.balance.GetAllByOwnerAndMint(ctx, owner, mint)
+}
+func (dp *DatabaseProvider) GetAllBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+	return dp.balance.GetAllByMint(ctx, mint, minQuarks, cursor, limit, direction)
+}
+func (dp *DatabaseProvider) ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error {
+	return dp.balance.ApplyDeltas(ctx, deltas...)
+}
+func (dp *DatabaseProvider) BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
+	return dp.balance.Backfill(ctx, tokenAccount, fn)
+}
 func (dp *DatabaseProvider) GetCachedBalanceVersion(ctx context.Context, account string) (uint64, error) {
 	return dp.balance.GetCachedVersion(ctx, account)
 }

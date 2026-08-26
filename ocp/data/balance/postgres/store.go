@@ -6,6 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 )
 
@@ -20,48 +21,95 @@ func New(db *sql.DB) balance.Store {
 	}
 }
 
-// GetCachedVersion implements balance.Store.GetCachedVersion
-func (s *store) GetCachedVersion(ctx context.Context, account string) (uint64, error) {
-	return dbGetCachedVersion(ctx, s.db, account)
-}
-
-// AdvanceCachedVersion implements balance.Store.AdvanceCachedVersion
-func (s *store) AdvanceCachedVersion(ctx context.Context, account string, currentVersion uint64) error {
-	return dbAdvanceCachedVersion(ctx, s.db, account, currentVersion)
-}
-
-// CheckNotClosed implements balance.Store.CheckNotClosed
-func (s *store) CheckNotClosed(ctx context.Context, account string) error {
-	return dbCheckNotClosed(ctx, s.db, account)
-}
-
-// MarkAsClosed implements balance.Store.MarkAsClosed
-func (s *store) MarkAsClosed(ctx context.Context, account string) error {
-	return dbMarkAsClosed(ctx, s.db, account)
-}
-
-// SaveExternalCheckpoint implements balance.Store.SaveExternalCheckpoint
-func (s *store) SaveExternalCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error {
-	model, err := toExternalCheckpointModel(record)
+// Create implements balance.Store.Create
+func (s *store) Create(ctx context.Context, record *balance.Record) error {
+	model, err := toModel(record)
 	if err != nil {
 		return err
 	}
 
-	if err := model.dbSave(ctx, s.db); err != nil {
+	if err := model.dbCreate(ctx, s.db); err != nil {
 		return err
 	}
 
-	res := fromExternalCheckpoingModel(model)
-	res.CopyTo(record)
-
+	fromModel(model).CopyTo(record)
 	return nil
 }
 
-// GetExternalCheckpoint implements balance.Store.GetExternalCheckpoint
-func (s *store) GetExternalCheckpoint(ctx context.Context, account string) (*balance.ExternalCheckpointRecord, error) {
-	model, err := dbGetExternalCheckpoint(ctx, s.db, account)
+// Get implements balance.Store.Get
+func (s *store) Get(ctx context.Context, tokenAccount string) (*balance.Record, error) {
+	model, err := dbGet(ctx, s.db, tokenAccount)
 	if err != nil {
 		return nil, err
 	}
-	return fromExternalCheckpoingModel(model), nil
+	return fromModel(model), nil
+}
+
+// GetBatch implements balance.Store.GetBatch
+func (s *store) GetBatch(ctx context.Context, tokenAccounts ...string) (map[string]*balance.Record, error) {
+	models, err := dbGetBatch(ctx, s.db, tokenAccounts...)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]*balance.Record, len(models))
+	for _, model := range models {
+		res[model.TokenAccount] = fromModel(model)
+	}
+	return res, nil
+}
+
+// GetAllByOwner implements balance.Store.GetAllByOwner
+func (s *store) GetAllByOwner(ctx context.Context, owner string) ([]*balance.Record, error) {
+	models, err := dbGetAllByOwner(ctx, s.db, owner, nil)
+	if err != nil {
+		return nil, err
+	}
+	return fromModels(models), nil
+}
+
+// GetAllByOwnerAndMint implements balance.Store.GetAllByOwnerAndMint
+func (s *store) GetAllByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error) {
+	models, err := dbGetAllByOwner(ctx, s.db, owner, &mint)
+	if err != nil {
+		return nil, err
+	}
+	return fromModels(models), nil
+}
+
+// GetAllByMint implements balance.Store.GetAllByMint
+func (s *store) GetAllByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+	models, err := dbGetAllByMint(ctx, s.db, mint, minQuarks, cursor, limit, direction)
+	if err != nil {
+		return nil, err
+	}
+	return fromModels(models), nil
+}
+
+// ApplyDeltas implements balance.Store.ApplyDeltas
+func (s *store) ApplyDeltas(ctx context.Context, deltas ...*balance.Delta) error {
+	for _, delta := range deltas {
+		if err := delta.Validate(); err != nil {
+			return err
+		}
+	}
+
+	sorted := make([]*balance.Delta, len(deltas))
+	copy(sorted, deltas)
+	balance.SortDeltas(sorted)
+
+	return dbApplyDeltas(ctx, s.db, sorted)
+}
+
+// Backfill implements balance.Store.Backfill
+func (s *store) Backfill(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
+	return dbBackfill(ctx, s.db, tokenAccount, fn)
+}
+
+func fromModels(models []*model) []*balance.Record {
+	res := make([]*balance.Record, len(models))
+	for i, model := range models {
+		res[i] = fromModel(model)
+	}
+	return res
 }
