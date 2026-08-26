@@ -11,6 +11,8 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
+	"github.com/code-payments/ocp-server/config/memory"
+	"github.com/code-payments/ocp-server/config/wrapper"
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
@@ -340,6 +342,7 @@ func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
 
 func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	env := setupBalanceTestEnv(t)
+	enableLedgerReadsForTest(t)
 
 	vmConfig := testutil.NewRandomVmConfig(t, true)
 	backfilledOwner := testutil.NewRandomAccount(t)
@@ -415,8 +418,53 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	assert.Equal(t, expected, balanceByAccount)
 }
 
+func TestDefaultCalculationMethods_BalanceRecordReadsDisabled(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+
+	vmConfig := testutil.NewRandomVmConfig(t, true)
+	owner := testutil.NewRandomAccount(t)
+	tokenAccount, err := owner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+
+	externalAccount := testutil.NewRandomAccount(t)
+
+	data := &balanceTestData{
+		vmConfig:  vmConfig,
+		codeUsers: []*common.Account{owner},
+		transactions: []balanceTestTransaction{
+			{source: externalAccount, destination: tokenAccount, quantity: 11, transactionState: transaction.ConfirmationFinalized},
+		},
+	}
+
+	setupBalanceTestData(t, env, data)
+
+	// A backfilled record exists, but reads are disabled, so history wins
+	require.NoError(t, env.data.CreateBalance(env.ctx, &balance.Record{
+		TokenAccount: tokenAccount.PublicKey().ToBase58(),
+		OwnerAccount: owner.PublicKey().ToBase58(),
+		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
+		Quarks:       42,
+		UsdCostBasis: 123,
+		IsOpen:       true,
+		IsBackfilled: true,
+	}))
+
+	actual, err := CalculateFromCache(env.ctx, env.data, tokenAccount)
+	require.NoError(t, err)
+	assert.EqualValues(t, 11, actual)
+
+	balanceByAccount, err := BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, tokenAccount)
+	require.NoError(t, err)
+	assert.EqualValues(t, 11, balanceByAccount[tokenAccount.PublicKey().ToBase58()])
+
+	usdCostBasis, err := CalculateUsdCostBasisFromCache(env.ctx, env.data, tokenAccount)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, usdCostBasis)
+}
+
 func TestUsdCostBasisCalculationMethods(t *testing.T) {
 	env := setupBalanceTestEnv(t)
+	enableLedgerReadsForTest(t)
 
 	vmConfig := testutil.NewRandomVmConfig(t, true)
 	backfilledOwner := testutil.NewRandomAccount(t)
@@ -492,6 +540,14 @@ func TestDefaultCalculation_ExternalAccount(t *testing.T) {
 	assert.Equal(t, ErrNotManagedByCode, err)
 
 	// Note: not possible with batch method, since we wouldn't have account records
+}
+
+func enableLedgerReadsForTest(t *testing.T) {
+	previous := enableLedgerReads
+	enableLedgerReads = wrapper.NewBoolConfig(memory.NewConfig(true), defaultEnableLedgerReads)
+	t.Cleanup(func() {
+		enableLedgerReads = previous
+	})
 }
 
 type balanceTestEnv struct {

@@ -109,17 +109,19 @@ func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccoun
 
 	// Prefer the materialized balance record, when the account has one that
 	// reflects its full history.
-	balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
-	if err == nil && balanceRecord.IsBackfilled {
-		quarks, err := quarksFromRecord(balanceRecord)
-		if err != nil {
+	if enableLedgerReads.Get(ctx) {
+		balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
+		if err == nil && balanceRecord.IsBackfilled {
+			quarks, err := quarksFromRecord(balanceRecord)
+			if err != nil {
+				tracer.OnError(err)
+				return 0, err
+			}
+			return quarks, nil
+		} else if err != nil && err != balance.ErrRecordNotFound {
 			tracer.OnError(err)
 			return 0, err
 		}
-		return quarks, nil
-	} else if err != nil && err != balance.ErrRecordNotFound {
-		tracer.OnError(err)
-		return 0, err
 	}
 
 	// Otherwise, fall back to iterating over the account's history.
@@ -349,9 +351,13 @@ func defaultBatchCalculationFromCache(ctx context.Context, data ocp_data.Provide
 
 	// Prefer materialized balance records, and only iterate over history for
 	// accounts that don't yet have a fully backfilled one.
-	balanceRecords, err := data.GetBalanceBatch(ctx, tokenAccounts...)
-	if err != nil {
-		return nil, err
+	balanceRecords := make(map[string]*balance.Record)
+	if enableLedgerReads.Get(ctx) {
+		var err error
+		balanceRecords, err = data.GetBalanceBatch(ctx, tokenAccounts...)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	res := make(map[string]uint64, len(tokenAccounts))
@@ -399,12 +405,14 @@ func CalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider,
 	tracer.AddAttribute("account", tokenAccount.PublicKey().ToBase58())
 	defer tracer.End()
 
-	balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
-	if err == nil && balanceRecord.IsBackfilled {
-		return balanceRecord.UsdCostBasis, nil
-	} else if err != nil && err != balance.ErrRecordNotFound {
-		tracer.OnError(err)
-		return 0, err
+	if enableLedgerReads.Get(ctx) {
+		balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
+		if err == nil && balanceRecord.IsBackfilled {
+			return balanceRecord.UsdCostBasis, nil
+		} else if err != nil && err != balance.ErrRecordNotFound {
+			tracer.OnError(err)
+			return 0, err
+		}
 	}
 
 	res, err := legacyUsdCostBasis(ctx, data, tokenAccount.PublicKey().ToBase58())
@@ -426,10 +434,14 @@ func BatchCalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Prov
 		tokenAccountStrings[i] = tokenAccount.PublicKey().ToBase58()
 	}
 
-	balanceRecords, err := data.GetBalanceBatch(ctx, tokenAccountStrings...)
-	if err != nil {
-		tracer.OnError(err)
-		return nil, err
+	balanceRecords := make(map[string]*balance.Record)
+	if enableLedgerReads.Get(ctx) {
+		var err error
+		balanceRecords, err = data.GetBalanceBatch(ctx, tokenAccountStrings...)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
 	}
 
 	res := make(map[string]int64, len(tokenAccounts))
