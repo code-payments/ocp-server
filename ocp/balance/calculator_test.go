@@ -16,6 +16,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/transaction"
@@ -335,6 +336,153 @@ func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
 
 	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, tokenAccount)
 	assert.Equal(t, ErrNotManagedByCode, err)
+}
+
+func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+
+	vmConfig := testutil.NewRandomVmConfig(t, true)
+	backfilledOwner := testutil.NewRandomAccount(t)
+	backfilledAccount, err := backfilledOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+	pendingOwner := testutil.NewRandomAccount(t)
+	pendingAccount, err := pendingOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+	legacyOwner := testutil.NewRandomAccount(t)
+	legacyAccount, err := legacyOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+
+	externalAccount := testutil.NewRandomAccount(t)
+
+	data := &balanceTestData{
+		vmConfig:  vmConfig,
+		codeUsers: []*common.Account{backfilledOwner, pendingOwner, legacyOwner},
+		transactions: []balanceTestTransaction{
+			{source: externalAccount, destination: backfilledAccount, quantity: 11, transactionState: transaction.ConfirmationFinalized},
+			{source: externalAccount, destination: pendingAccount, quantity: 22, transactionState: transaction.ConfirmationFinalized},
+			{source: externalAccount, destination: legacyAccount, quantity: 33, transactionState: transaction.ConfirmationFinalized},
+		},
+	}
+
+	setupBalanceTestData(t, env, data)
+
+	// A backfilled record is authoritative, even where it disagrees with history
+	require.NoError(t, env.data.CreateBalance(env.ctx, &balance.Record{
+		TokenAccount: backfilledAccount.PublicKey().ToBase58(),
+		OwnerAccount: backfilledOwner.PublicKey().ToBase58(),
+		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
+		Quarks:       42,
+		IsOpen:       true,
+		IsBackfilled: true,
+	}))
+
+	// A record that isn't backfilled is ignored in favour of history
+	require.NoError(t, env.data.CreateBalance(env.ctx, &balance.Record{
+		TokenAccount: pendingAccount.PublicKey().ToBase58(),
+		OwnerAccount: pendingOwner.PublicKey().ToBase58(),
+		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
+		Quarks:       -5,
+		IsOpen:       true,
+	}))
+
+	expected := map[string]uint64{
+		backfilledAccount.PublicKey().ToBase58(): 42,
+		pendingAccount.PublicKey().ToBase58():    22,
+		legacyAccount.PublicKey().ToBase58():     33,
+	}
+
+	for tokenAccount, expectedQuarks := range expected {
+		account, err := common.NewAccountFromPublicKeyString(tokenAccount)
+		require.NoError(t, err)
+
+		actual, err := CalculateFromCache(env.ctx, env.data, account)
+		require.NoError(t, err)
+		assert.EqualValues(t, expectedQuarks, actual, tokenAccount)
+	}
+
+	balanceByAccount, err := BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, backfilledAccount, pendingAccount, legacyAccount)
+	require.NoError(t, err)
+	assert.Equal(t, expected, balanceByAccount)
+
+	var allAccountRecords []*common.AccountRecords
+	for _, owner := range data.codeUsers {
+		accountRecords, err := common.GetLatestTokenAccountRecordsForOwner(env.ctx, env.data, owner)
+		require.NoError(t, err)
+		allAccountRecords = append(allAccountRecords, accountRecords[vmConfig.Mint.PublicKey().ToBase58()][commonpb.AccountType_PRIMARY][0])
+	}
+	balanceByAccount, err = BatchCalculateFromCacheWithAccountRecords(env.ctx, env.data, allAccountRecords...)
+	require.NoError(t, err)
+	assert.Equal(t, expected, balanceByAccount)
+}
+
+func TestUsdCostBasisCalculationMethods(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+
+	vmConfig := testutil.NewRandomVmConfig(t, true)
+	backfilledOwner := testutil.NewRandomAccount(t)
+	backfilledAccount, err := backfilledOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+	legacyOwner := testutil.NewRandomAccount(t)
+	legacyAccount, err := legacyOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+
+	data := &balanceTestData{
+		vmConfig:  vmConfig,
+		codeUsers: []*common.Account{backfilledOwner, legacyOwner},
+	}
+
+	setupBalanceTestData(t, env, data)
+
+	require.NoError(t, env.data.CreateBalance(env.ctx, &balance.Record{
+		TokenAccount: backfilledAccount.PublicKey().ToBase58(),
+		OwnerAccount: backfilledOwner.PublicKey().ToBase58(),
+		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
+		UsdCostBasis: -123456,
+		IsOpen:       true,
+		IsBackfilled: true,
+	}))
+
+	// The legacy calculation is owner-level, and derived from intents
+	require.NoError(t, env.data.SaveIntent(env.ctx, &intent.Record{
+		IntentId:              testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		IntentType:            intent.ExternalDeposit,
+		MintAccount:           vmConfig.Mint.PublicKey().ToBase58(),
+		InitiatorOwnerAccount: legacyOwner.PublicKey().ToBase58(),
+		ExternalDepositMetadata: &intent.ExternalDepositMetadata{
+			DestinationTokenAccount: legacyAccount.PublicKey().ToBase58(),
+			Quantity:                1,
+			ExchangeCurrency:        currency_lib.USD,
+			ExchangeRate:            1.0,
+			NativeAmount:            1.5,
+			UsdMarketValue:          1.5,
+		},
+		State:     intent.StateConfirmed,
+		CreatedAt: time.Now(),
+	}))
+
+	expected := map[string]int64{
+		backfilledAccount.PublicKey().ToBase58(): -123456,
+		legacyAccount.PublicKey().ToBase58():     1_500_000,
+	}
+
+	for tokenAccount, expectedUsdCostBasis := range expected {
+		account, err := common.NewAccountFromPublicKeyString(tokenAccount)
+		require.NoError(t, err)
+
+		actual, err := CalculateUsdCostBasisFromCache(env.ctx, env.data, account)
+		require.NoError(t, err)
+		assert.EqualValues(t, expectedUsdCostBasis, actual, tokenAccount)
+	}
+
+	usdCostBasisByAccount, err := BatchCalculateUsdCostBasisFromCache(env.ctx, env.data, backfilledAccount, legacyAccount)
+	require.NoError(t, err)
+	assert.Equal(t, expected, usdCostBasisByAccount)
+
+	// Accounts unknown to the system have no cost basis
+	unknownAccount := testutil.NewRandomAccount(t)
+	actual, err := CalculateUsdCostBasisFromCache(env.ctx, env.data, unknownAccount)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, actual)
 }
 
 func TestDefaultCalculation_ExternalAccount(t *testing.T) {
