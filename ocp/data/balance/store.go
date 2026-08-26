@@ -84,9 +84,12 @@ type Store interface {
 	// applied or none are. Deltas are applied in SortDeltas order.
 	//
 	// Predicates are enforced only on backfilled records; records that are
-	// not backfilled simply accumulate the change. Deltas for token accounts
-	// without a record are skipped, since only accounts managed by Code are
-	// tracked.
+	// not backfilled simply accumulate the change.
+	//
+	// Only accounts managed by OCP have records. A credit to an account
+	// without one is skipped, since external destinations are routinely paid.
+	// Any other kind targeting an account without a record is
+	// ErrRecordNotFound, since funds only ever leave accounts managed by OCP.
 	//
 	// ErrInsufficientBalance is returned when a debit exceeds the balance.
 	// ErrBalanceChanged is returned when a drain or close doesn't match the
@@ -104,6 +107,17 @@ type Store interface {
 	// not called. ErrNegativeBalance is returned if fn computes a negative
 	// balance, leaving the record untouched.
 	Backfill(ctx context.Context, tokenAccount string, fn BackfillFunc) error
+
+	// SaveExternalCheckpoint saves an external balance at a checkpoint.
+	//
+	// ErrStaleCheckpoint is returned if the checkpoint is outdated
+	SaveExternalCheckpoint(ctx context.Context, record *ExternalCheckpointRecord) error
+
+	// GetExternalCheckpoint gets an exeternal balance checkpoint for a
+	// given account.
+	//
+	// ErrCheckpointNotFound is returend if no DB record exists.
+	GetExternalCheckpoint(ctx context.Context, account string) (*ExternalCheckpointRecord, error)
 
 	// GetCachedVersion gets the current cached balance version, which can be used
 	// for optimistic locking cached balances for operations with outgoing transfers.
@@ -136,15 +150,4 @@ type Store interface {
 	// Note: Use ApplyDeltas with DeltaDrain or DeltaClose. Retained for
 	// accounts that are not yet backfilled.
 	MarkAsClosed(ctx context.Context, account string) error
-
-	// SaveExternalCheckpoint saves an external balance at a checkpoint.
-	//
-	// ErrStaleCheckpoint is returned if the checkpoint is outdated
-	SaveExternalCheckpoint(ctx context.Context, record *ExternalCheckpointRecord) error
-
-	// GetExternalCheckpoint gets an exeternal balance checkpoint for a
-	// given account.
-	//
-	// ErrCheckpointNotFound is returend if no DB record exists.
-	GetExternalCheckpoint(ctx context.Context, account string) (*ExternalCheckpointRecord, error)
 }

@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	tableName = "ocp__core_balance"
+	tableName                   = "ocp__core_balance"
+	externalCheckpointTableName = "ocp__core_externalbalancecheckpoint"
 
 	allColumns = "id, token_account, owner_account, mint_account, quarks, usd_cost_basis, is_open, is_backfilled, updated_at"
 )
@@ -227,7 +228,10 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 			var current model
 			err = tx.GetContext(ctx, &current, `SELECT `+allColumns+` FROM `+tableName+` WHERE token_account = $1`, delta.TokenAccount)
 			if pgutil.IsNoRows(err) {
-				continue // Not an account we track
+				if delta.Kind == balance.DeltaCredit {
+					continue // Credits to accounts we don't track, like external wallets, are expected
+				}
+				return balance.ErrRecordNotFound // Everything else only ever targets accounts we track
 			} else if err != nil {
 				return err
 			}
@@ -291,4 +295,80 @@ func executeTxWithinCtxOrJoin(ctx context.Context, db *sqlx.DB, fn func(ctx cont
 		return fn(ctx)
 	}
 	return err
+}
+
+type externalCheckpointModel struct {
+	Id sql.NullInt64 `db:"id"`
+
+	TokenAccount   string `db:"token_account"`
+	Quarks         uint64 `db:"quarks"`
+	SlotCheckpoint uint64 `db:"slot_checkpoint"`
+
+	LastUpdatedAt time.Time `db:"last_updated_at"`
+}
+
+func toExternalCheckpointModel(obj *balance.ExternalCheckpointRecord) (*externalCheckpointModel, error) {
+	if err := obj.Validate(); err != nil {
+		return nil, err
+	}
+
+	return &externalCheckpointModel{
+		TokenAccount:   obj.TokenAccount,
+		Quarks:         obj.Quarks,
+		SlotCheckpoint: obj.SlotCheckpoint,
+		LastUpdatedAt:  obj.LastUpdatedAt,
+	}, nil
+}
+
+func fromExternalCheckpoingModel(obj *externalCheckpointModel) *balance.ExternalCheckpointRecord {
+	return &balance.ExternalCheckpointRecord{
+		Id:             uint64(obj.Id.Int64),
+		TokenAccount:   obj.TokenAccount,
+		Quarks:         obj.Quarks,
+		SlotCheckpoint: obj.SlotCheckpoint,
+		LastUpdatedAt:  obj.LastUpdatedAt,
+	}
+}
+
+func (m *externalCheckpointModel) dbSave(ctx context.Context, db *sqlx.DB) error {
+	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		query := `INSERT INTO ` + externalCheckpointTableName + `
+			(token_account, quarks, slot_checkpoint, last_updated_at)
+			VALUES ($1, $2, $3, $4)
+
+			ON CONFLICT (token_account)
+			DO UPDATE
+				SET quarks = $2, slot_checkpoint = $3, last_updated_at = $4
+				WHERE ` + externalCheckpointTableName + `.token_account = $1 AND ` + externalCheckpointTableName + `.slot_checkpoint < $3
+
+			RETURNING
+				id, token_account, quarks, slot_checkpoint, last_updated_at`
+
+		m.LastUpdatedAt = time.Now()
+
+		err := tx.QueryRowxContext(
+			ctx,
+			query,
+			m.TokenAccount,
+			m.Quarks,
+			m.SlotCheckpoint,
+			m.LastUpdatedAt.UTC(),
+		).StructScan(m)
+
+		return pgutil.CheckNoRows(err, balance.ErrStaleCheckpoint)
+	})
+}
+
+func dbGetExternalCheckpoint(ctx context.Context, db *sqlx.DB, account string) (*externalCheckpointModel, error) {
+	res := &externalCheckpointModel{}
+
+	query := `SELECT id, token_account, quarks, slot_checkpoint, last_updated_at FROM ` + externalCheckpointTableName + `
+		WHERE token_account = $1
+		LIMIT 1`
+
+	err := db.GetContext(ctx, res, query, account)
+	if err != nil {
+		return nil, pgutil.CheckNoRows(err, balance.ErrCheckpointNotFound)
+	}
+	return res, nil
 }

@@ -192,8 +192,25 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 			IsBackfilled: true,
 		}))
 
-		// Deltas for accounts without a record are skipped
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaDebit, Quarks: 1}))
+		// Credits to accounts without a record are skipped, but nothing else is
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1}))
+		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaDebit, Quarks: 1}))
+		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaDrain, Quarks: 1}))
+		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaClose}))
+
+		// A batch mixing a tracked account with an untracked credit, like a
+		// withdrawal to an external wallet, applies the tracked side
+		require.NoError(t, s.ApplyDeltas(
+			ctx,
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1},
+			&balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1},
+		))
+		require.NoError(t, s.ApplyDeltas(
+			ctx,
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1},
+			&balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1},
+		))
+		assertBalance(t, s, "token_account_1", 0, 0, true)
 
 		// Invalid deltas are rejected
 		assert.Error(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit}))

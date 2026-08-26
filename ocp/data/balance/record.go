@@ -2,6 +2,7 @@ package balance
 
 import (
 	"errors"
+	"math"
 	"sort"
 	"time"
 )
@@ -10,6 +11,19 @@ import (
 // deliberately equal to the core mint's quarks per unit, so a core mint account's
 // USD cost basis is exactly its quark balance.
 const UsdQuarksPerUnit = 1_000_000
+
+// UsdCostBasisFromFloat converts a USD value into UsdQuarksPerUnit, rounding
+// to the nearest unit. This is the single conversion point, so every caller
+// rounds identically.
+func UsdCostBasisFromFloat(usd float64) int64 {
+	return int64(math.Round(usd * UsdQuarksPerUnit))
+}
+
+// UsdCostBasisToFloat converts a value in UsdQuarksPerUnit back into USD. Use
+// it only at the edge, e.g. when populating a client-facing response.
+func UsdCostBasisToFloat(usdCostBasis int64) float64 {
+	return float64(usdCostBasis) / UsdQuarksPerUnit
+}
 
 // Record is the materialized balance of a token account managed by Code.
 type Record struct {
