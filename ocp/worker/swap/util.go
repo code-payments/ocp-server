@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	currency_lib "github.com/code-payments/ocp-server/currency"
+	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
@@ -464,6 +465,17 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 				return err
 			}
 
+			if balance.LedgerWritesEnabled(ctx) {
+				balanceDeltas, err := balance.DeltasForExternalDeposit(refundIntentRecord)
+				if err != nil {
+					return err
+				}
+				err = balance.ApplyDeltasInTx(ctx, p.data, balanceDeltas...)
+				if err != nil {
+					return err
+				}
+			}
+
 			// The swap was funded and entered transaction history, so its
 			// record must reflect the refund
 			err = history_util.MarkSwapAsFailed(ctx, p.data, swapRecord.SwapId)
@@ -703,6 +715,7 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 	var exchangeCurrency currency_lib.Code
 	var nativeAmountWithoutFees float64
 	var usdMarketValueWithoutFees float64
+	var previousFundingIntentRecord, reconciledFundingIntentRecord *intent.Record
 	switch swapRecord.FundingSource {
 	case swap.FundingSourceSubmitIntent:
 		fundingIntentRecord, err := p.data.GetIntent(ctx, swapRecord.FundingId)
@@ -760,12 +773,11 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 			}
 
 			// Reconcile the source funding payment's cost basis to the core mint actually
-			// realized by the sell.
+			// realized by the sell. Saved in the settlement transaction below.
+			cloned := fundingIntentRecord.Clone()
+			previousFundingIntentRecord = &cloned
 			fundingIntentRecord.SendPublicPaymentMetadata.UsdMarketValue = usdMarketValueWithoutFees
-			err = p.data.SaveIntent(ctx, fundingIntentRecord)
-			if err != nil {
-				return 0, false, err
-			}
+			reconciledFundingIntentRecord = fundingIntentRecord
 		}
 	case swap.FundingSourceExternalWallet, swap.FundingSourceCoinbaseOnramp:
 		if !common.IsCoreMint(fromMint) {
@@ -830,7 +842,43 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 
 			CreatedAt: time.Now(),
 		}
-		return p.data.SaveExternalDeposit(ctx, externalDepositRecord)
+		err = p.data.SaveExternalDeposit(ctx, externalDepositRecord)
+		if err != nil {
+			return err
+		}
+
+		if reconciledFundingIntentRecord != nil {
+			err = p.data.SaveIntent(ctx, reconciledFundingIntentRecord)
+			if err != nil {
+				return err
+			}
+		}
+
+		if balance.LedgerWritesEnabled(ctx) {
+			balanceDeltas, err := balance.DeltasForExternalDeposit(intentRecord)
+			if err != nil {
+				return err
+			}
+
+			if reconciledFundingIntentRecord != nil {
+				fundingActionRecords, err := p.data.GetAllActionsByIntent(ctx, reconciledFundingIntentRecord.IntentId)
+				if err != nil {
+					return err
+				}
+				reconciliationDeltas, err := balance.DeltasForSwapSellReconciliation(previousFundingIntentRecord, reconciledFundingIntentRecord, fundingActionRecords)
+				if err != nil {
+					return err
+				}
+				balanceDeltas = append(balanceDeltas, reconciliationDeltas...)
+			}
+
+			err = balance.ApplyDeltasInTx(ctx, p.data, balanceDeltas...)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 	if err != nil {
 		return 0, false, err

@@ -12,6 +12,7 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
+	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
@@ -1175,6 +1176,10 @@ func (p *runtime) initializeCreatorAcccount(ctx context.Context, currencyMetadat
 	err = p.data.CreateAccountInfo(ctx, accountInfoRecord)
 	if err != nil {
 		return errors.Wrap(err, "error saving creator account info record")
+	}
+	err = balance.CreateRecordInTx(ctx, p.data, accountInfoRecord)
+	if err != nil {
+		return errors.Wrap(err, "error creating creator balance record")
 	}
 
 	// Create the fulfillment record for initializing the timelock account

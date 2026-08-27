@@ -14,6 +14,13 @@ import (
 // ledger doesn't track.
 var ErrUntrackedAccount = errors.New("account is not tracked by the balance ledger")
 
+// LedgerWritesEnabled reports whether the ledger is being written to.
+// Callers use it to skip building deltas entirely when writes are disabled,
+// since builders reject flows the ledger doesn't support.
+func LedgerWritesEnabled(ctx context.Context) bool {
+	return enableLedgerWrites.Get(ctx)
+}
+
 // ApplyDeltasInTx applies balance deltas to the ledger. It must be called
 // within the DB transaction that commits the records the deltas are derived
 // from, so the ledger can never disagree with them.

@@ -170,7 +170,7 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 		}
 
 		// Add a intent record to show the funds being returned back to the issuer
-		err = insertAutoReturnIntentRecord(ctx, data, giftCardIssuedIntent, isVoidedByUser)
+		autoReturnIntent, err := insertAutoReturnIntentRecord(ctx, data, giftCardIssuedIntent, isVoidedByUser)
 		if err != nil {
 			return err
 		}
@@ -217,6 +217,17 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 		)
 		if err != nil {
 			return err
+		}
+
+		if balance.LedgerWritesEnabled(ctx) {
+			balanceDeltas, err := balance.DeltasForGiftCardAutoReturn(autoReturnIntent, autoReturnAction)
+			if err != nil {
+				return err
+			}
+			err = balance.ApplyDeltasInTx(ctx, data, balanceDeltas...)
+			if err != nil {
+				return err
+			}
 		}
 
 		// This will trigger the fulfillment worker to poll for the fulfillment. This
@@ -314,10 +325,10 @@ func updateAutoReturnFulfillmentPreSorting(
 	return data.UpdateFulfillment(ctx, fulfillmentRecord)
 }
 
-func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, giftCardIssuedIntent *intent.Record, isVoidedByUser bool) error {
+func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, giftCardIssuedIntent *intent.Record, isVoidedByUser bool) (*intent.Record, error) {
 	mintAccount, err := common.NewAccountFromPublicKeyString(giftCardIssuedIntent.MintAccount)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// We need to insert a faked completed public receive intent so it can appear
@@ -350,7 +361,11 @@ func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, g
 
 		CreatedAt: time.Now(),
 	}
-	return data.SaveIntent(ctx, intentRecord)
+	err = data.SaveIntent(ctx, intentRecord)
+	if err != nil {
+		return nil, err
+	}
+	return intentRecord, nil
 }
 
 func markActionAsRevoked(ctx context.Context, data ocp_data.Provider, actionRecord *action.Record) error {

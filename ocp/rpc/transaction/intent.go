@@ -22,9 +22,11 @@ import (
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/grpc/client"
+	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	balance_store "github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
@@ -723,6 +725,22 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 			}
 		}
 
+		// Reflect the intent in the balance ledger. Applied last, so the
+		// ledger row locks are held for as little of the transaction as
+		// possible.
+		if balance.LedgerWritesEnabled(ctx) {
+			balanceDeltas, err := balance.DeltasForSubmittedIntent(intentRecord, actionRecords, s.conf.createOnSendWithdrawalFeeQuarks.Get(ctx))
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure building balance deltas")
+				return err
+			}
+			err = balance.ApplyDeltasInTx(ctx, s.data, balanceDeltas...)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure applying balance deltas")
+				return err
+			}
+		}
+
 		// Schedule app-defined tasks atomically with the intent, so their
 		// execution is guaranteed once the intent is committed
 		tasksToSchedule, err = s.submitIntentIntegration.GetTasksToSchedule(ctx, intentRecord)
@@ -739,6 +757,10 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, balance_store.ErrInsufficientBalance) || errors.Is(err, balance_store.ErrBalanceChanged) || errors.Is(err, balance_store.ErrAccountClosed) {
+			log.With(zap.Error(err)).Info("balance ledger rejected intent")
+			return handleSubmitIntentError(ctx, streamer, intentRecord, NewStaleStateErrorf("race detected: %s", err.Error()))
+		}
 		if strings.Contains(err.Error(), "stale") || strings.Contains(err.Error(), "exist") {
 			log.With(zap.Error(err)).Info("race condition detected")
 			return handleSubmitIntentError(ctx, streamer, intentRecord, NewStaleStateErrorf("race detected: %s", err.Error()))

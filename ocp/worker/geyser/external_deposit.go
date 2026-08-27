@@ -16,6 +16,7 @@ import (
 	"github.com/code-payments/ocp-server/cache"
 	currency_lib "github.com/code-payments/ocp-server/currency"
 	"github.com/code-payments/ocp-server/database/query"
+	balance_util "github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
@@ -403,6 +404,17 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 			err = data.SaveExternalDeposit(ctx, externalDepositRecord)
 			if err != nil {
 				return errors.Wrap(err, "error saving external deposit record")
+			}
+
+			if balance_util.LedgerWritesEnabled(ctx) {
+				balanceDeltas, err := balance_util.DeltasForExternalDeposit(intentRecord)
+				if err != nil {
+					return errors.Wrap(err, "error building balance deltas")
+				}
+				err = balance_util.ApplyDeltasInTx(ctx, data, balanceDeltas...)
+				if err != nil {
+					return errors.Wrap(err, "error applying balance deltas")
+				}
 			}
 
 			return nil

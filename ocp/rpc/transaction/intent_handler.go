@@ -1979,6 +1979,9 @@ func saveAutoOpenPrimaryAccountIntent(ctx context.Context, data ocp_data.Provide
 	if err := data.CreateAccountInfo(ctx, req.accountInfo); err != nil {
 		return err
 	}
+	if err := balance.CreateRecordInTx(ctx, data, req.accountInfo); err != nil {
+		return err
+	}
 
 	openFulfillmentRecord := &fulfillment.Record{
 		Intent:                   openIntentRecord.IntentId,
