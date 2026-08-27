@@ -228,10 +228,7 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 			var current model
 			err = tx.GetContext(ctx, &current, `SELECT `+allColumns+` FROM `+tableName+` WHERE token_account = $1`, delta.TokenAccount)
 			if pgutil.IsNoRows(err) {
-				if delta.Kind == balance.DeltaCredit {
-					continue // Credits to accounts we don't track, like external wallets, are expected
-				}
-				return balance.ErrRecordNotFound // Everything else only ever targets accounts we track
+				return balance.ErrRecordNotFound
 			} else if err != nil {
 				return err
 			}

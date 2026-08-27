@@ -94,11 +94,7 @@ func (s *store) ApplyDeltas(ctx context.Context, deltas ...*balance.Delta) error
 		}
 	}
 
-	sorted := make([]*balance.Delta, len(deltas))
-	copy(sorted, deltas)
-	balance.SortDeltas(sorted)
-
-	return dbApplyDeltas(ctx, s.db, sorted)
+	return dbApplyDeltas(ctx, s.db, balance.MergeDeltas(deltas))
 }
 
 // Backfill implements balance.Store.Backfill

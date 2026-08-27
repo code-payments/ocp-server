@@ -169,6 +169,33 @@ func SortDeltas(deltas []*Delta) {
 	})
 }
 
+// MergeDeltas returns a copy of deltas in SortDeltas order with consecutive
+// credits and debits to the same account combined into one. Applying one
+// combined delta is equivalent to applying the parts in sequence, since
+// both kinds are additive and their predicates are monotonic in the amount,
+// but it touches the row once. Drains and closes are never merged, since an
+// account can only legitimately be drained or closed once.
+func MergeDeltas(deltas []*Delta) []*Delta {
+	sorted := make([]*Delta, len(deltas))
+	copy(sorted, deltas)
+	SortDeltas(sorted)
+
+	merged := make([]*Delta, 0, len(sorted))
+	for _, delta := range sorted {
+		if len(merged) > 0 {
+			last := merged[len(merged)-1]
+			if last.TokenAccount == delta.TokenAccount && last.Kind == delta.Kind && (delta.Kind == DeltaCredit || delta.Kind == DeltaDebit) {
+				last.Quarks += delta.Quarks
+				last.UsdCostBasis += delta.UsdCostBasis
+				continue
+			}
+		}
+		cloned := *delta
+		merged = append(merged, &cloned)
+	}
+	return merged
+}
+
 func (k DeltaKind) String() string {
 	switch k {
 	case DeltaCredit:

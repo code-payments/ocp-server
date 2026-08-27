@@ -192,22 +192,17 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 			IsBackfilled: true,
 		}))
 
-		// Credits to accounts without a record are skipped, but nothing else is
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1}))
+		// Every kind of delta requires a record
+		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1}))
 		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaDebit, Quarks: 1}))
 		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaDrain, Quarks: 1}))
 		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaClose}))
 
-		// A batch mixing a tracked account with an untracked credit, like a
-		// withdrawal to an external wallet, applies the tracked side
-		require.NoError(t, s.ApplyDeltas(
+		// A batch mixing a tracked account with an untracked credit is rejected
+		// as a whole, so the tracked side is untouched
+		assert.Equal(t, balance.ErrRecordNotFound, s.ApplyDeltas(
 			ctx,
 			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1},
-			&balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1},
-		))
-		require.NoError(t, s.ApplyDeltas(
-			ctx,
-			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1},
 			&balance.Delta{TokenAccount: "untracked", Kind: balance.DeltaCredit, Quarks: 1},
 		))
 		assertBalance(t, s, "token_account_1", 0, 0, true)
@@ -334,6 +329,25 @@ func testApplyDeltasAtomicity(t *testing.T, s balance.Store) {
 			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 50},
 		))
 		assertBalance(t, s, "token_account_1", 10, -4, true)
+
+		// Same-kind deltas to the same account are checked as one, so a pair of
+		// debits that together exceed the balance fails even though each fits
+		assert.Equal(t, balance.ErrInsufficientBalance, s.ApplyDeltas(
+			ctx,
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 6, UsdCostBasis: 1},
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 6, UsdCostBasis: 1},
+		))
+		assertBalance(t, s, "token_account_1", 10, -4, true)
+
+		require.NoError(t, s.ApplyDeltas(
+			ctx,
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 4, UsdCostBasis: 1},
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 6, UsdCostBasis: 2},
+			&balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaCredit, Quarks: 4, UsdCostBasis: 1},
+			&balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaCredit, Quarks: 6, UsdCostBasis: 2},
+		))
+		assertBalance(t, s, "token_account_1", 0, -7, true)
+		assertBalance(t, s, "token_account_2", 150, 7, true)
 	})
 }
 

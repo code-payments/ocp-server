@@ -86,10 +86,10 @@ type Store interface {
 	// Predicates are enforced only on backfilled records; records that are
 	// not backfilled simply accumulate the change.
 	//
-	// Only accounts managed by OCP have records. A credit to an account
-	// without one is skipped, since external destinations are routinely paid.
-	// Any other kind targeting an account without a record is
-	// ErrRecordNotFound, since funds only ever leave accounts managed by OCP.
+	// Every delta must target an account with a record, otherwise
+	// ErrRecordNotFound is returned and nothing is applied. Callers are
+	// responsible for not producing deltas for accounts the ledger doesn't
+	// track, like external wallets.
 	//
 	// ErrInsufficientBalance is returned when a debit exceeds the balance.
 	// ErrBalanceChanged is returned when a drain or close doesn't match the

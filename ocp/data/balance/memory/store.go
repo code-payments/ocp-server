@@ -147,9 +147,7 @@ func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 		}
 	}
 
-	sorted := make([]*balance.Delta, len(deltas))
-	copy(sorted, deltas)
-	balance.SortDeltas(sorted)
+	merged := balance.MergeDeltas(deltas)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,15 +155,12 @@ func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 	// Apply to copies first so a failure part way through leaves the store
 	// untouched, matching the transactional behaviour of the DB store.
 	updated := make(map[string]*balance.Record)
-	for _, delta := range sorted {
+	for _, delta := range merged {
 		item, ok := updated[delta.TokenAccount]
 		if !ok {
 			original, ok := s.balanceRecordsByTokenAccount[delta.TokenAccount]
 			if !ok {
-				if delta.Kind == balance.DeltaCredit {
-					continue // Credits to accounts we don't track, like external wallets, are expected
-				}
-				return balance.ErrRecordNotFound // Everything else only ever targets accounts we track
+				return balance.ErrRecordNotFound
 			}
 			cloned := original.Clone()
 			item = &cloned

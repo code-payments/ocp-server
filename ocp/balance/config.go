@@ -11,7 +11,15 @@ const (
 	// the legacy strategies exclusively.
 	EnableLedgerReadsConfigEnvName = "BALANCE_ENABLE_LEDGER_READS"
 
-	defaultEnableLedgerReads = false
+	// EnableLedgerWritesConfigEnvName gates whether ApplyDeltasInTx writes
+	// to the ledger at all. When disabled, it is a no-op.
+	EnableLedgerWritesConfigEnvName = "BALANCE_ENABLE_LEDGER_WRITES"
+
+	defaultEnableLedgerReads  = false
+	defaultEnableLedgerWrites = false
 )
 
-var enableLedgerReads config.Bool = env.NewBoolConfig(EnableLedgerReadsConfigEnvName, defaultEnableLedgerReads)
+var (
+	enableLedgerReads  config.Bool = env.NewBoolConfig(EnableLedgerReadsConfigEnvName, defaultEnableLedgerReads)
+	enableLedgerWrites config.Bool = env.NewBoolConfig(EnableLedgerWritesConfigEnvName, defaultEnableLedgerWrites)
+)
