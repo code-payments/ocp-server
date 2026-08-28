@@ -486,7 +486,10 @@ func BatchCalculateWithUsdCostBasisFromCache(ctx context.Context, data ocp_data.
 // in balance.UsdQuarksPerUnit, using cached values.
 //
 // Note: Unlike quark balances, a cost basis for an account not managed by Code
-// is still meaningful, so no timelock check is performed.
+// is still meaningful, so no timelock check is performed and such accounts fall
+// back to the legacy calculation. The materialized record is the exception:
+// once a vault unlocks it holds the last managed state rather than a live cost
+// basis, so reading one returns ErrNotManagedByCode.
 func CalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, tokenAccount *common.Account) (int64, error) {
 	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "CalculateUsdCostBasisFromCache")
 	tracer.AddAttribute("account", tokenAccount.PublicKey().ToBase58())
@@ -495,6 +498,10 @@ func CalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider,
 	if enableLedgerReads.Get(ctx) {
 		balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
 		if err == nil && balanceRecord.IsBackfilled {
+			if !balanceRecord.IsLocked {
+				tracer.OnError(ErrNotManagedByCode)
+				return 0, ErrNotManagedByCode
+			}
 			return balanceRecord.UsdCostBasis, nil
 		} else if err != nil && err != balance.ErrRecordNotFound {
 			tracer.OnError(err)
@@ -535,6 +542,10 @@ func BatchCalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Prov
 	for _, tokenAccount := range tokenAccountStrings {
 		balanceRecord, ok := balanceRecords[tokenAccount]
 		if ok && balanceRecord.IsBackfilled {
+			if !balanceRecord.IsLocked {
+				tracer.OnError(ErrNotManagedByCode)
+				return nil, ErrNotManagedByCode
+			}
 			res[tokenAccount] = balanceRecord.UsdCostBasis
 			continue
 		}
@@ -574,6 +585,11 @@ func legacyUsdCostBasis(ctx context.Context, data ocp_data.Provider, tokenAccoun
 }
 
 func quarksFromRecord(record *balance.Record) (uint64, error) {
+	// Callers reject unlocked vaults on the timelock record before reaching
+	// here, so this only guards against a record that disagrees with it.
+	if !record.IsLocked {
+		return 0, ErrNotManagedByCode
+	}
 	if record.Quarks < 0 {
 		return 0, ErrNegativeBalance
 	}

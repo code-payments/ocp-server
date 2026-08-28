@@ -116,7 +116,7 @@ func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string, cu
 	}
 
 	if balance.LedgerReadsEnabled(ctx) {
-		return p.data.CountBalancesByMint(ctx, mint, int64(minHoldings))
+		return p.data.CountLockedBalancesByMint(ctx, mint, int64(minHoldings))
 	}
 
 	accountRecords, err := p.data.GetAccountInfosByMintAndType(ctx, mint, commonpb.AccountType_PRIMARY)

@@ -37,15 +37,18 @@ func LedgerWritesEnabled(ctx context.Context) bool {
 // like an external wallet or the fee collector, are dropped, since delta
 // builders don't know which destinations OCP manages. Outgoing deltas from
 // an account the ledger doesn't track are ErrUntrackedAccount, since funds
-// only ever leave accounts OCP manages.
+// only ever leave accounts OCP manages. Any delta against a tracked account
+// whose vault has unlocked fails loudly with balance.ErrAccountUnlocked:
+// the record is no longer maintained, and a flow still moving funds through
+// it is a bug to surface, never to paper over.
 //
 // Any timelock account in the delta set that has no ledger record yet lazily
 // gets one that is not backfilled, so accounts that predate the ledger start
 // accumulating deltas on first touch regardless of direction.
 //
 // Store predicate failures (balance.ErrInsufficientBalance,
-// balance.ErrBalanceChanged, balance.ErrAccountClosed) are returned as is
-// for the caller to map.
+// balance.ErrBalanceChanged, balance.ErrAccountClosed,
+// balance.ErrAccountUnlocked) are returned as is for the caller to map.
 func ApplyDeltasInTx(ctx context.Context, data ocp_data.Provider, deltas ...*balance.Delta) error {
 	if !enableLedgerWrites.Get(ctx) || len(deltas) == 0 {
 		return nil
@@ -94,6 +97,7 @@ func CreateRecordInTx(ctx context.Context, data ocp_data.Provider, accountInfoRe
 		OwnerAccount: accountInfoRecord.OwnerAccount,
 		MintAccount:  accountInfoRecord.MintAccount,
 		IsOpen:       true,
+		IsLocked:     true,
 		IsBackfilled: true,
 	})
 	if errors.Is(err, balance.ErrRecordExists) {
@@ -142,6 +146,7 @@ func resolveRecords(ctx context.Context, data ocp_data.Provider, deltas []*balan
 			OwnerAccount: accountInfoRecord.OwnerAccount,
 			MintAccount:  accountInfoRecord.MintAccount,
 			IsOpen:       true,
+			IsLocked:     true,
 			IsBackfilled: false,
 		})
 		if err != nil && !errors.Is(err, balance.ErrRecordExists) {

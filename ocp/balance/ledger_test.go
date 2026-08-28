@@ -20,6 +20,7 @@ import (
 func TestApplyDeltasInTx_WritesDisabled(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
+	disableLedgerWritesForTest(t)
 
 	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
 
@@ -74,7 +75,7 @@ func TestApplyDeltasInTx_SeedsTimelockAccounts(t *testing.T) {
 
 	// Once backfilled, predicates are enforced
 	require.NoError(t, data.BackfillBalance(ctx, source, func(context.Context) (*balance.BackfillResult, error) {
-		return &balance.BackfillResult{Quarks: 400, UsdCostBasis: 4_000_000, IsOpen: true}, nil
+		return &balance.BackfillResult{Quarks: 400, UsdCostBasis: 4_000_000, IsOpen: true, IsLocked: true}, nil
 	}))
 	err = ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: source, Kind: balance.DeltaDebit, Quarks: 401})
 	assert.Equal(t, balance.ErrInsufficientBalance, err)
@@ -110,6 +111,29 @@ func TestApplyDeltasInTx_OnlyUntrackedCredits(t *testing.T) {
 	assert.Equal(t, balance.ErrRecordNotFound, err)
 }
 
+func TestApplyDeltasInTx_UnlockedAccount(t *testing.T) {
+	ctx := context.Background()
+	data := ocp_data.NewTestDataProvider()
+	enableLedgerWritesForTest(t)
+
+	unlocked := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
+	require.NoError(t, CreateRecordInTx(ctx, data, unlocked))
+	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaCredit, Quarks: 100}))
+	require.NoError(t, data.MarkBalanceAsUnlocked(ctx, unlocked.TokenAccount))
+
+	// Any delta against an unlocked account fails loudly, so a flow still
+	// moving funds through it surfaces as a DB error
+	err := ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaCredit, Quarks: 1})
+	assert.Equal(t, balance.ErrAccountUnlocked, err)
+	err = ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaDebit, Quarks: 1})
+	assert.Equal(t, balance.ErrAccountUnlocked, err)
+
+	record, err := data.GetBalance(ctx, unlocked.TokenAccount)
+	require.NoError(t, err)
+	assert.EqualValues(t, 100, record.Quarks)
+	assert.False(t, record.IsLocked)
+}
+
 func TestApplyDeltasInTx_InvalidDelta(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
@@ -128,9 +152,12 @@ func TestCreateRecordInTx(t *testing.T) {
 
 	// Disabled writes are a no-op
 	primary := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
-	require.NoError(t, CreateRecordInTx(ctx, data, primary))
-	_, err := data.GetBalance(ctx, primary.TokenAccount)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
+	func() {
+		disableLedgerWritesForTest(t)
+		require.NoError(t, CreateRecordInTx(ctx, data, primary))
+		_, err := data.GetBalance(ctx, primary.TokenAccount)
+		assert.Equal(t, balance.ErrRecordNotFound, err)
+	}()
 
 	enableLedgerWritesForTest(t)
 
@@ -183,6 +210,14 @@ func newLedgerTestAccountInfo(t *testing.T, ctx context.Context, data ocp_data.P
 	}
 	require.NoError(t, data.CreateAccountInfo(ctx, record))
 	return record
+}
+
+func disableLedgerWritesForTest(t *testing.T) {
+	previous := enableLedgerWrites
+	enableLedgerWrites = wrapper.NewBoolConfig(memory.NewConfig(false), defaultEnableLedgerWrites)
+	t.Cleanup(func() {
+		enableLedgerWrites = previous
+	})
 }
 
 func enableLedgerWritesForTest(t *testing.T) {

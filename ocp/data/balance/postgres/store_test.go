@@ -35,6 +35,7 @@ const (
 		usd_cost_basis BIGINT NOT NULL DEFAULT 0,
 
 		is_open BOOL NOT NULL DEFAULT TRUE,
+		is_locked BOOL NOT NULL DEFAULT TRUE,
 		is_backfilled BOOL NOT NULL DEFAULT FALSE,
 
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -44,7 +45,7 @@ const (
 	) WITH (fillfactor = 90);
 
 	CREATE INDEX ocp__core_balance__idx__owner_account__mint_account ON ocp__core_balance (owner_account, mint_account);
-	CREATE INDEX ocp__core_balance__idx__mint_account__id ON ocp__core_balance (mint_account, id);
+	CREATE INDEX ocp__core_balance__idx__mint_account__id ON ocp__core_balance (mint_account, id) WHERE is_locked;
 
 	CREATE TABLE ocp__core_externalbalancecheckpoint (
 		id SERIAL NOT NULL PRIMARY KEY,
