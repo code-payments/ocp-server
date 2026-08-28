@@ -61,7 +61,6 @@ type CreateIntentHandler interface {
 	// mass races are worth locking, like a gift card being claimed from many
 	// devices at once. Race resistance itself comes from the balance ledger's
 	// predicates in the intent transaction.
-	// against invalid balance updates that would result in intent fulfillment failure
 	GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error)
 
 	// AllowCreation determines whether the new intent creation should be allowed.
