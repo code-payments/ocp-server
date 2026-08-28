@@ -44,7 +44,7 @@ const (
 	) WITH (fillfactor = 90);
 
 	CREATE INDEX ocp__core_balance__idx__owner_account__mint_account ON ocp__core_balance (owner_account, mint_account);
-	CREATE INDEX ocp__core_balance__idx__mint_account ON ocp__core_balance (mint_account);
+	CREATE INDEX ocp__core_balance__idx__mint_account__id ON ocp__core_balance (mint_account, id);
 
 	CREATE TABLE ocp__core_cachedbalanceversion (
 		id SERIAL NOT NULL PRIMARY KEY,
