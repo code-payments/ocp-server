@@ -204,7 +204,7 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 			case balance.DeltaDebit:
 				query = `UPDATE ` + tableName + `
 					SET quarks = quarks - $2, usd_cost_basis = usd_cost_basis - $3, updated_at = $4
-					WHERE token_account = $1 AND (NOT is_backfilled OR quarks >= $2)`
+					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND quarks >= $2))`
 				args = []any{delta.TokenAccount, int64(delta.Quarks), delta.UsdCostBasis, time.Now().UTC()}
 			case balance.DeltaDrain:
 				query = `UPDATE ` + tableName + `
@@ -254,6 +254,9 @@ func classifyFailedDelta(delta *balance.Delta, current *balance.Record) error {
 	case balance.DeltaCredit:
 		return balance.ErrAccountClosed
 	case balance.DeltaDebit:
+		if !current.IsOpen {
+			return balance.ErrAccountClosed
+		}
 		return balance.ErrInsufficientBalance
 	case balance.DeltaDrain, balance.DeltaClose:
 		if !current.IsOpen {

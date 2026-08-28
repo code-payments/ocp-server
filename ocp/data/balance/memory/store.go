@@ -201,6 +201,9 @@ func applyDelta(item *balance.Record, delta *balance.Delta) error {
 		item.Quarks += int64(delta.Quarks)
 		item.UsdCostBasis += delta.UsdCostBasis
 	case balance.DeltaDebit:
+		if enforce && !item.IsOpen {
+			return balance.ErrAccountClosed
+		}
 		if enforce && item.Quarks < int64(delta.Quarks) {
 			return balance.ErrInsufficientBalance
 		}

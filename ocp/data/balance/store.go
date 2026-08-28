@@ -96,8 +96,9 @@ type Store interface {
 	//
 	// ErrInsufficientBalance is returned when a debit exceeds the balance.
 	// ErrBalanceChanged is returned when a drain or close doesn't match the
-	// balance. ErrAccountClosed is returned when a credit, drain or close
-	// targets a closed account.
+	// balance. ErrAccountClosed is returned when any delta targets a closed
+	// account: a closed account is frozen, so nothing may enter or leave it,
+	// including a zero-quark cost basis adjustment.
 	ApplyDeltas(ctx context.Context, deltas ...*Delta) error
 
 	// Backfill locks a record that is not yet backfilled, calls fn to compute

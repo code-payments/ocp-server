@@ -249,6 +249,12 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, UsdCostBasis: -5}))
 		assertBalance(t, s, "token_account_1", 70, -15, true)
 
+		// So can a debit, while the account is open
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, UsdCostBasis: -5}))
+		assertBalance(t, s, "token_account_1", 70, -10, true)
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, UsdCostBasis: 5}))
+		assertBalance(t, s, "token_account_1", 70, -15, true)
+
 		assert.Equal(t, balance.ErrBalanceChanged, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaClose}))
 		assert.Equal(t, balance.ErrBalanceChanged, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 69}))
 		assert.Equal(t, balance.ErrBalanceChanged, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 71}))
@@ -260,7 +266,11 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1}))
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 0, UsdCostBasis: 1}))
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaClose}))
-		assert.Equal(t, balance.ErrInsufficientBalance, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1}))
+
+		// A closed account is frozen: even a zero-quark cost basis adjustment
+		// cannot leave it
+		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1}))
+		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, UsdCostBasis: 1}))
 		assertBalance(t, s, "token_account_1", 0, 0, false)
 
 		require.NoError(t, s.Create(ctx, &balance.Record{
