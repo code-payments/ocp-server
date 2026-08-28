@@ -34,15 +34,6 @@ import (
 	"github.com/code-payments/ocp-server/solana"
 )
 
-type intentBalanceLock struct {
-	// The account that's being locked
-	Account *common.Account
-
-	// The function executed on intent DB commit that is guaranteed to prevent
-	// race conditions against invalid balance updates
-	CommitFn func(ctx context.Context, data ocp_data.Provider) error
-}
-
 // CreateIntentHandler is an interface for handling new intent creations
 type CreateIntentHandler interface {
 	// PopulateMetadata adds intent metadata to the provided intent record
