@@ -93,12 +93,6 @@ func (p *runtime) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 		return err
 	}
 
-	balanceLock, err := balance.GetOptimisticVersionLock(ctx, p.data, giftCardVaultAccount)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting balance lock")
-		return err
-	}
-
 	_, err = p.data.GetGiftCardClaimedAction(ctx, giftCardVaultAccount.PublicKey().ToBase58())
 	if err == nil {
 		log.Debug("gift card is claimed and will be removed from worker queue")
@@ -130,7 +124,7 @@ func (p *runtime) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 	// There's no action to claim the gift card and the expiry window has been met.
 	// It's time to initiate the process of auto-returning the funds back to the
 	// issuer.
-	err = InitiateProcessToAutoReturnGiftCard(ctx, p.data, giftCardVaultAccount, false, balanceLock)
+	err = InitiateProcessToAutoReturnGiftCard(ctx, p.data, giftCardVaultAccount, false)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure initiating process to return gift card balance to issuer")
 		return err
@@ -149,7 +143,7 @@ func (p *runtime) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 // a good guide for similar actions in the future.
 //
 // todo: This probably belongs somewhere more common
-func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Provider, giftCardVaultAccount *common.Account, isVoidedByUser bool, balanceLock *balance.OptimisticVersionLock) error {
+func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Provider, giftCardVaultAccount *common.Account, isVoidedByUser bool) error {
 	return data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
 		giftCardIssuedIntent, err := data.GetOriginalGiftCardIssuedIntent(ctx, giftCardVaultAccount.PublicKey().ToBase58())
 		if err != nil {
@@ -232,12 +226,7 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 
 		// This will trigger the fulfillment worker to poll for the fulfillment. This
 		// should be the very last DB update called.
-		err = markFulfillmentAsActivelyScheduled(ctx, data, autoReturnFulfillment[0])
-		if err != nil {
-			return err
-		}
-
-		return balanceLock.OnNewBalanceVersion(ctx, data)
+		return markFulfillmentAsActivelyScheduled(ctx, data, autoReturnFulfillment[0])
 	})
 }
 

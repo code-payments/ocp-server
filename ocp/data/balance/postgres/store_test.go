@@ -46,24 +46,6 @@ const (
 	CREATE INDEX ocp__core_balance__idx__owner_account__mint_account ON ocp__core_balance (owner_account, mint_account);
 	CREATE INDEX ocp__core_balance__idx__mint_account__id ON ocp__core_balance (mint_account, id);
 
-	CREATE TABLE ocp__core_cachedbalanceversion (
-		id SERIAL NOT NULL PRIMARY KEY,
-
-		token_account TEXT NOT NULL,
-		version INTEGER NOT NULL,
-
-		CONSTRAINT ocp__core_cachedbalanceversion__unique__token_account UNIQUE (token_account)
-	);
-
-	CREATE TABLE ocp__core_opencloselocks (
-		id SERIAL NOT NULL PRIMARY KEY,
-
-		token_account TEXT NOT NULL,
-		is_open BOOL NOT NULL,
-
-		CONSTRAINT ocp__core_opencloselocks__unique__token_account UNIQUE (token_account)
-	);
-
 	CREATE TABLE ocp__core_externalbalancecheckpoint (
 		id SERIAL NOT NULL PRIMARY KEY,
 
@@ -80,8 +62,6 @@ const (
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableDestroy = `
 		DROP TABLE ocp__core_balance;
-		DROP TABLE ocp__core_cachedbalanceversion;
-		DROP TABLE ocp__core_opencloselocks;
 		DROP TABLE ocp__core_externalbalancecheckpoint;
 	`
 )

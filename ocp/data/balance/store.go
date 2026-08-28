@@ -25,8 +25,6 @@ var (
 	// reviewed rather than recorded.
 	ErrNegativeBalance = errors.New("backfilled balance is negative")
 
-	ErrStaleCachedBalanceVersion = errors.New("cached balance version is stale")
-
 	ErrAccountClosed = errors.New("account open state is stale")
 
 	ErrCheckpointNotFound = errors.New("checkpoint not found")
@@ -123,36 +121,4 @@ type Store interface {
 	//
 	// ErrCheckpointNotFound is returend if no DB record exists.
 	GetExternalCheckpoint(ctx context.Context, account string) (*ExternalCheckpointRecord, error)
-
-	// GetCachedVersion gets the current cached balance version, which can be used
-	// for optimistic locking cached balances for operations with outgoing transfers.
-	//
-	// Note: Use ApplyDeltas, whose predicates replace the version check.
-	// Retained for accounts that are not yet backfilled.
-	GetCachedVersion(ctx context.Context, account string) (uint64, error)
-
-	// AdvanceCachedVersion advances an account's cached balance version.
-	//
-	// ErrStaleCachedBalanceVersion is returned if the currentVersion is out of date.
-	//
-	// Note: Use ApplyDeltas, whose predicates replace the version check.
-	// Retained for accounts that are not yet backfilled.
-	AdvanceCachedVersion(ctx context.Context, account string, currentVersion uint64) error
-
-	// CheckNotClosed checks whether an account is closed under a lock to guarantee
-	// payments to a closeable destination with cached balances are made to an open
-	// account.
-	//
-	// ErrAccountClosed is returned if the account has been closed.
-	//
-	// Note: Use ApplyDeltas with DeltaCredit. Retained for accounts that
-	// are not yet backfilled.
-	CheckNotClosed(ctx context.Context, account string) error
-
-	// MarkAsClosed marks an account as being closed and unable to receive payments
-	// as a destination.
-	//
-	// Note: Use ApplyDeltas with DeltaDrain or DeltaClose. Retained for
-	// accounts that are not yet backfilled.
-	MarkAsClosed(ctx context.Context, account string) error
 }

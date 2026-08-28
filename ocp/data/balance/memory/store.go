@@ -14,9 +14,7 @@ type store struct {
 	balanceRecords               []*balance.Record
 	balanceRecordsByTokenAccount map[string]*balance.Record
 
-	cachedBalanceVersionsByAccount map[string]uint64
-	closedAccounts                 map[string]any
-	externalCheckpointRecords      []*balance.ExternalCheckpointRecord
+	externalCheckpointRecords []*balance.ExternalCheckpointRecord
 
 	last uint64
 }
@@ -24,9 +22,7 @@ type store struct {
 // New returns a new in memory balance.Store
 func New() balance.Store {
 	return &store{
-		balanceRecordsByTokenAccount:   make(map[string]*balance.Record),
-		cachedBalanceVersionsByAccount: make(map[string]uint64),
-		closedAccounts:                 make(map[string]any),
+		balanceRecordsByTokenAccount: make(map[string]*balance.Record),
 	}
 }
 
@@ -297,8 +293,6 @@ func (s *store) reset() {
 
 	s.balanceRecords = nil
 	s.balanceRecordsByTokenAccount = make(map[string]*balance.Record)
-	s.cachedBalanceVersionsByAccount = make(map[string]uint64)
-	s.closedAccounts = make(map[string]any)
 	s.externalCheckpointRecords = nil
 	s.last = 0
 }

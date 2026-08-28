@@ -22,8 +22,6 @@ func RunTests(t *testing.T, s balance.Store, teardown func()) {
 		testApplyDeltasAtomicity,
 		testApplyDeltasConcurrency,
 		testBackfill,
-		testCachedBalanceVersionHappyPath,
-		testClosedAccountHappyPath,
 		testExternalCheckpointHappyPath,
 	} {
 		tf(t, s)
@@ -546,44 +544,6 @@ func testBackfill(t *testing.T, s balance.Store) {
 		require.NoError(t, s.Backfill(ctx, "token_account_2", fn(0, 0, false)))
 		assertBalance(t, s, "token_account_2", 0, 0, false)
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaCredit, Quarks: 1}))
-	})
-}
-
-func testCachedBalanceVersionHappyPath(t *testing.T, s balance.Store) {
-	t.Run("testCachedBalanceVersionHappyPath", func(t *testing.T) {
-		ctx := context.Background()
-
-		for i := range 100 {
-			for range 10 {
-				currentVersion, err := s.GetCachedVersion(ctx, "token_account_1")
-				require.NoError(t, err)
-				assert.EqualValues(t, i, currentVersion)
-			}
-
-			if i > 0 {
-				assert.Equal(t, balance.ErrStaleCachedBalanceVersion, s.AdvanceCachedVersion(ctx, "token_account_1", uint64(i-1)))
-			}
-			assert.Equal(t, balance.ErrStaleCachedBalanceVersion, s.AdvanceCachedVersion(ctx, "token_account_1", uint64(i+1)))
-
-			require.NoError(t, s.AdvanceCachedVersion(ctx, "token_account_1", uint64(i)))
-		}
-
-		currentVersion, err := s.GetCachedVersion(ctx, "token_account_2")
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, currentVersion)
-	})
-}
-
-func testClosedAccountHappyPath(t *testing.T, s balance.Store) {
-	t.Run("testClosedAccountHappyPath", func(t *testing.T) {
-		ctx := context.Background()
-
-		require.NoError(t, s.CheckNotClosed(ctx, "token_account_1"))
-
-		require.NoError(t, s.MarkAsClosed(ctx, "token_account_1"))
-
-		assert.Equal(t, balance.ErrAccountClosed, s.CheckNotClosed(ctx, "token_account_1"))
-		require.NoError(t, s.CheckNotClosed(ctx, "token_account_2s"))
 	})
 }
 
