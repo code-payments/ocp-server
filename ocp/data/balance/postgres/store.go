@@ -86,6 +86,11 @@ func (s *store) GetAllByMint(ctx context.Context, mint string, minQuarks int64, 
 	return fromModels(models), nil
 }
 
+// CountByMint implements balance.Store.CountByMint
+func (s *store) CountByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error) {
+	return dbCountByMint(ctx, s.db, mint, minQuarks)
+}
+
 // ApplyDeltas implements balance.Store.ApplyDeltas
 func (s *store) ApplyDeltas(ctx context.Context, deltas ...*balance.Delta) error {
 	for _, delta := range deltas {

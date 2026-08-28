@@ -127,6 +127,7 @@ type DatabaseData interface {
 	GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error)
 	GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error)
 	GetAllBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error)
+	CountBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
 	ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error
 	BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error
 	GetCachedBalanceVersion(ctx context.Context, account string) (uint64, error)
@@ -485,6 +486,9 @@ func (dp *DatabaseProvider) GetAllBalancesByOwnerAndMint(ctx context.Context, ow
 }
 func (dp *DatabaseProvider) GetAllBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
 	return dp.balance.GetAllByMint(ctx, mint, minQuarks, cursor, limit, direction)
+}
+func (dp *DatabaseProvider) CountBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error) {
+	return dp.balance.CountByMint(ctx, mint, minQuarks)
 }
 func (dp *DatabaseProvider) ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error {
 	return dp.balance.ApplyDeltas(ctx, deltas...)

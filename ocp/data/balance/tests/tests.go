@@ -177,6 +177,33 @@ func testGetAllByMint(t *testing.T, s balance.Store) {
 
 		_, err = s.GetAllByMint(ctx, "mint_1", 0, query.ToCursor(5), 10, query.Ascending)
 		assert.Equal(t, balance.ErrRecordNotFound, err)
+
+		// Counting by mint uses the same threshold semantics, but only over
+		// backfilled records
+		require.NoError(t, s.Create(ctx, &balance.Record{
+			TokenAccount: "token_account_not_backfilled",
+			OwnerAccount: "owner",
+			MintAccount:  "mint_1",
+			Quarks:       1000,
+			IsOpen:       true,
+			IsBackfilled: false,
+		}))
+
+		count, err := s.CountByMint(ctx, "mint_1", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 5, count)
+
+		count, err = s.CountByMint(ctx, "mint_1", 20)
+		require.NoError(t, err)
+		assert.EqualValues(t, 3, count)
+
+		count, err = s.CountByMint(ctx, "mint_2", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, count)
+
+		count, err = s.CountByMint(ctx, "mint_3", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, count)
 	})
 }
 

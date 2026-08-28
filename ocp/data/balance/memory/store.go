@@ -139,6 +139,20 @@ func (s *store) GetAllByMint(_ context.Context, mint string, minQuarks int64, cu
 	return res, nil
 }
 
+// CountByMint implements balance.Store.CountByMint
+func (s *store) CountByMint(_ context.Context, mint string, minQuarks int64) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var res uint64
+	for _, item := range s.balanceRecordsByTokenAccount {
+		if item.MintAccount == mint && item.Quarks >= minQuarks && item.IsBackfilled {
+			res++
+		}
+	}
+	return res, nil
+}
+
 // ApplyDeltas implements balance.Store.ApplyDeltas
 func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 	for _, delta := range deltas {

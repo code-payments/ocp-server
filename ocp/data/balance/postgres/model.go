@@ -176,6 +176,17 @@ func dbGetAllByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int
 	return res, nil
 }
 
+func dbCountByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int64) (uint64, error) {
+	var res uint64
+	query := `SELECT COUNT(*) FROM ` + tableName + `
+		WHERE mint_account = $1 AND quarks >= $2 AND is_backfilled`
+	err := db.GetContext(ctx, &res, query, mint, minQuarks)
+	if err != nil {
+		return 0, err
+	}
+	return res, nil
+}
+
 // dbApplyDeltas applies every delta in a single transaction. Each delta is one
 // conditional UPDATE, so its predicate is evaluated against the row after the
 // row lock is acquired. Predicates only apply to backfilled rows.

@@ -80,6 +80,11 @@ type Store interface {
 	// ErrRecordNotFound is returned if no records exist.
 	GetAllByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
 
+	// CountByMint counts backfilled records for a mint with at least
+	// minQuarks. Records that are not backfilled are excluded, since their
+	// balances are partial sums that can't be compared against a threshold.
+	CountByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
+
 	// ApplyDeltas atomically applies a set of deltas. Either every delta is
 	// applied or none are. Deltas are applied in SortDeltas order.
 	//
