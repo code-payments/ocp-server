@@ -77,13 +77,18 @@ func (s *store) GetAllByOwnerAndMint(ctx context.Context, owner, mint string) ([
 	return fromModels(models), nil
 }
 
-// GetAllByMint implements balance.Store.GetAllByMint
-func (s *store) GetAllByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
-	models, err := dbGetAllByMint(ctx, s.db, mint, minQuarks, cursor, limit, direction)
+// GetAllLockedByMint implements balance.Store.GetAllLockedByMint
+func (s *store) GetAllLockedByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+	models, err := dbGetAllLockedByMint(ctx, s.db, mint, minQuarks, cursor, limit, direction)
 	if err != nil {
 		return nil, err
 	}
 	return fromModels(models), nil
+}
+
+// MarkAsUnlocked implements balance.Store.MarkAsUnlocked
+func (s *store) MarkAsUnlocked(ctx context.Context, tokenAccount string) error {
+	return dbMarkAsUnlocked(ctx, s.db, tokenAccount)
 }
 
 // ApplyDeltas implements balance.Store.ApplyDeltas

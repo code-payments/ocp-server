@@ -104,13 +104,13 @@ func (s *store) GetAllByOwnerAndMint(_ context.Context, owner, mint string) ([]*
 	})
 }
 
-// GetAllByMint implements balance.Store.GetAllByMint
-func (s *store) GetAllByMint(_ context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+// GetAllLockedByMint implements balance.Store.GetAllLockedByMint
+func (s *store) GetAllLockedByMint(_ context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	res, err := s.filter(func(item *balance.Record) bool {
-		if item.MintAccount != mint || item.Quarks < minQuarks {
+		if item.MintAccount != mint || item.Quarks < minQuarks || !item.IsLocked {
 			return false
 		}
 		if len(cursor) > 0 {
@@ -137,6 +137,21 @@ func (s *store) GetAllByMint(_ context.Context, mint string, minQuarks int64, cu
 		res = res[:limit]
 	}
 	return res, nil
+}
+
+// MarkAsUnlocked implements balance.Store.MarkAsUnlocked
+func (s *store) MarkAsUnlocked(_ context.Context, tokenAccount string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, ok := s.balanceRecordsByTokenAccount[tokenAccount]
+	if !ok {
+		return balance.ErrRecordNotFound
+	}
+
+	item.IsLocked = false
+	item.UpdatedAt = time.Now()
+	return nil
 }
 
 // ApplyDeltas implements balance.Store.ApplyDeltas
@@ -182,6 +197,10 @@ func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 
 func applyDelta(item *balance.Record, delta *balance.Delta) error {
 	enforce := item.IsBackfilled
+
+	if enforce && !item.IsLocked {
+		return balance.ErrAccountUnlocked
+	}
 
 	switch delta.Kind {
 	case balance.DeltaCredit:
@@ -257,6 +276,7 @@ func (s *store) Backfill(ctx context.Context, tokenAccount string, fn balance.Ba
 	item.Quarks = result.Quarks
 	item.UsdCostBasis = result.UsdCostBasis
 	item.IsOpen = result.IsOpen
+	item.IsLocked = result.IsLocked
 	item.IsBackfilled = true
 	item.UpdatedAt = time.Now()
 	return nil

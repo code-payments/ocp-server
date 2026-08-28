@@ -44,6 +44,13 @@ type Record struct {
 
 	IsOpen bool
 
+	// IsLocked indicates the timelock vault is still locked, so the account
+	// is managed by OCP and every balance change flows through the ledger.
+	// Once a vault unlocks, funds can move on chain without an intent, so
+	// the record's values are the last managed state and must not be
+	// trusted or aggregated. Unlocking is one-way.
+	IsLocked bool
+
 	// IsBackfilled indicates the record reflects the full history of the
 	// account. Until it does, deltas are recorded without enforcing any
 	// balance predicates.
@@ -84,6 +91,7 @@ func (r *Record) Clone() Record {
 		UsdCostBasis: r.UsdCostBasis,
 
 		IsOpen:       r.IsOpen,
+		IsLocked:     r.IsLocked,
 		IsBackfilled: r.IsBackfilled,
 
 		UpdatedAt: r.UpdatedAt,
@@ -101,6 +109,7 @@ func (r *Record) CopyTo(dst *Record) {
 	dst.UsdCostBasis = r.UsdCostBasis
 
 	dst.IsOpen = r.IsOpen
+	dst.IsLocked = r.IsLocked
 	dst.IsBackfilled = r.IsBackfilled
 
 	dst.UpdatedAt = r.UpdatedAt

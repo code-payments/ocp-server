@@ -376,6 +376,7 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
 		Quarks:       42,
 		IsOpen:       true,
+		IsLocked:     true,
 		IsBackfilled: true,
 	}))
 
@@ -418,6 +419,56 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	assert.Equal(t, expected, balanceByAccount)
 }
 
+func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	enableLedgerReadsForTest(t)
+
+	vmConfig := testutil.NewRandomVmConfig(t, true)
+	owner := testutil.NewRandomAccount(t)
+	tokenAccount, err := owner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+
+	externalAccount := testutil.NewRandomAccount(t)
+
+	data := &balanceTestData{
+		vmConfig:  vmConfig,
+		codeUsers: []*common.Account{owner},
+		transactions: []balanceTestTransaction{
+			{source: externalAccount, destination: tokenAccount, quantity: 11, transactionState: transaction.ConfirmationFinalized},
+		},
+	}
+
+	setupBalanceTestData(t, env, data)
+
+	// A backfilled record for an unlocked vault holds the last managed state,
+	// not a live balance, so it is refused even though the timelock record
+	// still passes the managed check. That pairing is inconsistent by
+	// construction: the timelock check normally rejects first, so the fixture
+	// exists to exercise the record's own guard.
+	require.NoError(t, env.data.CreateBalance(env.ctx, &balance.Record{
+		TokenAccount: tokenAccount.PublicKey().ToBase58(),
+		OwnerAccount: owner.PublicKey().ToBase58(),
+		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
+		Quarks:       42,
+		UsdCostBasis: 4_200_000,
+		IsOpen:       true,
+		IsLocked:     false,
+		IsBackfilled: true,
+	}))
+
+	_, err = CalculateFromCache(env.ctx, env.data, tokenAccount)
+	assert.Equal(t, ErrNotManagedByCode, err)
+
+	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, tokenAccount)
+	assert.Equal(t, ErrNotManagedByCode, err)
+
+	_, err = CalculateUsdCostBasisFromCache(env.ctx, env.data, tokenAccount)
+	assert.Equal(t, ErrNotManagedByCode, err)
+
+	_, err = BatchCalculateUsdCostBasisFromCache(env.ctx, env.data, tokenAccount)
+	assert.Equal(t, ErrNotManagedByCode, err)
+}
+
 func TestDefaultCalculationMethods_BalanceRecordReadsDisabled(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 
@@ -446,6 +497,7 @@ func TestDefaultCalculationMethods_BalanceRecordReadsDisabled(t *testing.T) {
 		Quarks:       42,
 		UsdCostBasis: 123,
 		IsOpen:       true,
+		IsLocked:     true,
 		IsBackfilled: true,
 	}))
 
@@ -487,6 +539,7 @@ func TestUsdCostBasisCalculationMethods(t *testing.T) {
 		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
 		UsdCostBasis: -123456,
 		IsOpen:       true,
+		IsLocked:     true,
 		IsBackfilled: true,
 	}))
 
