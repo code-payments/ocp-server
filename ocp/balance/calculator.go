@@ -395,6 +395,93 @@ func defaultBatchCalculationFromCache(ctx context.Context, data ocp_data.Provide
 	return res, nil
 }
 
+// BalanceWithUsdCostBasis holds a token account's quark balance and USD cost
+// basis, in balance.UsdQuarksPerUnit.
+type BalanceWithUsdCostBasis struct {
+	Quarks       uint64
+	UsdCostBasis int64
+}
+
+// BatchCalculateWithUsdCostBasisFromCache calculates balances and USD cost
+// bases for a set of account records. When ledger reads are enabled, both
+// values for an account come from the same balance record read, so they are
+// guaranteed consistent with each other. Accounts without a backfilled
+// record fall back to the legacy aggregates, which read the two values from
+// separate sources.
+//
+// Note: Use this method when calculating balances for accounts that are managed by
+// Code (ie. Timelock account) and operate within the L2 system.
+func BatchCalculateWithUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, accountRecordsBatch ...*common.AccountRecords) (map[string]*BalanceWithUsdCostBasis, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateWithUsdCostBasisFromCache")
+	defer tracer.End()
+
+	var tokenAccounts []string
+	for _, accountRecords := range accountRecordsBatch {
+		if !accountRecords.IsTimelock() || !accountRecords.IsManagedByCode(ctx) {
+			tracer.OnError(ErrNotManagedByCode)
+			return nil, ErrNotManagedByCode
+		}
+		tokenAccounts = append(tokenAccounts, accountRecords.General.TokenAccount)
+	}
+
+	balanceRecords := make(map[string]*balance.Record)
+	if enableLedgerReads.Get(ctx) {
+		var err error
+		balanceRecords, err = data.GetBalanceBatch(ctx, tokenAccounts...)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+	}
+
+	res := make(map[string]*BalanceWithUsdCostBasis, len(tokenAccounts))
+	var remaining []string
+	for _, tokenAccount := range tokenAccounts {
+		balanceRecord, ok := balanceRecords[tokenAccount]
+		if !ok || !balanceRecord.IsBackfilled {
+			remaining = append(remaining, tokenAccount)
+			continue
+		}
+
+		quarks, err := quarksFromRecord(balanceRecord)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+		res[tokenAccount] = &BalanceWithUsdCostBasis{
+			Quarks:       quarks,
+			UsdCostBasis: balanceRecord.UsdCostBasis,
+		}
+	}
+
+	if len(remaining) == 0 {
+		return res, nil
+	}
+
+	legacyQuarks, err := CalculateBatch(
+		ctx,
+		remaining,
+		NetBalanceFromIntentActionsBatch(ctx, data),
+		FundingFromExternalDepositsBatch(ctx, data),
+	)
+	if err != nil {
+		tracer.OnError(err)
+		return nil, err
+	}
+	for _, tokenAccount := range remaining {
+		usdCostBasis, err := legacyUsdCostBasis(ctx, data, tokenAccount)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+		res[tokenAccount] = &BalanceWithUsdCostBasis{
+			Quarks:       legacyQuarks[tokenAccount],
+			UsdCostBasis: usdCostBasis,
+		}
+	}
+	return res, nil
+}
+
 // CalculateUsdCostBasisFromCache calculates a token account's USD cost basis,
 // in balance.UsdQuarksPerUnit, using cached values.
 //

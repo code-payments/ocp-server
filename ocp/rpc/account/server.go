@@ -25,6 +25,7 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	balance_store "github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 	account_worker "github.com/code-payments/ocp-server/ocp/worker/account"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -36,8 +37,9 @@ var (
 )
 
 type balanceMetadata struct {
-	value  uint64
-	source accountpb.TokenAccountInfo_BalanceSource
+	quarks       uint64
+	usdCostBasis int64
+	source       accountpb.TokenAccountInfo_BalanceSource
 }
 
 type server struct {
@@ -321,19 +323,21 @@ func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.
 			// Don't calculate a balance for now, since the caching strategy
 			// is not possible.
 			balanceMetadataByTokenAccount[accountRecords.General.TokenAccount] = &balanceMetadata{
-				value:  0,
-				source: accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN,
+				quarks:       0,
+				usdCostBasis: 0,
+				source:       accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN,
 			}
 		}
 	}
-	balancesByTokenAccount, err := balance.BatchCalculateFromCacheWithAccountRecords(ctx, s.data, mangedByCodeRecords...)
+	balancesByTokenAccount, err := balance.BatchCalculateWithUsdCostBasisFromCache(ctx, s.data, mangedByCodeRecords...)
 	if err != nil {
 		return nil, err
 	}
-	for tokenAccount, quarks := range balancesByTokenAccount {
+	for tokenAccount, cached := range balancesByTokenAccount {
 		balanceMetadataByTokenAccount[tokenAccount] = &balanceMetadata{
-			value:  quarks,
-			source: accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE,
+			quarks:       cached.Quarks,
+			usdCostBasis: cached.UsdCostBasis,
+			source:       accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE,
 		}
 	}
 
@@ -372,8 +376,9 @@ func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.
 			protoBalanceSource = accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN
 		}
 		balanceMetadataByTokenAccount[tokenAccount.PublicKey().ToBase58()] = &balanceMetadata{
-			value:  quarks,
-			source: protoBalanceSource,
+			quarks:       quarks,
+			usdCostBasis: 0,
+			source:       protoBalanceSource,
 		}
 	}
 
@@ -453,7 +458,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		}
 
 		// Otherwise, check whether it looks like the gift card was claimed.
-		if prefetchedBalanceMetadata.source == accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE && prefetchedBalanceMetadata.value == 0 {
+		if prefetchedBalanceMetadata.source == accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE && prefetchedBalanceMetadata.quarks == 0 {
 			claimState = accountpb.TokenAccountInfo_CLAIM_STATE_CLAIMED
 		} else if records.Timelock.IsClosed() {
 			claimState = accountpb.TokenAccountInfo_CLAIM_STATE_CLAIMED
@@ -481,7 +486,8 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		// If the gift card account is claimed or expired, force the balance to zero.
 		if claimState == accountpb.TokenAccountInfo_CLAIM_STATE_CLAIMED || claimState == accountpb.TokenAccountInfo_CLAIM_STATE_EXPIRED {
 			prefetchedBalanceMetadata.source = accountpb.TokenAccountInfo_BALANCE_SOURCE_CACHE
-			prefetchedBalanceMetadata.value = 0
+			prefetchedBalanceMetadata.quarks = 0
+			prefetchedBalanceMetadata.usdCostBasis = 0
 		}
 	}
 
@@ -495,18 +501,11 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 
 	var usdCostBasis float64
 	if common.IsCoreMint(mintAccount) && common.IsCoreMintUsdStableCoin() {
-		usdCostBasis = float64(prefetchedBalanceMetadata.value) / float64(common.CoreMintQuarksPerUnit)
+		usdCostBasis = float64(prefetchedBalanceMetadata.quarks) / float64(common.CoreMintQuarksPerUnit)
 	} else {
-		switch records.General.AccountType {
-		case commonpb.AccountType_PRIMARY:
-			// todo: Assumes the structure that each user has exactly one primary account per mint
-			usdCostBasis, err = s.data.GetUsdCostBasis(ctx, ownerAccount.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58())
-			if err != nil {
-				return nil, err
-			}
-		default:
-			usdCostBasis = 0 // Account type not supported
-		}
+		// Prefetched alongside the balance, from the same record where the
+		// ledger serves both
+		usdCostBasis = balance_store.UsdCostBasisToFloat(prefetchedBalanceMetadata.usdCostBasis)
 	}
 	var mintMetadata *currencypb.Mint
 	var liveReserveState *currencypb.VerifiedLaunchpadCurrencyReserveState
@@ -542,7 +541,7 @@ func (s *server) getProtoAccountInfo(ctx context.Context, records *common.Accoun
 		AccountType:          records.General.AccountType,
 		Index:                records.General.Index,
 		BalanceSource:        prefetchedBalanceMetadata.source,
-		Balance:              prefetchedBalanceMetadata.value,
+		Balance:              prefetchedBalanceMetadata.quarks,
 		UsdCostBasis:         usdCostBasis,
 		ManagementState:      managementState,
 		BlockchainState:      blockchainState,
