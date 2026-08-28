@@ -203,6 +203,7 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 			MintAccount:  "mint_1",
 			Quarks:       1000,
 			IsOpen:       true,
+			IsLocked:     true,
 			IsBackfilled: false,
 		}))
 
