@@ -287,80 +287,11 @@ func BatchCalculateWithUsdCostBasisFromCache(ctx context.Context, data ocp_data.
 	return res, nil
 }
 
-// CalculateUsdCostBasisFromCache calculates a token account's USD cost basis,
-// in balance.UsdQuarksPerUnit, from its ledger record.
-//
-// Note: Unlike the quark balance calculators, no timelock check is performed,
-// since the ledger record carries the lock state itself. Once a vault unlocks
-// its record holds the last managed state rather than a live cost basis, so
-// reading one returns ErrNotManagedByCode. An account the ledger doesn't
-// track returns balance.ErrRecordNotFound.
-func CalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, tokenAccount *common.Account) (int64, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "CalculateUsdCostBasisFromCache")
-	tracer.AddAttribute("account", tokenAccount.PublicKey().ToBase58())
-	defer tracer.End()
-
-	balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
-	if err != nil {
-		tracer.OnError(err)
-		return 0, err
-	}
-
-	if err := checkRecord(balanceRecord); err != nil {
-		tracer.OnError(err)
-		return 0, err
-	}
-	return balanceRecord.UsdCostBasis, nil
-}
-
-// BatchCalculateUsdCostBasisFromCache is like CalculateUsdCostBasisFromCache,
-// but for a set of token accounts.
-func BatchCalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, tokenAccounts ...*common.Account) (map[string]int64, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateUsdCostBasisFromCache")
-	defer tracer.End()
-
-	tokenAccountStrings := make([]string, len(tokenAccounts))
-	for i, tokenAccount := range tokenAccounts {
-		tokenAccountStrings[i] = tokenAccount.PublicKey().ToBase58()
-	}
-
-	balanceRecords, err := data.GetBalanceBatch(ctx, tokenAccountStrings...)
-	if err != nil {
-		tracer.OnError(err)
-		return nil, err
-	}
-
-	res := make(map[string]int64, len(tokenAccounts))
-	for _, tokenAccount := range tokenAccountStrings {
-		balanceRecord, ok := balanceRecords[tokenAccount]
-		if !ok {
-			tracer.OnError(balance.ErrRecordNotFound)
-			return nil, balance.ErrRecordNotFound
-		}
-
-		if err := checkRecord(balanceRecord); err != nil {
-			tracer.OnError(err)
-			return nil, err
-		}
-		res[tokenAccount] = balanceRecord.UsdCostBasis
-	}
-	return res, nil
-}
-
-// checkRecord verifies a ledger record is an authoritative view of an account
-// that Code still manages. Quark balance callers reject unlocked vaults on the
-// timelock record before reaching here, so for them this only guards against a
-// record that disagrees with it.
-func checkRecord(record *balance.Record) error {
-	if !record.IsLocked {
-		return ErrNotManagedByCode
-	}
-	return nil
-}
-
 func quarksFromRecord(record *balance.Record) (uint64, error) {
-	if err := checkRecord(record); err != nil {
-		return 0, err
+	// Callers reject unlocked vaults on the timelock record before reaching
+	// here, so this only guards against a record that disagrees with it.
+	if !record.IsLocked {
+		return 0, ErrNotManagedByCode
 	}
 	return record.Quarks, nil
 }

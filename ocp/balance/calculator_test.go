@@ -61,12 +61,6 @@ func TestDefaultCalculationMethods_MissingBalanceRecord(t *testing.T) {
 
 	_, err = BatchCalculateFromCacheWithAccountRecords(env.ctx, env.data, testAccount.accountRecords(t, env))
 	assert.Equal(t, balance.ErrRecordNotFound, err)
-
-	_, err = CalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
-
-	_, err = BatchCalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
 }
 
 func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
@@ -95,10 +89,10 @@ func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 
 	// A record for an unlocked vault holds the last managed state, not a live
-	// balance, so it is refused even though the timelock record
-	// still passes the managed check. That pairing is inconsistent by
-	// construction: the timelock check normally rejects first, so the fixture
-	// exists to exercise the record's own guard.
+	// balance, so it is refused even though the timelock record still passes
+	// the managed check. That pairing is inconsistent by construction: the
+	// timelock check normally rejects first, so the fixture exists to exercise
+	// the record's own guard.
 	testAccount := newBalanceTestAccount(t, env)
 	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true})
 
@@ -106,12 +100,6 @@ func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
 	assert.Equal(t, ErrNotManagedByCode, err)
 
 	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrNotManagedByCode, err)
-
-	_, err = CalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrNotManagedByCode, err)
-
-	_, err = BatchCalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
 	assert.Equal(t, ErrNotManagedByCode, err)
 }
 
@@ -138,31 +126,6 @@ func TestDefaultCalculationMethods_BalanceWithUsdCostBasis(t *testing.T) {
 	require.NotNil(t, cached)
 	assert.EqualValues(t, 33, cached.Quarks)
 	assert.EqualValues(t, -123456, cached.UsdCostBasis)
-}
-
-func TestUsdCostBasisCalculationMethods(t *testing.T) {
-	env := setupBalanceTestEnv(t)
-
-	first := newBalanceTestAccount(t, env)
-	second := newBalanceTestAccount(t, env)
-
-	saveBalanceTestRecord(t, env, first, &balance.Record{UsdCostBasis: -123456, IsOpen: true, IsLocked: true})
-	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 1, UsdCostBasis: 1_500_000, IsOpen: true, IsLocked: true})
-
-	expected := map[string]int64{
-		first.tokenAccount.PublicKey().ToBase58():  -123456,
-		second.tokenAccount.PublicKey().ToBase58(): 1_500_000,
-	}
-
-	for _, testAccount := range []*balanceTestAccount{first, second} {
-		actual, err := CalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
-		require.NoError(t, err)
-		assert.EqualValues(t, expected[testAccount.tokenAccount.PublicKey().ToBase58()], actual)
-	}
-
-	usdCostBasisByAccount, err := BatchCalculateUsdCostBasisFromCache(env.ctx, env.data, first.tokenAccount, second.tokenAccount)
-	require.NoError(t, err)
-	assert.Equal(t, expected, usdCostBasisByAccount)
 }
 
 func TestDefaultCalculation_ExternalAccount(t *testing.T) {
