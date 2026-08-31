@@ -27,9 +27,11 @@ var (
 
 	ErrAccountClosed = errors.New("account open state is stale")
 
-	// ErrAccountUnlocked is returned when a delta targets an account whose
-	// timelock vault has unlocked. The ledger stops maintaining the record at
-	// unlock, so nothing may enter or leave it.
+	// ErrAccountUnlocked is returned when a delta other than a credit targets
+	// an account whose timelock vault has unlocked. The ledger stops
+	// maintaining the record at unlock, so nothing may leave it. Credits are
+	// still applied, since an unlocked record is excluded from every read and
+	// turning one away only blocks the flow recording it.
 	ErrAccountUnlocked = errors.New("account is unlocked")
 
 	ErrCheckpointNotFound = errors.New("checkpoint not found")
@@ -109,11 +111,12 @@ type Store interface {
 	//
 	// ErrInsufficientBalance is returned when a debit exceeds the balance.
 	// ErrBalanceChanged is returned when a drain or close doesn't match the
-	// balance. ErrAccountClosed is returned when any delta targets a closed
-	// account: a closed account is frozen, so nothing may enter or leave it,
-	// including a zero-quark cost basis adjustment. ErrAccountUnlocked is
-	// returned when any delta targets an unlocked account, whose record is
-	// no longer maintained.
+	// balance. ErrAccountClosed is returned when a credit, debit, drain or
+	// close targets a closed account, which is frozen. ErrAccountUnlocked is
+	// returned when a delta other than a credit targets an unlocked account,
+	// whose record is no longer maintained. DeltaAdjustUsdCostBasis carries
+	// no predicate: it moves no quarks, so it applies to closed and unlocked
+	// accounts alike and only fails when the record is missing.
 	ApplyDeltas(ctx context.Context, deltas ...*Delta) error
 
 	// MarkAsUnlocked marks an account's timelock vault as unlocked, which is

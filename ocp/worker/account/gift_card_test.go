@@ -63,6 +63,22 @@ func TestGiftCardAutoReturn_AlreadyClaimed(t *testing.T) {
 	env.assertGiftCardNotAutoReturned(t, giftCard2, true)
 }
 
+func TestGiftCardAutoReturn_VaultUnlocked(t *testing.T) {
+	env := setup(t)
+
+	giftCard1 := env.generateRandomGiftCard(t, time.Now())
+	env.simulateGiftCardVaultBeingUnlocked(t, giftCard1)
+
+	giftCard2 := env.generateRandomGiftCard(t, time.Now().Add(-GiftCardExpiry-24*time.Hour))
+	env.simulateGiftCardVaultBeingUnlocked(t, giftCard2)
+
+	require.NoError(t, env.runtime.maybeInitiateGiftCardAutoReturn(env.ctx, giftCard1.accountInfoRecord))
+	env.assertGiftCardNotAutoReturned(t, giftCard1, true)
+
+	require.NoError(t, env.runtime.maybeInitiateGiftCardAutoReturn(env.ctx, giftCard2.accountInfoRecord))
+	env.assertGiftCardNotAutoReturned(t, giftCard2, true)
+}
+
 func TestGiftCardAutoReturn_IntentId(t *testing.T) {
 	intentId1 := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 	intentId2 := testutil.NewRandomAccount(t).PublicKey().ToBase58()

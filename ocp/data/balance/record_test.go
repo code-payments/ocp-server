@@ -17,6 +17,8 @@ func TestMergeDeltas(t *testing.T) {
 		{TokenAccount: "c", Kind: DeltaDrain, Quarks: 9, UsdCostBasis: 9},
 		{TokenAccount: "d", Kind: DeltaClose},
 		{TokenAccount: "d", Kind: DeltaClose},
+		{TokenAccount: "a", Kind: DeltaAdjustUsdCostBasis, UsdCostBasis: 5},
+		{TokenAccount: "a", Kind: DeltaAdjustUsdCostBasis, UsdCostBasis: -8},
 	}
 	original := make([]Delta, len(input))
 	for i, delta := range input {
@@ -27,6 +29,7 @@ func TestMergeDeltas(t *testing.T) {
 
 	assert.Equal(t, []*Delta{
 		{TokenAccount: "a", Kind: DeltaCredit, Quarks: 4, UsdCostBasis: 40},
+		{TokenAccount: "a", Kind: DeltaAdjustUsdCostBasis, UsdCostBasis: -3},
 		{TokenAccount: "b", Kind: DeltaCredit, Quarks: 2, UsdCostBasis: 20},
 		{TokenAccount: "b", Kind: DeltaDebit, Quarks: 12, UsdCostBasis: -2},
 		{TokenAccount: "c", Kind: DeltaDrain, Quarks: 9, UsdCostBasis: 9},

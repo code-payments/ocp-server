@@ -37,10 +37,12 @@ func LedgerWritesEnabled(ctx context.Context) bool {
 // like an external wallet or the fee collector, are dropped, since delta
 // builders don't know which destinations OCP manages. Outgoing deltas from
 // an account the ledger doesn't track are ErrUntrackedAccount, since funds
-// only ever leave accounts OCP manages. Any delta against a tracked account
-// whose vault has unlocked fails loudly with balance.ErrAccountUnlocked:
-// the record is no longer maintained, and a flow still moving funds through
-// it is a bug to surface, never to paper over.
+// only ever leave accounts OCP manages. An outgoing delta against a tracked
+// account whose vault has unlocked fails loudly with
+// balance.ErrAccountUnlocked: the record is no longer maintained, and a flow
+// still taking funds out of it is a bug to surface, never to paper over.
+// Credits are still applied, since an unlocked record is excluded from every
+// read and turning one away only blocks the flow recording it.
 //
 // Any timelock account in the delta set that has no ledger record yet lazily
 // gets one that is not backfilled, so accounts that predate the ledger start

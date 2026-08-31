@@ -208,8 +208,16 @@ func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 func applyDelta(item *balance.Record, delta *balance.Delta) error {
 	enforce := item.IsBackfilled
 
-	if enforce && !item.IsLocked {
-		return balance.ErrAccountUnlocked
+	// A credit doesn't require the vault to be locked, since an unlocked
+	// record is excluded from every read anyway and turning the credit away
+	// only blocks the flow recording it. A cost basis adjustment carries no
+	// predicate at all.
+	switch delta.Kind {
+	case balance.DeltaCredit, balance.DeltaAdjustUsdCostBasis:
+	default:
+		if enforce && !item.IsLocked {
+			return balance.ErrAccountUnlocked
+		}
 	}
 
 	switch delta.Kind {
@@ -253,6 +261,8 @@ func applyDelta(item *balance.Record, delta *balance.Delta) error {
 			}
 		}
 		item.IsOpen = false
+	case balance.DeltaAdjustUsdCostBasis:
+		item.UsdCostBasis += delta.UsdCostBasis
 	}
 	return nil
 }

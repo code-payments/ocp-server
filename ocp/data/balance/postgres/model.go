@@ -223,7 +223,7 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 			case balance.DeltaCredit:
 				query = `UPDATE ` + tableName + `
 					SET quarks = quarks + $2, usd_cost_basis = usd_cost_basis + $3, updated_at = $4
-					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND is_locked))`
+					WHERE token_account = $1 AND (NOT is_backfilled OR is_open)`
 				args = []any{delta.TokenAccount, int64(delta.Quarks), delta.UsdCostBasis, time.Now().UTC()}
 			case balance.DeltaDebit:
 				query = `UPDATE ` + tableName + `
@@ -243,6 +243,13 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 					SET is_open = FALSE, updated_at = $2
 					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND is_locked AND quarks = 0))`
 				args = []any{delta.TokenAccount, time.Now().UTC()}
+			case balance.DeltaAdjustUsdCostBasis:
+				// No predicate: no quarks move, so nothing the other kinds
+				// guard against can happen here
+				query = `UPDATE ` + tableName + `
+					SET usd_cost_basis = usd_cost_basis + $2, updated_at = $3
+					WHERE token_account = $1`
+				args = []any{delta.TokenAccount, delta.UsdCostBasis, time.Now().UTC()}
 			default:
 				return fmt.Errorf("unsupported delta kind: %s", delta.Kind)
 			}
@@ -274,12 +281,16 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 }
 
 func classifyFailedDelta(delta *balance.Delta, current *balance.Record) error {
+	// A credit doesn't require the vault to be locked, so a closed account is
+	// the only thing that turns one away.
+	if delta.Kind == balance.DeltaCredit {
+		return balance.ErrAccountClosed
+	}
+
 	if !current.IsLocked {
 		return balance.ErrAccountUnlocked
 	}
 	switch delta.Kind {
-	case balance.DeltaCredit:
-		return balance.ErrAccountClosed
 	case balance.DeltaDebit:
 		if !current.IsOpen {
 			return balance.ErrAccountClosed

@@ -110,6 +110,26 @@ func (p *runtime) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 		return err
 	}
 
+	timelockRecord, err := p.data.GetTimelockByVault(ctx, giftCardVaultAccount.PublicKey().ToBase58())
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting timelock record")
+		return err
+	}
+	if !common.IsManagedByCode(ctx, timelockRecord) {
+		log.Debug("gift card is no longer managed by code and will be removed from worker queue")
+
+		// The vault has unlocked, so the funds can no longer be moved by an
+		// auto-return withdraw. Clean it up like a claimed gift card, rather
+		// than scheduling a fulfillment that can't be executed.
+		err = InitiateProcessToCleanupGiftCardAutoReturn(ctx, p.data, giftCardVaultAccount)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure cleaning up auto-return action")
+			return err
+		}
+
+		return MarkAutoReturnCheckComplete(ctx, p.data, accountInfoRecord)
+	}
+
 	// Expiration window hasn't been met
 	//
 	// Note: Without distributed locks, we assume SubmitIntent uses expiry - delta

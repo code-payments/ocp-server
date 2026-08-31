@@ -46,9 +46,11 @@ type Record struct {
 
 	// IsLocked indicates the timelock vault is still locked, so the account
 	// is managed by OCP and every balance change flows through the ledger.
-	// Once a vault unlocks, funds can move on chain without an intent, so
-	// the record's values are the last managed state and must not be
-	// trusted or aggregated. Unlocking is one-way.
+	// Once a vault unlocks, funds can move on chain without an intent, so the
+	// record's values must not be trusted or aggregated: nothing may leave
+	// the account through the ledger, while credits keep being recorded
+	// against a balance that no longer reflects the chain. Unlocking is
+	// one-way.
 	IsLocked bool
 
 	// IsBackfilled indicates the record reflects the full history of the
@@ -131,6 +133,14 @@ const (
 
 	// DeltaClose closes an account with a zero balance.
 	DeltaClose
+
+	// DeltaAdjustUsdCostBasis adds a signed correction to an account's USD
+	// cost basis without moving quarks. It carries no predicate: every
+	// predicate on the other kinds protects a quark invariant, and none of
+	// them apply when no quarks move. A correction is only ever issued for a
+	// period the ledger was already tracking, so refusing one would leave the
+	// basis wrong rather than protect anything.
+	DeltaAdjustUsdCostBasis
 )
 
 // Delta is a single balance change to apply to a token account.
@@ -138,13 +148,15 @@ type Delta struct {
 	TokenAccount string
 	Kind         DeltaKind
 
-	// Quarks is the amount credited, debited or drained. Ignored for DeltaClose.
+	// Quarks is the amount credited, debited or drained. Ignored for
+	// DeltaClose, and must be zero for DeltaAdjustUsdCostBasis.
 	Quarks uint64
 
 	// UsdCostBasis is added on credit and subtracted on debit. It is signed
 	// so that a credit can also carry a downward reconciliation. Ignored for
 	// DeltaDrain and DeltaClose on backfilled records, where the basis is
-	// zeroed along with the balance.
+	// zeroed along with the balance. For DeltaAdjustUsdCostBasis it is the
+	// signed correction, added as is.
 	UsdCostBasis int64
 }
 
@@ -156,6 +168,13 @@ func (d *Delta) Validate() error {
 	switch d.Kind {
 	case DeltaCredit, DeltaDebit, DeltaDrain:
 		if d.Quarks == 0 && d.UsdCostBasis == 0 {
+			return errors.New("delta is a no-op")
+		}
+	case DeltaAdjustUsdCostBasis:
+		if d.Quarks != 0 {
+			return errors.New("cost basis adjustment cannot move quarks")
+		}
+		if d.UsdCostBasis == 0 {
 			return errors.New("delta is a no-op")
 		}
 	case DeltaClose:
@@ -179,11 +198,12 @@ func SortDeltas(deltas []*Delta) {
 }
 
 // MergeDeltas returns a copy of deltas in SortDeltas order with consecutive
-// credits and debits to the same account combined into one. Applying one
-// combined delta is equivalent to applying the parts in sequence, since
-// both kinds are additive and their predicates are monotonic in the amount,
-// but it touches the row once. Drains and closes are never merged, since an
-// account can only legitimately be drained or closed once.
+// credits, debits and cost basis adjustments to the same account combined
+// into one. Applying one combined delta is equivalent to applying the parts
+// in sequence, since those kinds are additive and their predicates are
+// monotonic in the amount, but it touches the row once. Drains and closes are
+// never merged, since an account can only legitimately be drained or closed
+// once.
 func MergeDeltas(deltas []*Delta) []*Delta {
 	sorted := make([]*Delta, len(deltas))
 	copy(sorted, deltas)
@@ -193,7 +213,7 @@ func MergeDeltas(deltas []*Delta) []*Delta {
 	for _, delta := range sorted {
 		if len(merged) > 0 {
 			last := merged[len(merged)-1]
-			if last.TokenAccount == delta.TokenAccount && last.Kind == delta.Kind && (delta.Kind == DeltaCredit || delta.Kind == DeltaDebit) {
+			if last.TokenAccount == delta.TokenAccount && last.Kind == delta.Kind && (delta.Kind == DeltaCredit || delta.Kind == DeltaDebit || delta.Kind == DeltaAdjustUsdCostBasis) {
 				last.Quarks += delta.Quarks
 				last.UsdCostBasis += delta.UsdCostBasis
 				continue
@@ -215,6 +235,8 @@ func (k DeltaKind) String() string {
 		return "drain"
 	case DeltaClose:
 		return "close"
+	case DeltaAdjustUsdCostBasis:
+		return "adjust usd cost basis"
 	}
 	return "unknown"
 }
