@@ -27,10 +27,6 @@ const (
 )
 
 var (
-	// ErrNegativeBalance indicates that a ledger record holds a negative
-	// value, which the store's delta predicates should make impossible.
-	ErrNegativeBalance = errors.New("balance calculation resulted in negative value")
-
 	// ErrNotManagedByCode indicates that an account is not owned by Code.
 	// It's up to callers to determine how to handle this situation within
 	// the context of a balance.
@@ -366,11 +362,7 @@ func quarksFromRecord(record *balance.Record) (uint64, error) {
 	if err := checkRecord(record); err != nil {
 		return 0, err
 	}
-
-	if record.Quarks < 0 {
-		return 0, ErrNegativeBalance
-	}
-	return uint64(record.Quarks), nil
+	return record.Quarks, nil
 }
 
 func (s Source) String() string {

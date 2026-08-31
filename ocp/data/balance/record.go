@@ -33,9 +33,7 @@ type Record struct {
 	OwnerAccount string
 	MintAccount  string
 
-	// Quarks is signed to match the column's type. Delta predicates keep it
-	// non-negative.
-	Quarks int64
+	Quarks uint64
 
 	// UsdCostBasis is the account's USD cost basis, in UsdQuarksPerUnit.
 	// A cost basis may legitimately be negative.
@@ -66,10 +64,6 @@ func (r *Record) Validate() error {
 
 	if len(r.MintAccount) == 0 {
 		return errors.New("mint account is required")
-	}
-
-	if r.Quarks < 0 {
-		return errors.New("quarks cannot be negative")
 	}
 
 	return nil

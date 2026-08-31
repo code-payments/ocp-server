@@ -110,5 +110,5 @@ func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string, cu
 		return 0, nil
 	}
 
-	return p.data.CountLockedBalancesByMint(ctx, mint, int64(minHoldings))
+	return p.data.CountLockedBalancesByMint(ctx, mint, minHoldings)
 }

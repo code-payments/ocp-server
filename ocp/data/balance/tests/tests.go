@@ -102,13 +102,6 @@ func testRecordHappyPath(t *testing.T, s balance.Store) {
 
 		_, err = s.GetAllByOwnerAndMint(ctx, "owner_2", "mint_2")
 		assert.Equal(t, balance.ErrRecordNotFound, err)
-
-		assert.Error(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_5",
-			OwnerAccount: "owner_1",
-			MintAccount:  "mint_1",
-			Quarks:       -1,
-		}))
 	})
 }
 
@@ -124,7 +117,7 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 				TokenAccount: "token_account_" + string(rune('a'+i)),
 				OwnerAccount: "owner",
 				MintAccount:  "mint_1",
-				Quarks:       int64(i * 10),
+				Quarks:       uint64(i * 10),
 				IsOpen:       true,
 				IsLocked:     true,
 			}))
@@ -580,7 +573,7 @@ func testExternalCheckpointHappyPath(t *testing.T, s balance.Store) {
 	})
 }
 
-func assertBalance(t *testing.T, s balance.Store, tokenAccount string, quarks, usdCostBasis int64, isOpen bool) {
+func assertBalance(t *testing.T, s balance.Store, tokenAccount string, quarks uint64, usdCostBasis int64, isOpen bool) {
 	record, err := s.Get(context.Background(), tokenAccount)
 	require.NoError(t, err)
 	assert.EqualValues(t, quarks, record.Quarks, "quarks")

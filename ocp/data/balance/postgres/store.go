@@ -78,7 +78,7 @@ func (s *store) GetAllByOwnerAndMint(ctx context.Context, owner, mint string) ([
 }
 
 // GetAllLockedByMint implements balance.Store.GetAllLockedByMint
-func (s *store) GetAllLockedByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+func (s *store) GetAllLockedByMint(ctx context.Context, mint string, minQuarks uint64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
 	models, err := dbGetAllLockedByMint(ctx, s.db, mint, minQuarks, cursor, limit, direction)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (s *store) GetAllLockedByMint(ctx context.Context, mint string, minQuarks i
 }
 
 // CountLockedByMint implements balance.Store.CountLockedByMint
-func (s *store) CountLockedByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error) {
+func (s *store) CountLockedByMint(ctx context.Context, mint string, minQuarks uint64) (uint64, error) {
 	return dbCountLockedByMint(ctx, s.db, mint, minQuarks)
 }
 

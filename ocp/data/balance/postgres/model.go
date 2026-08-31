@@ -30,8 +30,8 @@ type model struct {
 	OwnerAccount string `db:"owner_account"`
 	MintAccount  string `db:"mint_account"`
 
-	Quarks       int64 `db:"quarks"`
-	UsdCostBasis int64 `db:"usd_cost_basis"`
+	Quarks       uint64 `db:"quarks"`
+	UsdCostBasis int64  `db:"usd_cost_basis"`
 
 	IsOpen   bool `db:"is_open"`
 	IsLocked bool `db:"is_locked"`
@@ -160,7 +160,7 @@ func dbGetAllByOwner(ctx context.Context, db *sqlx.DB, owner string, mint *strin
 	return res, nil
 }
 
-func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int64, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*model, error) {
+func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks uint64, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*model, error) {
 	res := []*model{}
 
 	query := `SELECT ` + allColumns + ` FROM ` + tableName + `
@@ -179,7 +179,7 @@ func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuar
 	return res, nil
 }
 
-func dbCountLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int64) (uint64, error) {
+func dbCountLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks uint64) (uint64, error) {
 	var res uint64
 	query := `SELECT COUNT(*) FROM ` + tableName + `
 		WHERE mint_account = $1 AND quarks >= $2 AND is_locked`

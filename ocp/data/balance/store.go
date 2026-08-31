@@ -62,12 +62,12 @@ type Store interface {
 	// making their balances stale.
 	//
 	// ErrRecordNotFound is returned if no records exist.
-	GetAllLockedByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
+	GetAllLockedByMint(ctx context.Context, mint string, minQuarks uint64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
 
 	// CountLockedByMint counts locked records for a mint with at least
 	// minQuarks. Unlocked records are excluded, since their balances are
 	// stale.
-	CountLockedByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
+	CountLockedByMint(ctx context.Context, mint string, minQuarks uint64) (uint64, error)
 
 	// ApplyDeltas atomically applies a set of deltas. Either every delta is
 	// applied or none are. Deltas are applied in SortDeltas order.

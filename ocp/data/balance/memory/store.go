@@ -101,7 +101,7 @@ func (s *store) GetAllByOwnerAndMint(_ context.Context, owner, mint string) ([]*
 }
 
 // GetAllLockedByMint implements balance.Store.GetAllLockedByMint
-func (s *store) GetAllLockedByMint(_ context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+func (s *store) GetAllLockedByMint(_ context.Context, mint string, minQuarks uint64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -136,7 +136,7 @@ func (s *store) GetAllLockedByMint(_ context.Context, mint string, minQuarks int
 }
 
 // CountLockedByMint implements balance.Store.CountLockedByMint
-func (s *store) CountLockedByMint(_ context.Context, mint string, minQuarks int64) (uint64, error) {
+func (s *store) CountLockedByMint(_ context.Context, mint string, minQuarks uint64) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -223,22 +223,22 @@ func applyDelta(item *balance.Record, delta *balance.Delta) error {
 		if !item.IsOpen {
 			return balance.ErrAccountClosed
 		}
-		item.Quarks += int64(delta.Quarks)
+		item.Quarks += delta.Quarks
 		item.UsdCostBasis += delta.UsdCostBasis
 	case balance.DeltaDebit:
 		if !item.IsOpen {
 			return balance.ErrAccountClosed
 		}
-		if item.Quarks < int64(delta.Quarks) {
+		if item.Quarks < delta.Quarks {
 			return balance.ErrInsufficientBalance
 		}
-		item.Quarks -= int64(delta.Quarks)
+		item.Quarks -= delta.Quarks
 		item.UsdCostBasis -= delta.UsdCostBasis
 	case balance.DeltaDrain:
 		if !item.IsOpen {
 			return balance.ErrAccountClosed
 		}
-		if item.Quarks != int64(delta.Quarks) {
+		if item.Quarks != delta.Quarks {
 			return balance.ErrBalanceChanged
 		}
 		item.Quarks = 0
