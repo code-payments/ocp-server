@@ -131,9 +131,12 @@ func TestGetBalance_UnmanagedAccountsExcluded(t *testing.T) {
 
 	// The pool account has left the L2 system, so there isn't a cached balance that
 	// can be trusted for it.
+	// The geyser worker moves both records in the same transaction, so the
+	// ledger record's lock state can't disagree with the timelock record's
 	primaryCoreMintAccountRecords.Timelock.VaultState = timelock_token_v1.StateUnlocked
 	primaryCoreMintAccountRecords.Timelock.Block += 1
 	require.NoError(t, env.data.SaveTimelock(env.ctx, primaryCoreMintAccountRecords.Timelock))
+	require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, primaryCoreMintAccountRecords.General.TokenAccount))
 
 	resp, err := env.client.GetBalance(env.ctx, &balancepb.GetBalanceRequest{
 		Owner: ownerAccount.ToProto(),

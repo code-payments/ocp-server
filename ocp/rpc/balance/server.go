@@ -79,35 +79,40 @@ func (s *server) calculateCoreMintValue(ctx context.Context, owner *common.Accou
 		return 0, err
 	}
 
-	// Accounts that have left the L2 system don't have a cached balance that can
-	// be trusted, so they're excluded from the calculation.
 	mintByTokenAccount := make(map[string]string)
-	var managedByCodeRecords []*common.AccountRecords
+	var tokenAccounts []*common.Account
 	for mint, recordsByType := range recordsByMintAndType {
 		for _, recordsList := range recordsByType {
 			for _, records := range recordsList {
-				if !records.IsManagedByCode(ctx) {
+				if !records.IsTimelock() {
 					continue
 				}
 
+				tokenAccount, err := common.NewAccountFromPublicKeyString(records.General.TokenAccount)
+				if err != nil {
+					return 0, err
+				}
+
 				mintByTokenAccount[records.General.TokenAccount] = mint
-				managedByCodeRecords = append(managedByCodeRecords, records)
+				tokenAccounts = append(tokenAccounts, tokenAccount)
 			}
 		}
 	}
 
-	if len(managedByCodeRecords) == 0 {
+	if len(tokenAccounts) == 0 {
 		return 0, nil
 	}
 
-	balanceByTokenAccount, err := balance.BatchCalculateFromCacheWithAccountRecords(ctx, s.data, managedByCodeRecords...)
+	// Accounts that have left the L2 system don't have a cached balance that can
+	// be trusted, so the ledger omits them from the result.
+	balanceByTokenAccount, err := balance.BatchCalculateFromCache(ctx, s.data, tokenAccounts...)
 	if err != nil {
 		return 0, err
 	}
 
 	quarksByMint := make(map[string]uint64)
-	for tokenAccount, quarks := range balanceByTokenAccount {
-		quarksByMint[mintByTokenAccount[tokenAccount]] += quarks
+	for tokenAccount, cached := range balanceByTokenAccount {
+		quarksByMint[mintByTokenAccount[tokenAccount]] += cached.Quarks
 	}
 
 	var coreMintValue uint64

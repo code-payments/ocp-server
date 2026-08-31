@@ -10,7 +10,6 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
-	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/solana"
 )
 
@@ -36,6 +35,11 @@ var (
 // CalculateFromCache is the default and recommended strategy for reliably estimating
 // a token account's balance using cached values.
 //
+// The ledger record is the whole answer: it exists for exactly the accounts
+// Code manages, and carries the lock state that says whether it still does.
+// An account with no record, or one whose vault has unlocked, is
+// ErrNotManagedByCode.
+//
 // Note: Use this method when calculating balances for accounts that are managed by
 // Code (ie. Timelock account) and operate within the L2 system.
 func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccount *common.Account) (uint64, error) {
@@ -43,8 +47,8 @@ func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccoun
 	tracer.AddAttribute("account", tokenAccount.PublicKey().ToBase58())
 	defer tracer.End()
 
-	timelockRecord, err := data.GetTimelockByVault(ctx, tokenAccount.PublicKey().ToBase58())
-	if err == timelock.ErrTimelockNotFound {
+	balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
+	if err == balance.ErrRecordNotFound {
 		tracer.OnError(ErrNotManagedByCode)
 		return 0, ErrNotManagedByCode
 	} else if err != nil {
@@ -52,26 +56,13 @@ func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccoun
 		return 0, err
 	}
 
-	// The balance ledger is only maintained for accounts managed by Code. The
-	// account must be managed in order to return accurate values.
-	isManagedByCode := common.IsManagedByCode(ctx, timelockRecord)
-	if !isManagedByCode {
+	// Once a vault unlocks, funds can move on chain without an intent, so the
+	// record stops being maintained and its balance must not be trusted.
+	if !balanceRecord.IsLocked {
 		tracer.OnError(ErrNotManagedByCode)
 		return 0, ErrNotManagedByCode
 	}
-
-	balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
-	if err != nil {
-		tracer.OnError(err)
-		return 0, err
-	}
-
-	quarks, err := quarksFromRecord(balanceRecord)
-	if err != nil {
-		tracer.OnError(err)
-		return 0, err
-	}
-	return quarks, nil
+	return balanceRecord.Quarks, nil
 }
 
 // CalculateFromBlockchain is the default and recommended strategy for reliably
@@ -134,42 +125,27 @@ func CalculateFromBlockchain(ctx context.Context, data ocp_data.Provider, tokenA
 	return quarks, BlockchainSource, nil
 }
 
-// BatchCalculateFromCacheWithAccountRecords is the default and recommended batch strategy
-// or reliably estimating a set of token accounts' balance when common.AccountRecords are
-// available.
-//
-// Note: Use this method when calculating balances for accounts that are managed by
-// Code (ie. Timelock account) and operate within the L2 system.
-func BatchCalculateFromCacheWithAccountRecords(ctx context.Context, data ocp_data.Provider, accountRecordsBatch ...*common.AccountRecords) (map[string]uint64, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateFromCacheWithAccountRecords")
-	defer tracer.End()
-
-	timelockRecords := make([]*timelock.Record, 0)
-	for _, accountRecords := range accountRecordsBatch {
-		if !accountRecords.IsTimelock() {
-			tracer.OnError(ErrNotManagedByCode)
-			return nil, ErrNotManagedByCode
-		}
-
-		timelockRecords = append(timelockRecords, accountRecords.Timelock)
-	}
-
-	balanceByTokenAccount, err := defaultBatchCalculationFromCache(ctx, data, timelockRecords)
-	if err != nil {
-		tracer.OnError(err)
-		return nil, err
-	}
-	return balanceByTokenAccount, nil
+// Balance is a token account's quark balance and USD cost basis, in
+// balance.UsdQuarksPerUnit.
+type Balance struct {
+	Quarks       uint64
+	UsdCostBasis int64
 }
 
-// BatchCalculateFromCacheWithTokenAccounts is the default and recommended batch strategy
-// or reliably estimating a set of token accounts' balance when common.Account are
-// available.
+// BatchCalculateFromCache is the default and recommended batch strategy for
+// reliably estimating a set of token accounts' balances using cached values.
+// Both values for an account come from the same ledger record read, so they
+// are guaranteed consistent with each other.
+//
+// Accounts the ledger doesn't manage are omitted from the result: those with
+// no record, and those whose vault has unlocked. A caller that requires every
+// account it asked for to be managed compares the result's length against its
+// input.
 //
 // Note: Use this method when calculating balances for accounts that are managed by
 // Code (ie. Timelock account) and operate within the L2 system.
-func BatchCalculateFromCacheWithTokenAccounts(ctx context.Context, data ocp_data.Provider, tokenAccounts ...*common.Account) (map[string]uint64, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateFromCacheWithTokenAccounts")
+func BatchCalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccounts ...*common.Account) (map[string]*Balance, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateFromCache")
 	defer tracer.End()
 
 	tokenAccountStrings := make([]string, len(tokenAccounts))
@@ -177,123 +153,27 @@ func BatchCalculateFromCacheWithTokenAccounts(ctx context.Context, data ocp_data
 		tokenAccountStrings[i] = tokenAccount.PublicKey().ToBase58()
 	}
 
-	timelockRecordsByVault, err := data.GetTimelockByVaultBatch(ctx, tokenAccountStrings...)
-	if err == timelock.ErrTimelockNotFound {
-		tracer.OnError(ErrNotManagedByCode)
-		return nil, ErrNotManagedByCode
-	} else if err != nil {
-		tracer.OnError(err)
-		return nil, err
-	}
-
-	timelockRecords := make([]*timelock.Record, 0, len(timelockRecordsByVault))
-	for _, timelockRecord := range timelockRecordsByVault {
-		timelockRecords = append(timelockRecords, timelockRecord)
-	}
-
-	balanceByTokenAccount, err := defaultBatchCalculationFromCache(ctx, data, timelockRecords)
-	if err != nil {
-		tracer.OnError(err)
-		return nil, err
-	}
-	return balanceByTokenAccount, nil
-}
-
-func defaultBatchCalculationFromCache(ctx context.Context, data ocp_data.Provider, timelockRecords []*timelock.Record) (map[string]uint64, error) {
-	tokenAccounts := make([]string, 0, len(timelockRecords))
-	for _, timelockRecord := range timelockRecords {
-		// The balance ledger is only maintained for accounts managed by Code.
-		// The account must be managed in order to return accurate values.
-		isManagedByCode := common.IsManagedByCode(ctx, timelockRecord)
-		if !isManagedByCode {
-			return nil, ErrNotManagedByCode
-		}
-
-		tokenAccounts = append(tokenAccounts, timelockRecord.VaultAddress)
-	}
-
-	balanceRecords, err := data.GetBalanceBatch(ctx, tokenAccounts...)
-	if err != nil {
-		return nil, err
-	}
-
-	res := make(map[string]uint64, len(tokenAccounts))
-	for _, tokenAccount := range tokenAccounts {
-		balanceRecord, ok := balanceRecords[tokenAccount]
-		if !ok {
-			return nil, balance.ErrRecordNotFound
-		}
-
-		quarks, err := quarksFromRecord(balanceRecord)
-		if err != nil {
-			return nil, err
-		}
-		res[tokenAccount] = quarks
-	}
-	return res, nil
-}
-
-// BalanceWithUsdCostBasis holds a token account's quark balance and USD cost
-// basis, in balance.UsdQuarksPerUnit.
-type BalanceWithUsdCostBasis struct {
-	Quarks       uint64
-	UsdCostBasis int64
-}
-
-// BatchCalculateWithUsdCostBasisFromCache calculates balances and USD cost
-// bases for a set of account records. Both values for an account come from
-// the same balance record read, so they are guaranteed consistent with each
-// other.
-//
-// Note: Use this method when calculating balances for accounts that are managed by
-// Code (ie. Timelock account) and operate within the L2 system.
-func BatchCalculateWithUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, accountRecordsBatch ...*common.AccountRecords) (map[string]*BalanceWithUsdCostBasis, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateWithUsdCostBasisFromCache")
-	defer tracer.End()
-
-	tokenAccounts := make([]string, 0, len(accountRecordsBatch))
-	for _, accountRecords := range accountRecordsBatch {
-		if !accountRecords.IsTimelock() || !accountRecords.IsManagedByCode(ctx) {
-			tracer.OnError(ErrNotManagedByCode)
-			return nil, ErrNotManagedByCode
-		}
-		tokenAccounts = append(tokenAccounts, accountRecords.General.TokenAccount)
-	}
-
-	balanceRecords, err := data.GetBalanceBatch(ctx, tokenAccounts...)
+	balanceRecords, err := data.GetBalanceBatch(ctx, tokenAccountStrings...)
 	if err != nil {
 		tracer.OnError(err)
 		return nil, err
 	}
 
-	res := make(map[string]*BalanceWithUsdCostBasis, len(tokenAccounts))
-	for _, tokenAccount := range tokenAccounts {
-		balanceRecord, ok := balanceRecords[tokenAccount]
-		if !ok {
-			tracer.OnError(balance.ErrRecordNotFound)
-			return nil, balance.ErrRecordNotFound
+	res := make(map[string]*Balance, len(balanceRecords))
+	for tokenAccount, balanceRecord := range balanceRecords {
+		// Once a vault unlocks, funds can move on chain without an intent, so
+		// the record stops being maintained and its balance must not be
+		// trusted or aggregated.
+		if !balanceRecord.IsLocked {
+			continue
 		}
 
-		quarks, err := quarksFromRecord(balanceRecord)
-		if err != nil {
-			tracer.OnError(err)
-			return nil, err
-		}
-		res[tokenAccount] = &BalanceWithUsdCostBasis{
-			Quarks:       quarks,
+		res[tokenAccount] = &Balance{
+			Quarks:       balanceRecord.Quarks,
 			UsdCostBasis: balanceRecord.UsdCostBasis,
 		}
 	}
 	return res, nil
-}
-
-func quarksFromRecord(record *balance.Record) (uint64, error) {
-	// Callers reject unlocked vaults on the timelock record before reaching
-	// here, so this only guards against a record that disagrees with it.
-	if !record.IsLocked {
-		return 0, ErrNotManagedByCode
-	}
-	return record.Quarks, nil
 }
 
 func (s Source) String() string {

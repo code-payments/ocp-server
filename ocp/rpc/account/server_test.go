@@ -517,9 +517,7 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 			require.NoError(t, env.data.PutAllActions(env.ctx, claimActionRecord))
 		}
 
-		accountRecords.Timelock.VaultState = tc.timelockState
-		accountRecords.Timelock.Block += 1
-		require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+		setTimelockState(t, env, accountRecords, tc.timelockState)
 
 		for _, requestingOwnerAccount := range []*common.Account{
 			nil,
@@ -629,11 +627,9 @@ func TestGetTokenAccountInfos_BlockchainState(t *testing.T) {
 		}
 
 		accountRecords := getDefaultTestAccountRecords(t, ownerAccount, ownerAccount, coreVmConfig, 0, commonpb.AccountType_PRIMARY)
-		accountRecords.Timelock.VaultState = tc.timelockState
-		accountRecords.Timelock.Block += 1
 		require.NoError(t, env.data.CreateAccountInfo(env.ctx, accountRecords.General))
 		require.NoError(t, balance_util.CreateRecordInTx(env.ctx, env.data, accountRecords.General))
-		require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+		setTimelockState(t, env, accountRecords, tc.timelockState)
 
 		resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 		require.NoError(t, err)
@@ -703,6 +699,9 @@ func TestGetTokenAccountInfos_ManagementState(t *testing.T) {
 		require.NoError(t, env.data.CreateAccountInfo(env.ctx, accountRecords.General))
 		require.NoError(t, balance_util.CreateRecordInTx(env.ctx, env.data, accountRecords.General))
 		require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+		if !accountRecords.Timelock.IsLocked() {
+			require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, accountRecords.General.TokenAccount))
+		}
 
 		resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 		require.NoError(t, err)
@@ -845,6 +844,18 @@ func getDefaultTestAccountRecords(t *testing.T, ownerAccount, authorityAccount *
 	return &common.AccountRecords{
 		General:  accountInfoRecord,
 		Timelock: timelockRecord,
+	}
+}
+
+// setTimelockState transitions a vault the way the geyser worker does, moving
+// the ledger record's lock state with it so the two can't disagree.
+func setTimelockState(t *testing.T, env testEnv, accountRecords *common.AccountRecords, state timelock_token_v1.TimelockState) {
+	accountRecords.Timelock.VaultState = state
+	accountRecords.Timelock.Block += 1
+	require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+
+	if !accountRecords.Timelock.IsLocked() {
+		require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, accountRecords.General.TokenAccount))
 	}
 }
 

@@ -23,44 +23,49 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	first := newBalanceTestAccount(t, env)
 	second := newBalanceTestAccount(t, env)
 
-	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true})
-	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 0, IsOpen: true, IsLocked: true})
+	// Quarks and cost basis come from the same record, so they can't disagree
+	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 0, UsdCostBasis: -123456, IsOpen: true, IsLocked: true})
 
-	expected := map[string]uint64{
-		first.tokenAccount.PublicKey().ToBase58():  42,
-		second.tokenAccount.PublicKey().ToBase58(): 0,
-	}
-
-	for _, testAccount := range []*balanceTestAccount{first, second} {
-		actual, err := CalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
+	for _, tc := range []struct {
+		testAccount  *balanceTestAccount
+		quarks       uint64
+		usdCostBasis int64
+	}{
+		{first, 42, 4_200_000},
+		{second, 0, -123456},
+	} {
+		actual, err := CalculateFromCache(env.ctx, env.data, tc.testAccount.tokenAccount)
 		require.NoError(t, err)
-		assert.EqualValues(t, expected[testAccount.tokenAccount.PublicKey().ToBase58()], actual)
+		assert.EqualValues(t, tc.quarks, actual)
 	}
 
-	balanceByAccount, err := BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, first.tokenAccount, second.tokenAccount)
+	balanceByAccount, err := BatchCalculateFromCache(env.ctx, env.data, first.tokenAccount, second.tokenAccount)
 	require.NoError(t, err)
-	assert.Equal(t, expected, balanceByAccount)
-
-	balanceByAccount, err = BatchCalculateFromCacheWithAccountRecords(env.ctx, env.data, first.accountRecords(t, env), second.accountRecords(t, env))
-	require.NoError(t, err)
-	assert.Equal(t, expected, balanceByAccount)
+	assert.Equal(t, map[string]*Balance{
+		first.tokenAccount.PublicKey().ToBase58():  {Quarks: 42, UsdCostBasis: 4_200_000},
+		second.tokenAccount.PublicKey().ToBase58(): {Quarks: 0, UsdCostBasis: -123456},
+	}, balanceByAccount)
 }
 
 func TestDefaultCalculationMethods_MissingBalanceRecord(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 
-	// The account is managed, but the ledger has no record for it, which is a
-	// broken invariant rather than a balance of zero
-	testAccount := newBalanceTestAccount(t, env)
+	tracked := newBalanceTestAccount(t, env)
+	saveBalanceTestRecord(t, env, tracked, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true})
+	untracked := newBalanceTestAccount(t, env)
 
-	_, err := CalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
+	// The ledger record is the whole answer, so an account without one simply
+	// isn't managed by Code
+	_, err := CalculateFromCache(env.ctx, env.data, untracked.tokenAccount)
+	assert.Equal(t, ErrNotManagedByCode, err)
 
-	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
-
-	_, err = BatchCalculateFromCacheWithAccountRecords(env.ctx, env.data, testAccount.accountRecords(t, env))
-	assert.Equal(t, balance.ErrRecordNotFound, err)
+	// The batch variant says so by omission, and the rest of the batch still
+	// resolves
+	balanceByAccount, err := BatchCalculateFromCache(env.ctx, env.data, tracked.tokenAccount, untracked.tokenAccount)
+	require.NoError(t, err)
+	require.Len(t, balanceByAccount, 1)
+	assert.EqualValues(t, 42, balanceByAccount[tracked.tokenAccount.PublicKey().ToBase58()].Quarks)
 }
 
 func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
@@ -69,63 +74,23 @@ func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
 	testAccount := newBalanceTestAccount(t, env)
 	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true})
 
+	// The vault unlocks. In production the timelock and ledger records move in
+	// the same transaction, so they can't disagree.
 	timelockRecord, err := env.data.GetTimelockByVault(env.ctx, testAccount.tokenAccount.PublicKey().ToBase58())
 	require.NoError(t, err)
 	timelockRecord.VaultState = timelock_token_v1.StateWaitingForTimeout
 	timelockRecord.Block += 1
 	require.NoError(t, env.data.SaveTimelock(env.ctx, timelockRecord))
+	require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, testAccount.tokenAccount.PublicKey().ToBase58()))
 
+	// A record for an unlocked vault holds the last managed state rather than
+	// a live balance, so it is refused outright and omitted from a batch
 	_, err = CalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
 	assert.Equal(t, ErrNotManagedByCode, err)
 
-	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrNotManagedByCode, err)
-
-	_, err = BatchCalculateFromCacheWithAccountRecords(env.ctx, env.data, testAccount.accountRecords(t, env))
-	assert.Equal(t, ErrNotManagedByCode, err)
-}
-
-func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
-	env := setupBalanceTestEnv(t)
-
-	// A record for an unlocked vault holds the last managed state, not a live
-	// balance, so it is refused even though the timelock record still passes
-	// the managed check. That pairing is inconsistent by construction: the
-	// timelock check normally rejects first, so the fixture exists to exercise
-	// the record's own guard.
-	testAccount := newBalanceTestAccount(t, env)
-	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true})
-
-	_, err := CalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrNotManagedByCode, err)
-
-	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrNotManagedByCode, err)
-}
-
-func TestDefaultCalculationMethods_BalanceWithUsdCostBasis(t *testing.T) {
-	env := setupBalanceTestEnv(t)
-
-	first := newBalanceTestAccount(t, env)
-	second := newBalanceTestAccount(t, env)
-
-	// Both values come from the same record, so they can't disagree
-	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsLocked: true})
-	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 33, UsdCostBasis: -123456, IsOpen: true, IsLocked: true})
-
-	res, err := BatchCalculateWithUsdCostBasisFromCache(env.ctx, env.data, first.accountRecords(t, env), second.accountRecords(t, env))
+	balanceByAccount, err := BatchCalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
 	require.NoError(t, err)
-	require.Len(t, res, 2)
-
-	cached := res[first.tokenAccount.PublicKey().ToBase58()]
-	require.NotNil(t, cached)
-	assert.EqualValues(t, 42, cached.Quarks)
-	assert.EqualValues(t, 4_200_000, cached.UsdCostBasis)
-
-	cached = res[second.tokenAccount.PublicKey().ToBase58()]
-	require.NotNil(t, cached)
-	assert.EqualValues(t, 33, cached.Quarks)
-	assert.EqualValues(t, -123456, cached.UsdCostBasis)
+	assert.Empty(t, balanceByAccount)
 }
 
 func TestDefaultCalculation_ExternalAccount(t *testing.T) {
@@ -193,15 +158,4 @@ func saveBalanceTestRecord(t *testing.T, env balanceTestEnv, testAccount *balanc
 	record.OwnerAccount = testAccount.owner.PublicKey().ToBase58()
 	record.MintAccount = testAccount.vmConfig.Mint.PublicKey().ToBase58()
 	require.NoError(t, env.data.CreateBalance(env.ctx, record))
-}
-
-func (a *balanceTestAccount) accountRecords(t *testing.T, env balanceTestEnv) *common.AccountRecords {
-	generalRecord, err := env.data.GetAccountInfoByTokenAddress(env.ctx, a.tokenAccount.PublicKey().ToBase58())
-	require.NoError(t, err)
-	timelockRecord, err := env.data.GetTimelockByVault(env.ctx, a.tokenAccount.PublicKey().ToBase58())
-	require.NoError(t, err)
-	return &common.AccountRecords{
-		General:  generalRecord,
-		Timelock: timelockRecord,
-	}
 }
