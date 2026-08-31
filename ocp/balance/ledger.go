@@ -29,9 +29,8 @@ var ErrUntrackedAccount = errors.New("account is not tracked by the balance ledg
 // Credits are still applied, since an unlocked record is excluded from every
 // read and turning one away only blocks the flow recording it.
 //
-// Any timelock account in the delta set that has no ledger record yet lazily
-// gets one that is not backfilled, so accounts that predate the ledger start
-// accumulating deltas on first touch regardless of direction.
+// A timelock account with no ledger record at all is balance.ErrRecordNotFound
+// in either direction, since every one gets a record when it's opened.
 //
 // Store predicate failures (balance.ErrInsufficientBalance,
 // balance.ErrBalanceChanged, balance.ErrAccountClosed,
@@ -69,8 +68,7 @@ func ApplyDeltasInTx(ctx context.Context, data ocp_data.Provider, deltas ...*bal
 
 // CreateRecordInTx creates the ledger record for a newly opened account. It
 // must be called within the DB transaction that creates the account info
-// record. A new account has no history, so its record is created backfilled
-// at zero and predicates are enforced from the start.
+// record, so every timelock account has a record from the moment it exists.
 //
 // It is a no-op for accounts that aren't timelock accounts, which the ledger
 // doesn't track.
@@ -85,7 +83,6 @@ func CreateRecordInTx(ctx context.Context, data ocp_data.Provider, accountInfoRe
 		MintAccount:  accountInfoRecord.MintAccount,
 		IsOpen:       true,
 		IsLocked:     true,
-		IsBackfilled: true,
 	})
 	if errors.Is(err, balance.ErrRecordExists) {
 		return nil
@@ -93,9 +90,11 @@ func CreateRecordInTx(ctx context.Context, data ocp_data.Provider, accountInfoRe
 	return err
 }
 
-// resolveRecords reports which accounts in the delta set the ledger tracks,
-// creating a non-backfilled record for every timelock account that doesn't
-// have one yet.
+// resolveRecords reports which accounts in the delta set the ledger tracks. A
+// timelock account without a record is a broken invariant rather than an
+// untracked account, since CreateRecordInTx gives every one a record when it's
+// opened, so it fails with balance.ErrRecordNotFound instead of being seeded
+// with a balance that has no relationship to the account's history.
 func resolveRecords(ctx context.Context, data ocp_data.Provider, deltas []*balance.Delta) (map[string]bool, error) {
 	tracked := make(map[string]bool)
 	var tokenAccounts []string
@@ -128,18 +127,7 @@ func resolveRecords(ctx context.Context, data ocp_data.Provider, deltas []*balan
 			continue
 		}
 
-		err = data.CreateBalance(ctx, &balance.Record{
-			TokenAccount: accountInfoRecord.TokenAccount,
-			OwnerAccount: accountInfoRecord.OwnerAccount,
-			MintAccount:  accountInfoRecord.MintAccount,
-			IsOpen:       true,
-			IsLocked:     true,
-			IsBackfilled: false,
-		})
-		if err != nil && !errors.Is(err, balance.ErrRecordExists) {
-			return nil, err
-		}
-		tracked[tokenAccount] = true
+		return nil, fmt.Errorf("%w: %s", balance.ErrRecordNotFound, tokenAccount)
 	}
 	return tracked, nil
 }

@@ -23,8 +23,8 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	first := newBalanceTestAccount(t, env)
 	second := newBalanceTestAccount(t, env)
 
-	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true, IsBackfilled: true})
-	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 0, IsOpen: true, IsLocked: true, IsBackfilled: true})
+	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 0, IsOpen: true, IsLocked: true})
 
 	expected := map[string]uint64{
 		first.tokenAccount.PublicKey().ToBase58():  42,
@@ -69,35 +69,11 @@ func TestDefaultCalculationMethods_MissingBalanceRecord(t *testing.T) {
 	assert.Equal(t, balance.ErrRecordNotFound, err)
 }
 
-func TestDefaultCalculationMethods_IncompleteBalanceRecord(t *testing.T) {
-	env := setupBalanceTestEnv(t)
-
-	// A record that isn't backfilled only holds deltas observed since it was
-	// seeded, so it can't answer for the account
-	testAccount := newBalanceTestAccount(t, env)
-	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsLocked: true})
-
-	_, err := CalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrIncompleteRecord, err)
-
-	_, err = BatchCalculateFromCacheWithTokenAccounts(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrIncompleteRecord, err)
-
-	_, err = BatchCalculateFromCacheWithAccountRecords(env.ctx, env.data, testAccount.accountRecords(t, env))
-	assert.Equal(t, ErrIncompleteRecord, err)
-
-	_, err = CalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrIncompleteRecord, err)
-
-	_, err = BatchCalculateUsdCostBasisFromCache(env.ctx, env.data, testAccount.tokenAccount)
-	assert.Equal(t, ErrIncompleteRecord, err)
-}
-
 func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 
 	testAccount := newBalanceTestAccount(t, env)
-	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true, IsBackfilled: true})
+	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true})
 
 	timelockRecord, err := env.data.GetTimelockByVault(env.ctx, testAccount.tokenAccount.PublicKey().ToBase58())
 	require.NoError(t, err)
@@ -118,13 +94,13 @@ func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
 func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 
-	// A backfilled record for an unlocked vault holds the last managed state,
-	// not a live balance, so it is refused even though the timelock record
+	// A record for an unlocked vault holds the last managed state, not a live
+	// balance, so it is refused even though the timelock record
 	// still passes the managed check. That pairing is inconsistent by
 	// construction: the timelock check normally rejects first, so the fixture
 	// exists to exercise the record's own guard.
 	testAccount := newBalanceTestAccount(t, env)
-	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsBackfilled: true})
+	saveBalanceTestRecord(t, env, testAccount, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true})
 
 	_, err := CalculateFromCache(env.ctx, env.data, testAccount.tokenAccount)
 	assert.Equal(t, ErrNotManagedByCode, err)
@@ -146,8 +122,8 @@ func TestDefaultCalculationMethods_BalanceWithUsdCostBasis(t *testing.T) {
 	second := newBalanceTestAccount(t, env)
 
 	// Both values come from the same record, so they can't disagree
-	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsLocked: true, IsBackfilled: true})
-	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 33, UsdCostBasis: -123456, IsOpen: true, IsLocked: true, IsBackfilled: true})
+	saveBalanceTestRecord(t, env, first, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 33, UsdCostBasis: -123456, IsOpen: true, IsLocked: true})
 
 	res, err := BatchCalculateWithUsdCostBasisFromCache(env.ctx, env.data, first.accountRecords(t, env), second.accountRecords(t, env))
 	require.NoError(t, err)
@@ -170,8 +146,8 @@ func TestUsdCostBasisCalculationMethods(t *testing.T) {
 	first := newBalanceTestAccount(t, env)
 	second := newBalanceTestAccount(t, env)
 
-	saveBalanceTestRecord(t, env, first, &balance.Record{UsdCostBasis: -123456, IsOpen: true, IsLocked: true, IsBackfilled: true})
-	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 1, UsdCostBasis: 1_500_000, IsOpen: true, IsLocked: true, IsBackfilled: true})
+	saveBalanceTestRecord(t, env, first, &balance.Record{UsdCostBasis: -123456, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, second, &balance.Record{Quarks: 1, UsdCostBasis: 1_500_000, IsOpen: true, IsLocked: true})
 
 	expected := map[string]int64{
 		first.tokenAccount.PublicKey().ToBase58():  -123456,

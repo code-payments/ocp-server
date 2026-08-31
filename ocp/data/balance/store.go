@@ -18,13 +18,6 @@ var (
 	// balance than the one on record.
 	ErrBalanceChanged = errors.New("balance is not the expected value")
 
-	ErrAlreadyBackfilled = errors.New("balance record is already backfilled")
-
-	// ErrNegativeBalance is returned when a backfill computes a negative
-	// balance, which indicates inconsistent historical data that must be
-	// reviewed rather than recorded.
-	ErrNegativeBalance = errors.New("backfilled balance is negative")
-
 	ErrAccountClosed = errors.New("account open state is stale")
 
 	// ErrAccountUnlocked is returned when a delta other than a credit targets
@@ -37,26 +30,6 @@ var (
 	ErrCheckpointNotFound = errors.New("checkpoint not found")
 	ErrStaleCheckpoint    = errors.New("checkpoint is stale")
 )
-
-// BackfillResult is the full historical state of a token account.
-type BackfillResult struct {
-	Quarks       int64
-	UsdCostBasis int64
-
-	// IsOpen is false for accounts that can no longer receive funds, such as
-	// claimed gift cards and distributed pools.
-	IsOpen bool
-
-	// IsLocked is false for accounts whose timelock vault has unlocked, so
-	// the balance is the last managed state rather than a live value.
-	IsLocked bool
-}
-
-// BackfillFunc computes the full historical state of a token account. It
-// is called while the record is locked, with a context that is part of the
-// same DB transaction, so any store reads made through it observe every
-// committed change and block every in-flight one.
-type BackfillFunc func(ctx context.Context) (*BackfillResult, error)
 
 type Store interface {
 	// Create creates a new balance record.
@@ -91,18 +64,13 @@ type Store interface {
 	// ErrRecordNotFound is returned if no records exist.
 	GetAllLockedByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
 
-	// CountLockedByMint counts locked, backfilled records for a mint with at
-	// least minQuarks. Records that are not backfilled are excluded, since
-	// their balances are partial sums that can't be compared against a
-	// threshold. Unlocked records are excluded, since their balances are
+	// CountLockedByMint counts locked records for a mint with at least
+	// minQuarks. Unlocked records are excluded, since their balances are
 	// stale.
 	CountLockedByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
 
 	// ApplyDeltas atomically applies a set of deltas. Either every delta is
 	// applied or none are. Deltas are applied in SortDeltas order.
-	//
-	// Predicates are enforced only on backfilled records; records that are
-	// not backfilled simply accumulate the change.
 	//
 	// Every delta must target an account with a record, otherwise
 	// ErrRecordNotFound is returned and nothing is applied. Callers are
@@ -126,17 +94,6 @@ type Store interface {
 	//
 	// ErrRecordNotFound is returned if no record exists.
 	MarkAsUnlocked(ctx context.Context, tokenAccount string) error
-
-	// Backfill locks a record that is not yet backfilled, calls fn to compute
-	// its full historical balance, and overwrites the record with the result,
-	// marking it as backfilled. Deltas recorded before the backfill are
-	// intentionally discarded, since fn observes them.
-	//
-	// ErrRecordNotFound is returned if no record exists. ErrAlreadyBackfilled
-	// is returned if the record is already backfilled, in which case fn is
-	// not called. ErrNegativeBalance is returned if fn computes a negative
-	// balance, leaving the record untouched.
-	Backfill(ctx context.Context, tokenAccount string, fn BackfillFunc) error
 
 	// SaveExternalCheckpoint saves an external balance at a checkpoint.
 	//

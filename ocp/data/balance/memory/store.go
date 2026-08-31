@@ -142,7 +142,7 @@ func (s *store) CountLockedByMint(_ context.Context, mint string, minQuarks int6
 
 	var res uint64
 	for _, item := range s.balanceRecordsByTokenAccount {
-		if item.MintAccount == mint && item.Quarks >= minQuarks && item.IsLocked && item.IsBackfilled {
+		if item.MintAccount == mint && item.Quarks >= minQuarks && item.IsLocked {
 			res++
 		}
 	}
@@ -206,8 +206,6 @@ func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 }
 
 func applyDelta(item *balance.Record, delta *balance.Delta) error {
-	enforce := item.IsBackfilled
-
 	// A credit doesn't require the vault to be locked, since an unlocked
 	// record is excluded from every read anyway and turning the credit away
 	// only blocks the flow recording it. A cost basis adjustment carries no
@@ -215,93 +213,48 @@ func applyDelta(item *balance.Record, delta *balance.Delta) error {
 	switch delta.Kind {
 	case balance.DeltaCredit, balance.DeltaAdjustUsdCostBasis:
 	default:
-		if enforce && !item.IsLocked {
+		if !item.IsLocked {
 			return balance.ErrAccountUnlocked
 		}
 	}
 
 	switch delta.Kind {
 	case balance.DeltaCredit:
-		if enforce && !item.IsOpen {
+		if !item.IsOpen {
 			return balance.ErrAccountClosed
 		}
 		item.Quarks += int64(delta.Quarks)
 		item.UsdCostBasis += delta.UsdCostBasis
 	case balance.DeltaDebit:
-		if enforce && !item.IsOpen {
+		if !item.IsOpen {
 			return balance.ErrAccountClosed
 		}
-		if enforce && item.Quarks < int64(delta.Quarks) {
+		if item.Quarks < int64(delta.Quarks) {
 			return balance.ErrInsufficientBalance
 		}
 		item.Quarks -= int64(delta.Quarks)
 		item.UsdCostBasis -= delta.UsdCostBasis
 	case balance.DeltaDrain:
-		if enforce {
-			if !item.IsOpen {
-				return balance.ErrAccountClosed
-			}
-			if item.Quarks != int64(delta.Quarks) {
-				return balance.ErrBalanceChanged
-			}
-			item.Quarks = 0
-			item.UsdCostBasis = 0
-		} else {
-			item.Quarks -= int64(delta.Quarks)
-			item.UsdCostBasis -= delta.UsdCostBasis
+		if !item.IsOpen {
+			return balance.ErrAccountClosed
 		}
+		if item.Quarks != int64(delta.Quarks) {
+			return balance.ErrBalanceChanged
+		}
+		item.Quarks = 0
+		item.UsdCostBasis = 0
 		item.IsOpen = false
 	case balance.DeltaClose:
-		if enforce {
-			if !item.IsOpen {
-				return balance.ErrAccountClosed
-			}
-			if item.Quarks != 0 {
-				return balance.ErrBalanceChanged
-			}
+		if !item.IsOpen {
+			return balance.ErrAccountClosed
+		}
+		if item.Quarks != 0 {
+			return balance.ErrBalanceChanged
 		}
 		item.IsOpen = false
 	case balance.DeltaAdjustUsdCostBasis:
 		item.UsdCostBasis += delta.UsdCostBasis
 	}
-	return nil
-}
-
-// Backfill implements balance.Store.Backfill
-//
-// Note: The lock is released while fn runs, since fn reads from other stores
-// sharing the provider. Unlike the DB store, this doesn't block concurrent
-// deltas, which tests don't exercise against a backfill.
-func (s *store) Backfill(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
-	s.mu.Lock()
-	item, ok := s.balanceRecordsByTokenAccount[tokenAccount]
-	if !ok {
-		s.mu.Unlock()
-		return balance.ErrRecordNotFound
-	}
-	if item.IsBackfilled {
-		s.mu.Unlock()
-		return balance.ErrAlreadyBackfilled
-	}
-	s.mu.Unlock()
-
-	result, err := fn(ctx)
-	if err != nil {
-		return err
-	}
-	if result.Quarks < 0 {
-		return balance.ErrNegativeBalance
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	item.Quarks = result.Quarks
-	item.UsdCostBasis = result.UsdCostBasis
-	item.IsOpen = result.IsOpen
-	item.IsLocked = result.IsLocked
-	item.IsBackfilled = true
-	item.UpdatedAt = time.Now()
 	return nil
 }
 

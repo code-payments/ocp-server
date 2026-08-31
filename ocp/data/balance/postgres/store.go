@@ -107,11 +107,6 @@ func (s *store) ApplyDeltas(ctx context.Context, deltas ...*balance.Delta) error
 	return dbApplyDeltas(ctx, s.db, balance.MergeDeltas(deltas))
 }
 
-// Backfill implements balance.Store.Backfill
-func (s *store) Backfill(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
-	return dbBackfill(ctx, s.db, tokenAccount, fn)
-}
-
 func fromModels(models []*model) []*balance.Record {
 	res := make([]*balance.Record, len(models))
 	for i, model := range models {

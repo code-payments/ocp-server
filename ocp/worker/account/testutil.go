@@ -13,10 +13,12 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	currency_lib "github.com/code-payments/ocp-server/currency"
+	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	balance_data "github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
@@ -105,6 +107,15 @@ func (e *testEnv) generateRandomGiftCard(t *testing.T, creationTs time.Time) *te
 		CreatedAt: creationTs,
 	}
 	require.NoError(t, e.data.SaveIntent(e.ctx, intentRecord))
+
+	// The issuance funded the gift card, which the ledger recorded
+	require.NoError(t, balance.CreateRecordInTx(e.ctx, e.data, accountInfoRecord))
+	require.NoError(t, balance.ApplyDeltasInTx(e.ctx, e.data, &balance_data.Delta{
+		TokenAccount: accountInfoRecord.TokenAccount,
+		Kind:         balance_data.DeltaCredit,
+		Quarks:       intentRecord.SendPublicPaymentMetadata.Quantity,
+		UsdCostBasis: balance_data.UsdCostBasisFromFloat(intentRecord.SendPublicPaymentMetadata.UsdMarketValue),
+	}))
 
 	autoReturnActionRecord := &action.Record{
 		Intent:     intentRecord.IntentId,

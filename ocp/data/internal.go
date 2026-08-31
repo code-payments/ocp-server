@@ -130,7 +130,6 @@ type DatabaseData interface {
 	CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
 	ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error
 	MarkBalanceAsUnlocked(ctx context.Context, tokenAccount string) error
-	BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error
 	SaveExternalBalanceCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error
 	GetExternalBalanceCheckpoint(ctx context.Context, account string) (*balance.ExternalCheckpointRecord, error)
 
@@ -492,9 +491,6 @@ func (dp *DatabaseProvider) CountLockedBalancesByMint(ctx context.Context, mint 
 }
 func (dp *DatabaseProvider) ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error {
 	return dp.balance.ApplyDeltas(ctx, deltas...)
-}
-func (dp *DatabaseProvider) BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
-	return dp.balance.Backfill(ctx, tokenAccount, fn)
 }
 func (dp *DatabaseProvider) SaveExternalBalanceCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error {
 	return dp.balance.SaveExternalCheckpoint(ctx, record)

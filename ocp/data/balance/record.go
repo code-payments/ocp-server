@@ -33,9 +33,8 @@ type Record struct {
 	OwnerAccount string
 	MintAccount  string
 
-	// Quarks is signed because a record that has not been backfilled only
-	// accumulates deltas, which may temporarily net negative. Backfilled
-	// records are guaranteed to be non-negative.
+	// Quarks is signed to match the column's type. Delta predicates keep it
+	// non-negative.
 	Quarks int64
 
 	// UsdCostBasis is the account's USD cost basis, in UsdQuarksPerUnit.
@@ -53,11 +52,6 @@ type Record struct {
 	// one-way.
 	IsLocked bool
 
-	// IsBackfilled indicates the record reflects the full history of the
-	// account. Until it does, deltas are recorded without enforcing any
-	// balance predicates.
-	IsBackfilled bool
-
 	UpdatedAt time.Time
 }
 
@@ -74,8 +68,8 @@ func (r *Record) Validate() error {
 		return errors.New("mint account is required")
 	}
 
-	if r.IsBackfilled && r.Quarks < 0 {
-		return errors.New("backfilled quarks cannot be negative")
+	if r.Quarks < 0 {
+		return errors.New("quarks cannot be negative")
 	}
 
 	return nil
@@ -92,9 +86,8 @@ func (r *Record) Clone() Record {
 		Quarks:       r.Quarks,
 		UsdCostBasis: r.UsdCostBasis,
 
-		IsOpen:       r.IsOpen,
-		IsLocked:     r.IsLocked,
-		IsBackfilled: r.IsBackfilled,
+		IsOpen:   r.IsOpen,
+		IsLocked: r.IsLocked,
 
 		UpdatedAt: r.UpdatedAt,
 	}
@@ -112,13 +105,11 @@ func (r *Record) CopyTo(dst *Record) {
 
 	dst.IsOpen = r.IsOpen
 	dst.IsLocked = r.IsLocked
-	dst.IsBackfilled = r.IsBackfilled
 
 	dst.UpdatedAt = r.UpdatedAt
 }
 
-// DeltaKind selects the predicate a Delta is applied under. Predicates are
-// only enforced on backfilled records.
+// DeltaKind selects the predicate a Delta is applied under.
 type DeltaKind uint8
 
 const (
@@ -154,9 +145,9 @@ type Delta struct {
 
 	// UsdCostBasis is added on credit and subtracted on debit. It is signed
 	// so that a credit can also carry a downward reconciliation. Ignored for
-	// DeltaDrain and DeltaClose on backfilled records, where the basis is
-	// zeroed along with the balance. For DeltaAdjustUsdCostBasis it is the
-	// signed correction, added as is.
+	// DeltaDrain and DeltaClose, where the basis is zeroed along with the
+	// balance. For DeltaAdjustUsdCostBasis it is the signed correction, added
+	// as is.
 	UsdCostBasis int64
 }
 

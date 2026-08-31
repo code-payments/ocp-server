@@ -28,20 +28,13 @@ const (
 
 var (
 	// ErrNegativeBalance indicates that a ledger record holds a negative
-	// value, which can only happen before it's backfilled.
+	// value, which the store's delta predicates should make impossible.
 	ErrNegativeBalance = errors.New("balance calculation resulted in negative value")
 
 	// ErrNotManagedByCode indicates that an account is not owned by Code.
 	// It's up to callers to determine how to handle this situation within
 	// the context of a balance.
 	ErrNotManagedByCode = errors.New("explicitly not handling account not managed by code")
-
-	// ErrIncompleteRecord indicates a ledger record doesn't yet reflect the
-	// full history of the account, so it isn't an authoritative balance.
-	//
-	// todo: Remove alongside balance.Record.IsBackfilled once the ledger
-	//       backfill is retired.
-	ErrIncompleteRecord = errors.New("balance record is not backfilled")
 )
 
 // CalculateFromCache is the default and recommended strategy for reliably estimating
@@ -359,14 +352,10 @@ func BatchCalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Prov
 }
 
 // checkRecord verifies a ledger record is an authoritative view of an account
-// that Code still manages.
+// that Code still manages. Quark balance callers reject unlocked vaults on the
+// timelock record before reaching here, so for them this only guards against a
+// record that disagrees with it.
 func checkRecord(record *balance.Record) error {
-	if !record.IsBackfilled {
-		return ErrIncompleteRecord
-	}
-
-	// Callers reject unlocked vaults on the timelock record before reaching
-	// here, so this only guards against a record that disagrees with it.
 	if !record.IsLocked {
 		return ErrNotManagedByCode
 	}
