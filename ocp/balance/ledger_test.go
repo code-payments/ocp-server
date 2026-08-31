@@ -120,16 +120,18 @@ func TestApplyDeltasInTx_UnlockedAccount(t *testing.T) {
 	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaCredit, Quarks: 100}))
 	require.NoError(t, data.MarkBalanceAsUnlocked(ctx, unlocked.TokenAccount))
 
-	// Any delta against an unlocked account fails loudly, so a flow still
-	// moving funds through it surfaces as a DB error
-	err := ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaCredit, Quarks: 1})
+	// An outgoing delta against an unlocked account fails loudly, so a flow
+	// still taking funds out of it surfaces as a DB error
+	err := ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaDebit, Quarks: 1})
 	assert.Equal(t, balance.ErrAccountUnlocked, err)
-	err = ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaDebit, Quarks: 1})
-	assert.Equal(t, balance.ErrAccountUnlocked, err)
+
+	// A credit still applies, so a flow recording funds that have already
+	// moved isn't blocked by an unlock it raced against
+	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: unlocked.TokenAccount, Kind: balance.DeltaCredit, Quarks: 1}))
 
 	record, err := data.GetBalance(ctx, unlocked.TokenAccount)
 	require.NoError(t, err)
-	assert.EqualValues(t, 100, record.Quarks)
+	assert.EqualValues(t, 101, record.Quarks)
 	assert.False(t, record.IsLocked)
 }
 

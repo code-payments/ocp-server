@@ -258,6 +258,18 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 		assert.Equal(t, balance.ErrInsufficientBalance, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1}))
 		assertBalance(t, s, "token_account_1", 0, 0, false)
 
+		// A cost basis adjustment carries no predicate, so it still applies to
+		// a closed account and never moves quarks
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaAdjustUsdCostBasis, UsdCostBasis: 7}))
+		assertBalance(t, s, "token_account_1", 0, 7, false)
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaAdjustUsdCostBasis, UsdCostBasis: -20}))
+		assertBalance(t, s, "token_account_1", 0, -13, false)
+
+		// It must not carry quarks, and a zero adjustment is a no-op
+		assert.Error(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaAdjustUsdCostBasis, Quarks: 1, UsdCostBasis: 1}))
+		assert.Error(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaAdjustUsdCostBasis}))
+		assertBalance(t, s, "token_account_1", 0, -13, false)
+
 		require.NoError(t, s.Create(ctx, &balance.Record{
 			TokenAccount: "token_account_2",
 			OwnerAccount: "owner",
@@ -579,13 +591,33 @@ func testMarkAsUnlocked(t *testing.T, s balance.Store) {
 		require.NoError(t, err)
 		assert.False(t, record.IsLocked)
 
-		// An unlocked record is no longer maintained: nothing may enter or
-		// leave it
-		assert.Equal(t, balance.ErrAccountUnlocked, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1}))
+		// Nothing may leave an unlocked record, which is no longer maintained
 		assert.Equal(t, balance.ErrAccountUnlocked, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1}))
 		assert.Equal(t, balance.ErrAccountUnlocked, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 100}))
 		assert.Equal(t, balance.ErrAccountUnlocked, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaClose}))
 		assertBalance(t, s, "token_account_1", 100, 0, true)
+
+		// Credits still apply, so a flow recording funds that have already
+		// moved is never blocked by an unlock it raced against
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1, UsdCostBasis: 2}))
+		assertBalance(t, s, "token_account_1", 101, 2, true)
+
+		// As do cost basis adjustments, which carry no predicate at all
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaAdjustUsdCostBasis, UsdCostBasis: -5}))
+		assertBalance(t, s, "token_account_1", 101, -3, true)
+
+		// Unless the account is also closed
+		require.NoError(t, s.Create(ctx, &balance.Record{
+			TokenAccount: "token_account_3",
+			OwnerAccount: "owner",
+			MintAccount:  "mint",
+			IsOpen:       true,
+			IsLocked:     true,
+			IsBackfilled: true,
+		}))
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_3", Kind: balance.DeltaClose}))
+		require.NoError(t, s.MarkAsUnlocked(ctx, "token_account_3"))
+		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_3", Kind: balance.DeltaCredit, Quarks: 1}))
 
 		// A record that is not backfilled accumulates without predicates,
 		// unlocked included; the backfill computes the truth for it

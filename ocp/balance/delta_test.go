@@ -343,7 +343,7 @@ func TestDeltasForSwapSellReconciliation(t *testing.T) {
 	deltas, err := DeltasForSwapSellReconciliation(previous, updated, actionRecords)
 	require.NoError(t, err)
 	assert.Equal(t, []*balance.Delta{
-		{TokenAccount: "source", Kind: balance.DeltaDebit, UsdCostBasis: 250_000},
+		{TokenAccount: "source", Kind: balance.DeltaAdjustUsdCostBasis, UsdCostBasis: -250_000},
 	}, deltas)
 
 	// Realized less than estimated: basis is returned to the source
@@ -351,7 +351,7 @@ func TestDeltasForSwapSellReconciliation(t *testing.T) {
 	deltas, err = DeltasForSwapSellReconciliation(previous, updated, actionRecords)
 	require.NoError(t, err)
 	assert.Equal(t, []*balance.Delta{
-		{TokenAccount: "source", Kind: balance.DeltaDebit, UsdCostBasis: -250_000},
+		{TokenAccount: "source", Kind: balance.DeltaAdjustUsdCostBasis, UsdCostBasis: 250_000},
 	}, deltas)
 
 	// No change is a no-op

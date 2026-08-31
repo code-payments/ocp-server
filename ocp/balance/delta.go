@@ -188,16 +188,17 @@ func DeltasForSwapSellReconciliation(previous, updated *intent.Record, actionRec
 		return nil, fmt.Errorf("%w: swap sell has no funding action", ErrUnsupportedBalanceChange)
 	}
 
-	adjustment := balance.UsdCostBasisFromFloat(updated.SendPublicPaymentMetadata.UsdMarketValue) - balance.UsdCostBasisFromFloat(previous.SendPublicPaymentMetadata.UsdMarketValue)
+	// The funding payment already removed the basis it was committed with, so
+	// the correction added back is what it overcharged: negative when the sell
+	// realized more than estimated, positive when it realized less.
+	adjustment := balance.UsdCostBasisFromFloat(previous.SendPublicPaymentMetadata.UsdMarketValue) - balance.UsdCostBasisFromFloat(updated.SendPublicPaymentMetadata.UsdMarketValue)
 	if adjustment == 0 {
 		return nil, nil
 	}
 
-	// A debit subtracts the signed basis, so a higher realized value removes
-	// more basis from the source and a lower one gives some back
 	return []*balance.Delta{{
 		TokenAccount: funding.Source,
-		Kind:         balance.DeltaDebit,
+		Kind:         balance.DeltaAdjustUsdCostBasis,
 		UsdCostBasis: adjustment,
 	}}, nil
 }
