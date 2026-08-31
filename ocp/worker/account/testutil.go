@@ -19,7 +19,9 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
+	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/pointer"
+	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/testutil"
 )
 
@@ -31,6 +33,7 @@ type testEnv struct {
 
 type testGiftCard struct {
 	accountInfoRecord *account.Record
+	timelockRecord    *timelock.Record
 
 	issuedIntentRecord          *intent.Record
 	claimedActionRecord         *action.Record
@@ -73,6 +76,9 @@ func (e *testEnv) generateRandomGiftCard(t *testing.T, creationTs time.Time) *te
 		CreatedAt: creationTs,
 	}
 	require.NoError(t, e.data.CreateAccountInfo(e.ctx, accountInfoRecord))
+
+	timelockRecord := timelockAccounts.ToDBRecord()
+	require.NoError(t, e.data.SaveTimelock(e.ctx, timelockRecord))
 
 	intentRecord := &intent.Record{
 		IntentId:   testutil.NewRandomAccount(t).PublicKey().ToBase58(),
@@ -148,6 +154,7 @@ func (e *testEnv) generateRandomGiftCard(t *testing.T, creationTs time.Time) *te
 
 	return &testGiftCard{
 		accountInfoRecord: accountInfoRecord,
+		timelockRecord:    timelockRecord,
 
 		issuedIntentRecord:          intentRecord,
 		autoReturnActionRecord:      autoReturnActionRecord,
@@ -172,6 +179,12 @@ func (e *testEnv) simulateGiftCardBeingClaimed(t *testing.T, giftCard *testGiftC
 		State: action.StatePending,
 	}
 	require.NoError(t, e.data.PutAllActions(e.ctx, giftCard.claimedActionRecord))
+}
+
+func (e *testEnv) simulateGiftCardVaultBeingUnlocked(t *testing.T, giftCard *testGiftCard) {
+	giftCard.timelockRecord.VaultState = timelock_token.StateUnlocked
+	giftCard.timelockRecord.Block += 1
+	require.NoError(t, e.data.SaveTimelock(e.ctx, giftCard.timelockRecord))
 }
 
 func (e *testEnv) assertGiftCardAutoReturned(t *testing.T, giftCard *testGiftCard) {
