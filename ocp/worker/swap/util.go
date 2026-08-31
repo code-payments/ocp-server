@@ -465,15 +465,13 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 				return err
 			}
 
-			if balance.LedgerWritesEnabled(ctx) {
-				balanceDeltas, err := balance.DeltasForExternalDeposit(refundIntentRecord)
-				if err != nil {
-					return err
-				}
-				err = balance.ApplyDeltasInTx(ctx, p.data, balanceDeltas...)
-				if err != nil {
-					return err
-				}
+			balanceDeltas, err := balance.DeltasForExternalDeposit(refundIntentRecord)
+			if err != nil {
+				return err
+			}
+			err = balance.ApplyDeltasInTx(ctx, p.data, balanceDeltas...)
+			if err != nil {
+				return err
 			}
 
 			// The swap was funded and entered transaction history, so its
@@ -854,28 +852,26 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 			}
 		}
 
-		if balance.LedgerWritesEnabled(ctx) {
-			balanceDeltas, err := balance.DeltasForExternalDeposit(intentRecord)
+		balanceDeltas, err := balance.DeltasForExternalDeposit(intentRecord)
+		if err != nil {
+			return err
+		}
+
+		if reconciledFundingIntentRecord != nil {
+			fundingActionRecords, err := p.data.GetAllActionsByIntent(ctx, reconciledFundingIntentRecord.IntentId)
 			if err != nil {
 				return err
 			}
-
-			if reconciledFundingIntentRecord != nil {
-				fundingActionRecords, err := p.data.GetAllActionsByIntent(ctx, reconciledFundingIntentRecord.IntentId)
-				if err != nil {
-					return err
-				}
-				reconciliationDeltas, err := balance.DeltasForSwapSellReconciliation(previousFundingIntentRecord, reconciledFundingIntentRecord, fundingActionRecords)
-				if err != nil {
-					return err
-				}
-				balanceDeltas = append(balanceDeltas, reconciliationDeltas...)
-			}
-
-			err = balance.ApplyDeltasInTx(ctx, p.data, balanceDeltas...)
+			reconciliationDeltas, err := balance.DeltasForSwapSellReconciliation(previousFundingIntentRecord, reconciledFundingIntentRecord, fundingActionRecords)
 			if err != nil {
 				return err
 			}
+			balanceDeltas = append(balanceDeltas, reconciliationDeltas...)
+		}
+
+		err = balance.ApplyDeltasInTx(ctx, p.data, balanceDeltas...)
+		if err != nil {
+			return err
 		}
 
 		return nil

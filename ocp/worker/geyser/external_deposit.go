@@ -406,15 +406,13 @@ func processPotentialExternalDepositIntoVm(ctx context.Context, data ocp_data.Pr
 				return errors.Wrap(err, "error saving external deposit record")
 			}
 
-			if balance_util.LedgerWritesEnabled(ctx) {
-				balanceDeltas, err := balance_util.DeltasForExternalDeposit(intentRecord)
-				if err != nil {
-					return errors.Wrap(err, "error building balance deltas")
-				}
-				err = balance_util.ApplyDeltasInTx(ctx, data, balanceDeltas...)
-				if err != nil {
-					return errors.Wrap(err, "error applying balance deltas")
-				}
+			balanceDeltas, err := balance_util.DeltasForExternalDeposit(intentRecord)
+			if err != nil {
+				return errors.Wrap(err, "error building balance deltas")
+			}
+			err = balance_util.ApplyDeltasInTx(ctx, data, balanceDeltas...)
+			if err != nil {
+				return errors.Wrap(err, "error applying balance deltas")
 			}
 
 			return nil

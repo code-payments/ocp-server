@@ -14,24 +14,9 @@ import (
 // ledger doesn't track.
 var ErrUntrackedAccount = errors.New("account is not tracked by the balance ledger")
 
-// LedgerReadsEnabled reports whether backfilled ledger records are the
-// authoritative source for balance reads.
-func LedgerReadsEnabled(ctx context.Context) bool {
-	return enableLedgerReads.Get(ctx)
-}
-
-// LedgerWritesEnabled reports whether the ledger is being written to.
-// Callers use it to skip building deltas entirely when writes are disabled,
-// since builders reject flows the ledger doesn't support.
-func LedgerWritesEnabled(ctx context.Context) bool {
-	return enableLedgerWrites.Get(ctx)
-}
-
 // ApplyDeltasInTx applies balance deltas to the ledger. It must be called
 // within the DB transaction that commits the records the deltas are derived
 // from, so the ledger can never disagree with them.
-//
-// It is a no-op while ledger writes are disabled.
 //
 // The ledger only tracks timelock accounts. Credits to any other account,
 // like an external wallet or the fee collector, are dropped, since delta
@@ -52,7 +37,7 @@ func LedgerWritesEnabled(ctx context.Context) bool {
 // balance.ErrBalanceChanged, balance.ErrAccountClosed,
 // balance.ErrAccountUnlocked) are returned as is for the caller to map.
 func ApplyDeltasInTx(ctx context.Context, data ocp_data.Provider, deltas ...*balance.Delta) error {
-	if !enableLedgerWrites.Get(ctx) || len(deltas) == 0 {
+	if len(deltas) == 0 {
 		return nil
 	}
 
@@ -87,10 +72,10 @@ func ApplyDeltasInTx(ctx context.Context, data ocp_data.Provider, deltas ...*bal
 // record. A new account has no history, so its record is created backfilled
 // at zero and predicates are enforced from the start.
 //
-// It is a no-op while ledger writes are disabled, and for accounts that
-// aren't timelock accounts, which the ledger doesn't track.
+// It is a no-op for accounts that aren't timelock accounts, which the ledger
+// doesn't track.
 func CreateRecordInTx(ctx context.Context, data ocp_data.Provider, accountInfoRecord *account.Record) error {
-	if !enableLedgerWrites.Get(ctx) || !accountInfoRecord.IsTimelock() {
+	if !accountInfoRecord.IsTimelock() {
 		return nil
 	}
 

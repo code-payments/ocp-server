@@ -233,15 +233,13 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 			return err
 		}
 
-		if balance.LedgerWritesEnabled(ctx) {
-			balanceDeltas, err := balance.DeltasForGiftCardAutoReturn(autoReturnIntent, autoReturnAction)
-			if err != nil {
-				return err
-			}
-			err = balance.ApplyDeltasInTx(ctx, data, balanceDeltas...)
-			if err != nil {
-				return err
-			}
+		balanceDeltas, err := balance.DeltasForGiftCardAutoReturn(autoReturnIntent, autoReturnAction)
+		if err != nil {
+			return err
+		}
+		err = balance.ApplyDeltasInTx(ctx, data, balanceDeltas...)
+		if err != nil {
+			return err
 		}
 
 		// This will trigger the fulfillment worker to poll for the fulfillment. This

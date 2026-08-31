@@ -9,35 +9,15 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
-	"github.com/code-payments/ocp-server/config/memory"
-	"github.com/code-payments/ocp-server/config/wrapper"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/testutil"
 )
 
-func TestApplyDeltasInTx_WritesDisabled(t *testing.T) {
-	ctx := context.Background()
-	data := ocp_data.NewTestDataProvider()
-	disableLedgerWritesForTest(t)
-
-	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
-
-	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{
-		TokenAccount: source,
-		Kind:         balance.DeltaDebit,
-		Quarks:       100,
-	}))
-
-	_, err := data.GetBalance(ctx, source)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
-}
-
 func TestApplyDeltasInTx_SeedsTimelockAccounts(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
 	destination := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_REMOTE_SEND_GIFT_CARD)
@@ -90,7 +70,6 @@ func TestApplyDeltasInTx_SeedsTimelockAccounts(t *testing.T) {
 func TestApplyDeltasInTx_UnknownSource(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	external := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 	swap := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_SWAP)
@@ -103,7 +82,6 @@ func TestApplyDeltasInTx_UnknownSource(t *testing.T) {
 func TestApplyDeltasInTx_OnlyUntrackedCredits(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	external := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: external, Kind: balance.DeltaCredit, Quarks: 1}))
@@ -114,7 +92,6 @@ func TestApplyDeltasInTx_OnlyUntrackedCredits(t *testing.T) {
 func TestApplyDeltasInTx_UnlockedAccount(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	unlocked := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
 	require.NoError(t, CreateRecordInTx(ctx, data, unlocked))
@@ -139,7 +116,6 @@ func TestApplyDeltasInTx_UnlockedAccount(t *testing.T) {
 func TestApplyDeltasInTx_InvalidDelta(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
 	assert.Error(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: source, Kind: balance.DeltaDebit}))
@@ -152,16 +128,7 @@ func TestCreateRecordInTx(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
 
-	// Disabled writes are a no-op
 	primary := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
-	func() {
-		disableLedgerWritesForTest(t)
-		require.NoError(t, CreateRecordInTx(ctx, data, primary))
-		_, err := data.GetBalance(ctx, primary.TokenAccount)
-		assert.Equal(t, balance.ErrRecordNotFound, err)
-	}()
-
-	enableLedgerWritesForTest(t)
 
 	// A new timelock account starts backfilled at zero, so predicates are
 	// enforced immediately
@@ -212,20 +179,4 @@ func newLedgerTestAccountInfo(t *testing.T, ctx context.Context, data ocp_data.P
 	}
 	require.NoError(t, data.CreateAccountInfo(ctx, record))
 	return record
-}
-
-func disableLedgerWritesForTest(t *testing.T) {
-	previous := enableLedgerWrites
-	enableLedgerWrites = wrapper.NewBoolConfig(memory.NewConfig(false), defaultEnableLedgerWrites)
-	t.Cleanup(func() {
-		enableLedgerWrites = previous
-	})
-}
-
-func enableLedgerWritesForTest(t *testing.T) {
-	previous := enableLedgerWrites
-	enableLedgerWrites = wrapper.NewBoolConfig(memory.NewConfig(true), defaultEnableLedgerWrites)
-	t.Cleanup(func() {
-		enableLedgerWrites = previous
-	})
 }
