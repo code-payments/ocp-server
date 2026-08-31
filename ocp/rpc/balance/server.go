@@ -74,45 +74,17 @@ func (s *server) GetBalance(ctx context.Context, req *balancepb.GetBalanceReques
 }
 
 func (s *server) calculateCoreMintValue(ctx context.Context, owner *common.Account) (uint64, error) {
-	recordsByMintAndType, err := common.GetLatestCodeTimelockAccountRecordsForOwner(ctx, s.data, owner)
-	if err != nil {
-		return 0, err
-	}
-
-	mintByTokenAccount := make(map[string]string)
-	var tokenAccounts []*common.Account
-	for mint, recordsByType := range recordsByMintAndType {
-		for _, recordsList := range recordsByType {
-			for _, records := range recordsList {
-				if !records.IsTimelock() {
-					continue
-				}
-
-				tokenAccount, err := common.NewAccountFromPublicKeyString(records.General.TokenAccount)
-				if err != nil {
-					return 0, err
-				}
-
-				mintByTokenAccount[records.General.TokenAccount] = mint
-				tokenAccounts = append(tokenAccounts, tokenAccount)
-			}
-		}
-	}
-
-	if len(tokenAccounts) == 0 {
-		return 0, nil
-	}
-
-	// Accounts that have left the L2 system don't have a cached balance that can
-	// be trusted, so the ledger omits them from the result.
-	balanceByTokenAccount, err := balance.BatchCalculateFromCache(ctx, s.data, tokenAccounts...)
+	// The ledger holds a record for every account Code manages for the owner,
+	// and each carries the mint it holds. Accounts that have left the L2 system
+	// don't have a cached balance that can be trusted, so it omits them.
+	balanceByTokenAccount, err := balance.BatchCalculateFromCacheByOwner(ctx, s.data, owner)
 	if err != nil {
 		return 0, err
 	}
 
 	quarksByMint := make(map[string]uint64)
-	for tokenAccount, cached := range balanceByTokenAccount {
-		quarksByMint[mintByTokenAccount[tokenAccount]] += cached.Quarks
+	for _, cached := range balanceByTokenAccount {
+		quarksByMint[cached.MintAccount] += cached.Quarks
 	}
 
 	var coreMintValue uint64

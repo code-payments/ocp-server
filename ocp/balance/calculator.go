@@ -126,8 +126,9 @@ func CalculateFromBlockchain(ctx context.Context, data ocp_data.Provider, tokenA
 }
 
 // Balance is a token account's quark balance and USD cost basis, in
-// balance.UsdQuarksPerUnit.
+// balance.UsdQuarksPerUnit, alongside the mint it holds.
 type Balance struct {
+	MintAccount  string
 	Quarks       uint64
 	UsdCostBasis int64
 }
@@ -161,19 +162,59 @@ func BatchCalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenA
 
 	res := make(map[string]*Balance, len(balanceRecords))
 	for tokenAccount, balanceRecord := range balanceRecords {
-		// Once a vault unlocks, funds can move on chain without an intent, so
-		// the record stops being maintained and its balance must not be
-		// trusted or aggregated.
-		if !balanceRecord.IsLocked {
-			continue
-		}
-
-		res[tokenAccount] = &Balance{
-			Quarks:       balanceRecord.Quarks,
-			UsdCostBasis: balanceRecord.UsdCostBasis,
+		if cached, ok := balanceFromRecord(balanceRecord); ok {
+			res[tokenAccount] = cached
 		}
 	}
 	return res, nil
+}
+
+// BatchCalculateFromCacheByOwner is the default and recommended strategy for
+// reliably estimating the balance of every account an owner holds, keyed by
+// token account. Each balance carries the mint its account holds, so a caller
+// aggregating across mints doesn't need the account records to say which is
+// which.
+//
+// Accounts the ledger doesn't manage are omitted, as are owners it holds
+// nothing for, so an owner outside the L2 system is an empty result rather
+// than an error.
+//
+// Note: Use this method when calculating balances for accounts that are managed by
+// Code (ie. Timelock account) and operate within the L2 system.
+func BatchCalculateFromCacheByOwner(ctx context.Context, data ocp_data.Provider, owner *common.Account) (map[string]*Balance, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateFromCacheByOwner")
+	tracer.AddAttribute("owner", owner.PublicKey().ToBase58())
+	defer tracer.End()
+
+	balanceRecords, err := data.GetAllBalancesByOwner(ctx, owner.PublicKey().ToBase58())
+	if err != nil && err != balance.ErrRecordNotFound {
+		tracer.OnError(err)
+		return nil, err
+	}
+
+	res := make(map[string]*Balance, len(balanceRecords))
+	for _, balanceRecord := range balanceRecords {
+		if cached, ok := balanceFromRecord(balanceRecord); ok {
+			res[balanceRecord.TokenAccount] = cached
+		}
+	}
+	return res, nil
+}
+
+// balanceFromRecord reports a ledger record as a Balance, and whether the
+// ledger still maintains it. Once a vault unlocks, funds can move on chain
+// without an intent, so the record's balance must not be trusted or
+// aggregated.
+func balanceFromRecord(record *balance.Record) (*Balance, bool) {
+	if !record.IsLocked {
+		return nil, false
+	}
+
+	return &Balance{
+		MintAccount:  record.MintAccount,
+		Quarks:       record.Quarks,
+		UsdCostBasis: record.UsdCostBasis,
+	}, true
 }
 
 func (s Source) String() string {

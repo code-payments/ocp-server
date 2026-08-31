@@ -43,8 +43,8 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	balanceByAccount, err := BatchCalculateFromCache(env.ctx, env.data, first.tokenAccount, second.tokenAccount)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]*Balance{
-		first.tokenAccount.PublicKey().ToBase58():  {Quarks: 42, UsdCostBasis: 4_200_000},
-		second.tokenAccount.PublicKey().ToBase58(): {Quarks: 0, UsdCostBasis: -123456},
+		first.tokenAccount.PublicKey().ToBase58():  {MintAccount: first.mint(), Quarks: 42, UsdCostBasis: 4_200_000},
+		second.tokenAccount.PublicKey().ToBase58(): {MintAccount: second.mint(), Quarks: 0, UsdCostBasis: -123456},
 	}, balanceByAccount)
 }
 
@@ -93,6 +93,33 @@ func TestDefaultCalculationMethods_NotManagedByCode(t *testing.T) {
 	assert.Empty(t, balanceByAccount)
 }
 
+func TestDefaultCalculationMethods_ByOwner(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+
+	owner := testutil.NewRandomAccount(t)
+	coreMint := newBalanceTestAccountForOwner(t, env, owner, testutil.NewRandomVmConfig(t, true))
+	otherMint := newBalanceTestAccountForOwner(t, env, owner, testutil.NewRandomVmConfig(t, false))
+	unlocked := newBalanceTestAccountForOwner(t, env, owner, testutil.NewRandomVmConfig(t, false))
+
+	saveBalanceTestRecord(t, env, coreMint, &balance.Record{Quarks: 42, UsdCostBasis: 4_200_000, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, otherMint, &balance.Record{Quarks: 33, UsdCostBasis: -123456, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, unlocked, &balance.Record{Quarks: 99, IsOpen: true})
+
+	// Every account the ledger manages for the owner is reported with the mint
+	// it holds. The unlocked one is omitted, since its balance is stale.
+	balanceByAccount, err := BatchCalculateFromCacheByOwner(env.ctx, env.data, owner)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]*Balance{
+		coreMint.tokenAccount.PublicKey().ToBase58():  {MintAccount: coreMint.mint(), Quarks: 42, UsdCostBasis: 4_200_000},
+		otherMint.tokenAccount.PublicKey().ToBase58(): {MintAccount: otherMint.mint(), Quarks: 33, UsdCostBasis: -123456},
+	}, balanceByAccount)
+
+	// An owner the ledger holds nothing for is empty rather than an error
+	balanceByAccount, err = BatchCalculateFromCacheByOwner(env.ctx, env.data, testutil.NewRandomAccount(t))
+	require.NoError(t, err)
+	assert.Empty(t, balanceByAccount)
+}
+
 func TestDefaultCalculation_ExternalAccount(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 	externalAccount := testutil.NewRandomAccount(t)
@@ -123,9 +150,12 @@ func setupBalanceTestEnv(t *testing.T) (env balanceTestEnv) {
 // newBalanceTestAccount creates a locked timelock account, with an account
 // info record but no ledger record.
 func newBalanceTestAccount(t *testing.T, env balanceTestEnv) *balanceTestAccount {
-	vmConfig := testutil.NewRandomVmConfig(t, true)
-	owner := testutil.NewRandomAccount(t)
+	return newBalanceTestAccountForOwner(t, env, testutil.NewRandomAccount(t), testutil.NewRandomVmConfig(t, true))
+}
 
+// newBalanceTestAccountForOwner is like newBalanceTestAccount, for an owner
+// that holds accounts across several mints.
+func newBalanceTestAccountForOwner(t *testing.T, env balanceTestEnv, owner *common.Account, vmConfig *common.VmConfig) *balanceTestAccount {
 	timelockAccounts, err := owner.GetTimelockAccounts(vmConfig)
 	require.NoError(t, err)
 	timelockRecord := timelockAccounts.ToDBRecord()
@@ -149,6 +179,10 @@ func newBalanceTestAccount(t *testing.T, env balanceTestEnv) *balanceTestAccount
 		owner:        owner,
 		tokenAccount: tokenAccount,
 	}
+}
+
+func (a *balanceTestAccount) mint() string {
+	return a.vmConfig.Mint.PublicKey().ToBase58()
 }
 
 // saveBalanceTestRecord creates the account's ledger record, filling in the
