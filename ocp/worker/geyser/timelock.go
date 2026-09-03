@@ -2,6 +2,7 @@ package geyser
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
@@ -29,5 +30,11 @@ func updateTimelockAccountRecord(ctx context.Context, data ocp_data.Provider, ti
 	timelockRecord.UnlockAt = pointer.Uint64(uint64(unlockState.UnlockAt))
 	timelockRecord.Block = slot
 	timelockRecord.LastUpdatedAt = time.Now()
-	return data.SaveTimelock(ctx, timelockRecord)
+	return data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
+		err := data.SaveTimelock(ctx, timelockRecord)
+		if err != nil {
+			return err
+		}
+		return data.MarkBalanceAsUnlocked(ctx, timelockRecord.VaultAddress)
+	})
 }

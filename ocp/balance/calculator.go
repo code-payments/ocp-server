@@ -2,13 +2,17 @@ package balance
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/pkg/errors"
 
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
+
 	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
+	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
 	"github.com/code-payments/ocp-server/solana"
@@ -103,14 +107,24 @@ func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccoun
 		return 0, ErrNotManagedByCode
 	}
 
-	// Pick a set of strategies relevant for the type of account, so we can optimize
-	// the number of DB calls.
-	//
-	// Overall, we're using a simple strategy that iterates over an account's history
-	// to unblock a scheduler implementation optimized for privacy.
-	//
-	// todo: Come up with a heurisitc that enables some form of checkpointing, so
-	//       we're not iterating over all records every time.
+	// Prefer the materialized balance record, when the account has one that
+	// reflects its full history.
+	if enableLedgerReads.Get(ctx) {
+		balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
+		if err == nil && balanceRecord.IsBackfilled {
+			quarks, err := quarksFromRecord(balanceRecord)
+			if err != nil {
+				tracer.OnError(err)
+				return 0, err
+			}
+			return quarks, nil
+		} else if err != nil && err != balance.ErrRecordNotFound {
+			tracer.OnError(err)
+			return 0, err
+		}
+	}
+
+	// Otherwise, fall back to iterating over the account's history.
 	strategies := []Strategy{
 		NetBalanceFromIntentActions(ctx, data),
 		FundingFromExternalDeposits(ctx, data),
@@ -335,12 +349,164 @@ func defaultBatchCalculationFromCache(ctx context.Context, data ocp_data.Provide
 		tokenAccounts = append(tokenAccounts, timelockRecord.VaultAddress)
 	}
 
-	return CalculateBatch(
+	// Prefer materialized balance records, and only iterate over history for
+	// accounts that don't yet have a fully backfilled one.
+	balanceRecords := make(map[string]*balance.Record)
+	if enableLedgerReads.Get(ctx) {
+		var err error
+		balanceRecords, err = data.GetBalanceBatch(ctx, tokenAccounts...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	res := make(map[string]uint64, len(tokenAccounts))
+	var remaining []string
+	for _, tokenAccount := range tokenAccounts {
+		balanceRecord, ok := balanceRecords[tokenAccount]
+		if !ok || !balanceRecord.IsBackfilled {
+			remaining = append(remaining, tokenAccount)
+			continue
+		}
+
+		quarks, err := quarksFromRecord(balanceRecord)
+		if err != nil {
+			return nil, err
+		}
+		res[tokenAccount] = quarks
+	}
+
+	if len(remaining) == 0 {
+		return res, nil
+	}
+
+	legacyRes, err := CalculateBatch(
 		ctx,
-		tokenAccounts,
+		remaining,
 		NetBalanceFromIntentActionsBatch(ctx, data),
 		FundingFromExternalDepositsBatch(ctx, data),
 	)
+	if err != nil {
+		return nil, err
+	}
+	for tokenAccount, quarks := range legacyRes {
+		res[tokenAccount] = quarks
+	}
+	return res, nil
+}
+
+// CalculateUsdCostBasisFromCache calculates a token account's USD cost basis,
+// in balance.UsdQuarksPerUnit, using cached values.
+//
+// Note: Unlike quark balances, a cost basis for an account not managed by Code
+// is still meaningful, so no timelock check is performed and such accounts fall
+// back to the legacy calculation. The materialized record is the exception:
+// once a vault unlocks it holds the last managed state rather than a live cost
+// basis, so reading one returns ErrNotManagedByCode.
+func CalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, tokenAccount *common.Account) (int64, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "CalculateUsdCostBasisFromCache")
+	tracer.AddAttribute("account", tokenAccount.PublicKey().ToBase58())
+	defer tracer.End()
+
+	if enableLedgerReads.Get(ctx) {
+		balanceRecord, err := data.GetBalance(ctx, tokenAccount.PublicKey().ToBase58())
+		if err == nil && balanceRecord.IsBackfilled {
+			if !balanceRecord.IsLocked {
+				tracer.OnError(ErrNotManagedByCode)
+				return 0, ErrNotManagedByCode
+			}
+			return balanceRecord.UsdCostBasis, nil
+		} else if err != nil && err != balance.ErrRecordNotFound {
+			tracer.OnError(err)
+			return 0, err
+		}
+	}
+
+	res, err := legacyUsdCostBasis(ctx, data, tokenAccount.PublicKey().ToBase58())
+	if err != nil {
+		tracer.OnError(err)
+		return 0, err
+	}
+	return res, nil
+}
+
+// BatchCalculateUsdCostBasisFromCache is like CalculateUsdCostBasisFromCache,
+// but for a set of token accounts.
+func BatchCalculateUsdCostBasisFromCache(ctx context.Context, data ocp_data.Provider, tokenAccounts ...*common.Account) (map[string]int64, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateUsdCostBasisFromCache")
+	defer tracer.End()
+
+	tokenAccountStrings := make([]string, len(tokenAccounts))
+	for i, tokenAccount := range tokenAccounts {
+		tokenAccountStrings[i] = tokenAccount.PublicKey().ToBase58()
+	}
+
+	balanceRecords := make(map[string]*balance.Record)
+	if enableLedgerReads.Get(ctx) {
+		var err error
+		balanceRecords, err = data.GetBalanceBatch(ctx, tokenAccountStrings...)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+	}
+
+	res := make(map[string]int64, len(tokenAccounts))
+	for _, tokenAccount := range tokenAccountStrings {
+		balanceRecord, ok := balanceRecords[tokenAccount]
+		if ok && balanceRecord.IsBackfilled {
+			if !balanceRecord.IsLocked {
+				tracer.OnError(ErrNotManagedByCode)
+				return nil, ErrNotManagedByCode
+			}
+			res[tokenAccount] = balanceRecord.UsdCostBasis
+			continue
+		}
+
+		// todo: The legacy calculation has a batch variant by owner, but the
+		//       fallback is temporary and per-owner batching doesn't map onto
+		//       token accounts without an extra lookup anyway.
+		usdCostBasis, err := legacyUsdCostBasis(ctx, data, tokenAccount)
+		if err != nil {
+			tracer.OnError(err)
+			return nil, err
+		}
+		res[tokenAccount] = usdCostBasis
+	}
+	return res, nil
+}
+
+// legacyUsdCostBasis derives a token account's cost basis from the owner-level
+// intent aggregate, which is only defined for primary accounts.
+func legacyUsdCostBasis(ctx context.Context, data ocp_data.Provider, tokenAccount string) (int64, error) {
+	accountInfoRecord, err := data.GetAccountInfoByTokenAddress(ctx, tokenAccount)
+	if err == account.ErrAccountInfoNotFound {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+
+	if accountInfoRecord.AccountType != commonpb.AccountType_PRIMARY {
+		return 0, nil
+	}
+
+	usdCostBasis, err := data.GetUsdCostBasis(ctx, accountInfoRecord.OwnerAccount, accountInfoRecord.MintAccount)
+	if err != nil {
+		return 0, err
+	}
+	return int64(math.Round(usdCostBasis * balance.UsdQuarksPerUnit)), nil
+}
+
+func quarksFromRecord(record *balance.Record) (uint64, error) {
+	// Callers reject unlocked vaults on the timelock record before reaching
+	// here, so this only guards against a record that disagrees with it.
+	if !record.IsLocked {
+		return 0, ErrNotManagedByCode
+	}
+	if record.Quarks < 0 {
+		return 0, ErrNegativeBalance
+	}
+	return uint64(record.Quarks), nil
 }
 
 // NetBalanceFromIntentActionsBatch is a balance calculation strategy that incorporates

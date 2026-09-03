@@ -24,6 +24,29 @@ var (
 const (
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableCreate = `
+	CREATE TABLE ocp__core_balance (
+		id SERIAL NOT NULL PRIMARY KEY,
+
+		token_account TEXT NOT NULL,
+		owner_account TEXT NOT NULL,
+		mint_account TEXT NOT NULL,
+
+		quarks BIGINT NOT NULL DEFAULT 0,
+		usd_cost_basis BIGINT NOT NULL DEFAULT 0,
+
+		is_open BOOL NOT NULL DEFAULT TRUE,
+		is_locked BOOL NOT NULL DEFAULT TRUE,
+		is_backfilled BOOL NOT NULL DEFAULT FALSE,
+
+		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+
+		CONSTRAINT ocp__core_balance__uniq__token_account UNIQUE (token_account),
+		CONSTRAINT ocp__core_balance__check__nonnegative CHECK (NOT is_backfilled OR quarks >= 0)
+	) WITH (fillfactor = 90);
+
+	CREATE INDEX ocp__core_balance__idx__owner_account__mint_account ON ocp__core_balance (owner_account, mint_account);
+	CREATE INDEX ocp__core_balance__idx__mint_account__id ON ocp__core_balance (mint_account, id) WHERE is_locked;
+
 	CREATE TABLE ocp__core_cachedbalanceversion (
 		id SERIAL NOT NULL PRIMARY KEY,
 
@@ -57,6 +80,7 @@ const (
 
 	// Used for testing ONLY, the table and migrations are external to this repository
 	tableDestroy = `
+		DROP TABLE ocp__core_balance;
 		DROP TABLE ocp__core_cachedbalanceversion;
 		DROP TABLE ocp__core_opencloselocks;
 		DROP TABLE ocp__core_externalbalancecheckpoint;

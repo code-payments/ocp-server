@@ -116,6 +116,26 @@ func (p *runtime) maybeInitiateGiftCardAutoReturn(ctx context.Context, accountIn
 		return err
 	}
 
+	timelockRecord, err := p.data.GetTimelockByVault(ctx, giftCardVaultAccount.PublicKey().ToBase58())
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting timelock record")
+		return err
+	}
+	if !common.IsManagedByCode(ctx, timelockRecord) {
+		log.Debug("gift card is no longer managed by code and will be removed from worker queue")
+
+		// The vault has unlocked, so the funds can no longer be moved by an
+		// auto-return withdraw. Clean it up like a claimed gift card, rather
+		// than scheduling a fulfillment that can't be executed.
+		err = InitiateProcessToCleanupGiftCardAutoReturn(ctx, p.data, giftCardVaultAccount)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure cleaning up auto-return action")
+			return err
+		}
+
+		return MarkAutoReturnCheckComplete(ctx, p.data, accountInfoRecord)
+	}
+
 	// Expiration window hasn't been met
 	//
 	// Note: Without distributed locks, we assume SubmitIntent uses expiry - delta
@@ -170,7 +190,7 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 		}
 
 		// Add a intent record to show the funds being returned back to the issuer
-		err = insertAutoReturnIntentRecord(ctx, data, giftCardIssuedIntent, isVoidedByUser)
+		autoReturnIntent, err := insertAutoReturnIntentRecord(ctx, data, giftCardIssuedIntent, isVoidedByUser)
 		if err != nil {
 			return err
 		}
@@ -217,6 +237,17 @@ func InitiateProcessToAutoReturnGiftCard(ctx context.Context, data ocp_data.Prov
 		)
 		if err != nil {
 			return err
+		}
+
+		if balance.LedgerWritesEnabled(ctx) {
+			balanceDeltas, err := balance.DeltasForGiftCardAutoReturn(autoReturnIntent, autoReturnAction)
+			if err != nil {
+				return err
+			}
+			err = balance.ApplyDeltasInTx(ctx, data, balanceDeltas...)
+			if err != nil {
+				return err
+			}
 		}
 
 		// This will trigger the fulfillment worker to poll for the fulfillment. This
@@ -314,10 +345,10 @@ func updateAutoReturnFulfillmentPreSorting(
 	return data.UpdateFulfillment(ctx, fulfillmentRecord)
 }
 
-func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, giftCardIssuedIntent *intent.Record, isVoidedByUser bool) error {
+func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, giftCardIssuedIntent *intent.Record, isVoidedByUser bool) (*intent.Record, error) {
 	mintAccount, err := common.NewAccountFromPublicKeyString(giftCardIssuedIntent.MintAccount)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// We need to insert a faked completed public receive intent so it can appear
@@ -350,7 +381,11 @@ func insertAutoReturnIntentRecord(ctx context.Context, data ocp_data.Provider, g
 
 		CreatedAt: time.Now(),
 	}
-	return data.SaveIntent(ctx, intentRecord)
+	err = data.SaveIntent(ctx, intentRecord)
+	if err != nil {
+		return nil, err
+	}
+	return intentRecord, nil
 }
 
 func markActionAsRevoked(ctx context.Context, data ocp_data.Provider, actionRecord *action.Record) error {

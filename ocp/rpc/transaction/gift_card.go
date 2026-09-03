@@ -120,6 +120,17 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 		return nil, status.Error(codes.Internal, "")
 	}
 
+	timelockRecord, err := s.data.GetTimelockByVault(ctx, giftCardVault.PublicKey().ToBase58())
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting timelock record")
+		return nil, status.Error(codes.Internal, "")
+	}
+	if !common.IsManagedByCode(ctx, timelockRecord) {
+		return &transactionpb.VoidGiftCardResponse{
+			Result: transactionpb.VoidGiftCardResponse_CLAIMED_BY_OTHER_USER,
+		}, nil
+	}
+
 	err = account_worker.InitiateProcessToAutoReturnGiftCard(ctx, s.data, giftCardVault, true, globalBalanceLock)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure scheduling auto-return action")

@@ -9,6 +9,7 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
+	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
@@ -190,7 +191,12 @@ func (h *OpenAccountActionHandler) OnCommitToDB(ctx context.Context) error {
 		return err
 	}
 
-	return h.data.CreateAccountInfo(ctx, h.unsavedAccountInfoRecord)
+	err = h.data.CreateAccountInfo(ctx, h.unsavedAccountInfoRecord)
+	if err != nil {
+		return err
+	}
+
+	return balance.CreateRecordInTx(ctx, h.data, h.unsavedAccountInfoRecord)
 }
 
 type NoPrivacyTransferActionHandler struct {
