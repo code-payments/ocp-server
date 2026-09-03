@@ -75,6 +75,10 @@ func CalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenAccoun
 //
 // todo: add a batching variant
 func CalculateFromBlockchain(ctx context.Context, data ocp_data.Provider, tokenAccount *common.Account) (uint64, Source, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "CalculateFromBlockchain")
+	tracer.AddAttribute("account", tokenAccount.PublicKey().ToBase58())
+	defer tracer.End()
+
 	var cachedQuarks uint64
 	var cachedSlot uint64
 	var cachedUpdateTs time.Time
