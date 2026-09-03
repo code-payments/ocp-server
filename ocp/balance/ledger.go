@@ -14,6 +14,12 @@ import (
 // ledger doesn't track.
 var ErrUntrackedAccount = errors.New("account is not tracked by the balance ledger")
 
+// LedgerReadsEnabled reports whether backfilled ledger records are the
+// authoritative source for balance reads.
+func LedgerReadsEnabled(ctx context.Context) bool {
+	return enableLedgerReads.Get(ctx)
+}
+
 // LedgerWritesEnabled reports whether the ledger is being written to.
 // Callers use it to skip building deltas entirely when writes are disabled,
 // since builders reject flows the ledger doesn't support.

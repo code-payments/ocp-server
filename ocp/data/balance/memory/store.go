@@ -14,9 +14,7 @@ type store struct {
 	balanceRecords               []*balance.Record
 	balanceRecordsByTokenAccount map[string]*balance.Record
 
-	cachedBalanceVersionsByAccount map[string]uint64
-	closedAccounts                 map[string]any
-	externalCheckpointRecords      []*balance.ExternalCheckpointRecord
+	externalCheckpointRecords []*balance.ExternalCheckpointRecord
 
 	last uint64
 }
@@ -24,9 +22,7 @@ type store struct {
 // New returns a new in memory balance.Store
 func New() balance.Store {
 	return &store{
-		balanceRecordsByTokenAccount:   make(map[string]*balance.Record),
-		cachedBalanceVersionsByAccount: make(map[string]uint64),
-		closedAccounts:                 make(map[string]any),
+		balanceRecordsByTokenAccount: make(map[string]*balance.Record),
 	}
 }
 
@@ -139,6 +135,20 @@ func (s *store) GetAllLockedByMint(_ context.Context, mint string, minQuarks int
 	return res, nil
 }
 
+// CountLockedByMint implements balance.Store.CountLockedByMint
+func (s *store) CountLockedByMint(_ context.Context, mint string, minQuarks int64) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var res uint64
+	for _, item := range s.balanceRecordsByTokenAccount {
+		if item.MintAccount == mint && item.Quarks >= minQuarks && item.IsLocked && item.IsBackfilled {
+			res++
+		}
+	}
+	return res, nil
+}
+
 // MarkAsUnlocked implements balance.Store.MarkAsUnlocked
 func (s *store) MarkAsUnlocked(_ context.Context, tokenAccount string) error {
 	s.mu.Lock()
@@ -218,6 +228,9 @@ func applyDelta(item *balance.Record, delta *balance.Delta) error {
 		item.Quarks += int64(delta.Quarks)
 		item.UsdCostBasis += delta.UsdCostBasis
 	case balance.DeltaDebit:
+		if enforce && !item.IsOpen {
+			return balance.ErrAccountClosed
+		}
 		if enforce && item.Quarks < int64(delta.Quarks) {
 			return balance.ErrInsufficientBalance
 		}
@@ -313,8 +326,6 @@ func (s *store) reset() {
 
 	s.balanceRecords = nil
 	s.balanceRecordsByTokenAccount = make(map[string]*balance.Record)
-	s.cachedBalanceVersionsByAccount = make(map[string]uint64)
-	s.closedAccounts = make(map[string]any)
 	s.externalCheckpointRecords = nil
 	s.last = 0
 }

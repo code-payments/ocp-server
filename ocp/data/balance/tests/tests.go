@@ -23,8 +23,6 @@ func RunTests(t *testing.T, s balance.Store, teardown func()) {
 		testApplyDeltasConcurrency,
 		testBackfill,
 		testMarkAsUnlocked,
-		testCachedBalanceVersionHappyPath,
-		testClosedAccountHappyPath,
 		testExternalCheckpointHappyPath,
 	} {
 		tf(t, s)
@@ -196,6 +194,34 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 
 		_, err = s.GetAllLockedByMint(ctx, "mint_1", 0, query.ToCursor(5), 10, query.Ascending)
 		assert.Equal(t, balance.ErrRecordNotFound, err)
+
+		// Counting by mint uses the same threshold semantics, but only over
+		// backfilled records
+		require.NoError(t, s.Create(ctx, &balance.Record{
+			TokenAccount: "token_account_not_backfilled",
+			OwnerAccount: "owner",
+			MintAccount:  "mint_1",
+			Quarks:       1000,
+			IsOpen:       true,
+			IsLocked:     true,
+			IsBackfilled: false,
+		}))
+
+		count, err := s.CountLockedByMint(ctx, "mint_1", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 5, count)
+
+		count, err = s.CountLockedByMint(ctx, "mint_1", 20)
+		require.NoError(t, err)
+		assert.EqualValues(t, 3, count)
+
+		count, err = s.CountLockedByMint(ctx, "mint_2", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, count)
+
+		count, err = s.CountLockedByMint(ctx, "mint_3", 0)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, count)
 	})
 }
 
@@ -244,6 +270,12 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, UsdCostBasis: -5}))
 		assertBalance(t, s, "token_account_1", 70, -15, true)
 
+		// So can a debit, while the account is open
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, UsdCostBasis: -5}))
+		assertBalance(t, s, "token_account_1", 70, -10, true)
+		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, UsdCostBasis: 5}))
+		assertBalance(t, s, "token_account_1", 70, -15, true)
+
 		assert.Equal(t, balance.ErrBalanceChanged, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaClose}))
 		assert.Equal(t, balance.ErrBalanceChanged, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 69}))
 		assert.Equal(t, balance.ErrBalanceChanged, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 71}))
@@ -255,7 +287,11 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1}))
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 0, UsdCostBasis: 1}))
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaClose}))
-		assert.Equal(t, balance.ErrInsufficientBalance, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1}))
+
+		// A closed account is frozen: even a zero-quark cost basis adjustment
+		// cannot leave it
+		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 1}))
+		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, UsdCostBasis: 1}))
 		assertBalance(t, s, "token_account_1", 0, 0, false)
 
 		// A cost basis adjustment carries no predicate, so it still applies to
@@ -630,44 +666,6 @@ func testMarkAsUnlocked(t *testing.T, s balance.Store) {
 		}))
 		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaCredit, Quarks: 5}))
 		assertBalance(t, s, "token_account_2", 5, 0, true)
-	})
-}
-
-func testCachedBalanceVersionHappyPath(t *testing.T, s balance.Store) {
-	t.Run("testCachedBalanceVersionHappyPath", func(t *testing.T) {
-		ctx := context.Background()
-
-		for i := range 100 {
-			for range 10 {
-				currentVersion, err := s.GetCachedVersion(ctx, "token_account_1")
-				require.NoError(t, err)
-				assert.EqualValues(t, i, currentVersion)
-			}
-
-			if i > 0 {
-				assert.Equal(t, balance.ErrStaleCachedBalanceVersion, s.AdvanceCachedVersion(ctx, "token_account_1", uint64(i-1)))
-			}
-			assert.Equal(t, balance.ErrStaleCachedBalanceVersion, s.AdvanceCachedVersion(ctx, "token_account_1", uint64(i+1)))
-
-			require.NoError(t, s.AdvanceCachedVersion(ctx, "token_account_1", uint64(i)))
-		}
-
-		currentVersion, err := s.GetCachedVersion(ctx, "token_account_2")
-		require.NoError(t, err)
-		assert.EqualValues(t, 0, currentVersion)
-	})
-}
-
-func testClosedAccountHappyPath(t *testing.T, s balance.Store) {
-	t.Run("testClosedAccountHappyPath", func(t *testing.T) {
-		ctx := context.Background()
-
-		require.NoError(t, s.CheckNotClosed(ctx, "token_account_1"))
-
-		require.NoError(t, s.MarkAsClosed(ctx, "token_account_1"))
-
-		assert.Equal(t, balance.ErrAccountClosed, s.CheckNotClosed(ctx, "token_account_1"))
-		require.NoError(t, s.CheckNotClosed(ctx, "token_account_2s"))
 	})
 }
 

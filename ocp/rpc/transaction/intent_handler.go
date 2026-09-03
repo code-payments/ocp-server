@@ -34,15 +34,6 @@ import (
 	"github.com/code-payments/ocp-server/solana"
 )
 
-type intentBalanceLock struct {
-	// The account that's being locked
-	Account *common.Account
-
-	// The function executed on intent DB commit that is guaranteed to prevent
-	// race conditions against invalid balance updates
-	CommitFn func(ctx context.Context, data ocp_data.Provider) error
-}
-
 // CreateIntentHandler is an interface for handling new intent creations
 type CreateIntentHandler interface {
 	// PopulateMetadata adds intent metadata to the provided intent record
@@ -64,9 +55,13 @@ type CreateIntentHandler interface {
 	// error.
 	IsNoop(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata, actions []*transactionpb.Action) (bool, error)
 
-	// GetBalanceLocks gets a set of global balance locks to prevent race conditions
-	// against invalid balance updates that would result in intent fulfillment failure
-	GetBalanceLocks(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*intentBalanceLock, error)
+	// GetAccountsToLock gets the set of accounts to lock in-process before
+	// validation, to avoid over consumption of local resources (eg. nonces)
+	// on requests that are likely to lose a race and roll back. Only expected
+	// mass races are worth locking, like a gift card being claimed from many
+	// devices at once. Race resistance itself comes from the balance ledger's
+	// predicates in the intent transaction.
+	GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error)
 
 	// AllowCreation determines whether the new intent creation should be allowed.
 	AllowCreation(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata, actions []*transactionpb.Action) error
@@ -192,7 +187,7 @@ func (h *OpenAccountsIntentHandler) IsNoop(ctx context.Context, intentRecord *in
 	return accountInfoRecord.TokenAccount == tokenAccountToCheck.PublicKey().ToBase58() && accountInfoRecord.AccountType == expectedAccountType, nil
 }
 
-func (h *OpenAccountsIntentHandler) GetBalanceLocks(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*intentBalanceLock, error) {
+func (h *OpenAccountsIntentHandler) GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error) {
 	return nil, nil
 }
 
@@ -508,58 +503,8 @@ func (h *SendPublicPaymentIntentHandler) IsNoop(ctx context.Context, intentRecor
 	return false, nil
 }
 
-func (h *SendPublicPaymentIntentHandler) GetBalanceLocks(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*intentBalanceLock, error) {
-	typedMetadata := metadata.GetSendPublicPayment()
-	if typedMetadata == nil {
-		return nil, errors.New("unexpected metadata proto message")
-	}
-
-	sourceVault, err := common.NewAccountFromProto(typedMetadata.Source)
-	if err != nil {
-		return nil, err
-	}
-
-	outgoingSourceBalanceLock, err := balance.GetOptimisticVersionLock(ctx, h.data, sourceVault)
-	if err != nil {
-		return nil, err
-	}
-
-	intentBalanceLocks := []*intentBalanceLock{
-		{
-			Account:  sourceVault,
-			CommitFn: outgoingSourceBalanceLock.OnNewBalanceVersion,
-		},
-	}
-
-	if h.cachedDestinationAccountInfoRecord != nil {
-		switch h.cachedDestinationAccountInfoRecord.AccountType {
-		case commonpb.AccountType_POOL:
-			closeableDestinationVault, err := common.NewAccountFromProto(typedMetadata.Destination)
-			if err != nil {
-				return nil, err
-			}
-
-			incomingDestinationBalanceLock, err := balance.GetOptimisticVersionLock(ctx, h.data, closeableDestinationVault)
-			if err != nil {
-				return nil, err
-			}
-			incomingDestinationOpenCloseLock := balance.NewOpenCloseStatusLock(closeableDestinationVault)
-
-			intentBalanceLocks = append(
-				intentBalanceLocks,
-				&intentBalanceLock{
-					Account:  closeableDestinationVault,
-					CommitFn: incomingDestinationBalanceLock.RequireSameBalanceVerion,
-				},
-				&intentBalanceLock{
-					Account:  closeableDestinationVault,
-					CommitFn: incomingDestinationOpenCloseLock.OnPaymentToAccount,
-				},
-			)
-		}
-	}
-
-	return intentBalanceLocks, nil
+func (h *SendPublicPaymentIntentHandler) GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error) {
+	return nil, nil
 }
 
 func (h *SendPublicPaymentIntentHandler) AllowCreation(ctx context.Context, intentRecord *intent.Record, untypedMetadata *transactionpb.Metadata, actions []*transactionpb.Action) error {
@@ -1088,23 +1033,16 @@ func (h *ReceivePaymentsPubliclyIntentHandler) IsNoop(ctx context.Context, inten
 	return false, nil
 }
 
-func (h *ReceivePaymentsPubliclyIntentHandler) GetBalanceLocks(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*intentBalanceLock, error) {
+func (h *ReceivePaymentsPubliclyIntentHandler) GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error) {
+	// A gift card claim is an expected mass race across devices, so requests
+	// on this server queue behind one lock instead of burning nonces on
+	// attempts that are doomed to lose the gift card's drain
 	giftCardVault, err := common.NewAccountFromPublicKeyString(intentRecord.ReceivePaymentsPubliclyMetadata.Source)
 	if err != nil {
 		return nil, err
 	}
 
-	outgoingGiftCardBalanceLock, err := balance.GetOptimisticVersionLock(ctx, h.data, giftCardVault)
-	if err != nil {
-		return nil, err
-	}
-
-	return []*intentBalanceLock{
-		{
-			Account:  giftCardVault,
-			CommitFn: outgoingGiftCardBalanceLock.OnNewBalanceVersion,
-		},
-	}, nil
+	return []*common.Account{giftCardVault}, nil
 }
 
 func (h *ReceivePaymentsPubliclyIntentHandler) AllowCreation(ctx context.Context, intentRecord *intent.Record, untypedMetadata *transactionpb.Metadata, actions []*transactionpb.Action) error {
@@ -1437,29 +1375,8 @@ func (h *PublicDistributionIntentHandler) IsNoop(ctx context.Context, intentReco
 	return false, nil
 }
 
-func (h *PublicDistributionIntentHandler) GetBalanceLocks(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*intentBalanceLock, error) {
-	poolVault, err := common.NewAccountFromPublicKeyString(intentRecord.PublicDistributionMetadata.Source)
-	if err != nil {
-		return nil, err
-	}
-
-	outgoingPoolBalanceLock, err := balance.GetOptimisticVersionLock(ctx, h.data, poolVault)
-	if err != nil {
-		return nil, err
-	}
-
-	incomingPoolBalanceLock := balance.NewOpenCloseStatusLock(poolVault)
-
-	return []*intentBalanceLock{
-		{
-			Account:  poolVault,
-			CommitFn: outgoingPoolBalanceLock.OnNewBalanceVersion,
-		},
-		{
-			Account:  poolVault,
-			CommitFn: incomingPoolBalanceLock.OnClose,
-		},
-	}, nil
+func (h *PublicDistributionIntentHandler) GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error) {
+	return nil, nil
 }
 
 // todo: Not all multi-mint validation checks are implemented

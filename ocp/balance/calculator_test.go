@@ -419,6 +419,73 @@ func TestDefaultCalculationMethods_BalanceRecord(t *testing.T) {
 	assert.Equal(t, expected, balanceByAccount)
 }
 
+func TestDefaultCalculationMethods_BalanceWithUsdCostBasis(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+	enableLedgerReadsForTest(t)
+
+	vmConfig := testutil.NewRandomVmConfig(t, true)
+	backfilledOwner := testutil.NewRandomAccount(t)
+	backfilledAccount, err := backfilledOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+	legacyOwner := testutil.NewRandomAccount(t)
+	legacyAccount, err := legacyOwner.ToTimelockVault(vmConfig)
+	require.NoError(t, err)
+
+	externalAccount := testutil.NewRandomAccount(t)
+
+	data := &balanceTestData{
+		vmConfig:  vmConfig,
+		codeUsers: []*common.Account{backfilledOwner, legacyOwner},
+		transactions: []balanceTestTransaction{
+			{source: externalAccount, destination: backfilledAccount, quantity: 11, transactionState: transaction.ConfirmationFinalized},
+			{source: externalAccount, destination: legacyAccount, quantity: 33, transactionState: transaction.ConfirmationFinalized},
+		},
+	}
+
+	setupBalanceTestData(t, env, data)
+
+	// Both values come from the same record for a backfilled account, even
+	// where it disagrees with history
+	require.NoError(t, env.data.CreateBalance(env.ctx, &balance.Record{
+		TokenAccount: backfilledAccount.PublicKey().ToBase58(),
+		OwnerAccount: backfilledOwner.PublicKey().ToBase58(),
+		MintAccount:  vmConfig.Mint.PublicKey().ToBase58(),
+		Quarks:       42,
+		UsdCostBasis: 4_200_000,
+		IsOpen:       true,
+		IsLocked:     true,
+		IsBackfilled: true,
+	}))
+
+	accountRecordsBatch := make([]*common.AccountRecords, 0)
+	for _, tokenAccount := range []*common.Account{backfilledAccount, legacyAccount} {
+		generalRecord, err := env.data.GetAccountInfoByTokenAddress(env.ctx, tokenAccount.PublicKey().ToBase58())
+		require.NoError(t, err)
+		timelockRecord, err := env.data.GetTimelockByVault(env.ctx, tokenAccount.PublicKey().ToBase58())
+		require.NoError(t, err)
+		accountRecordsBatch = append(accountRecordsBatch, &common.AccountRecords{
+			General:  generalRecord,
+			Timelock: timelockRecord,
+		})
+	}
+
+	res, err := BatchCalculateWithUsdCostBasisFromCache(env.ctx, env.data, accountRecordsBatch...)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+
+	cached := res[backfilledAccount.PublicKey().ToBase58()]
+	require.NotNil(t, cached)
+	assert.EqualValues(t, 42, cached.Quarks)
+	assert.EqualValues(t, 4_200_000, cached.UsdCostBasis)
+
+	// An account without a backfilled record falls back to the legacy
+	// aggregates for both values
+	cached = res[legacyAccount.PublicKey().ToBase58()]
+	require.NotNil(t, cached)
+	assert.EqualValues(t, 33, cached.Quarks)
+	assert.EqualValues(t, 0, cached.UsdCostBasis) // deposits aren't primary-owner intents in this fixture
+}
+
 func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 	enableLedgerReadsForTest(t)
@@ -471,6 +538,7 @@ func TestDefaultCalculationMethods_UnlockedBalanceRecord(t *testing.T) {
 
 func TestDefaultCalculationMethods_BalanceRecordReadsDisabled(t *testing.T) {
 	env := setupBalanceTestEnv(t)
+	disableLedgerReadsForTest(t)
 
 	vmConfig := testutil.NewRandomVmConfig(t, true)
 	owner := testutil.NewRandomAccount(t)
@@ -598,6 +666,14 @@ func TestDefaultCalculation_ExternalAccount(t *testing.T) {
 func enableLedgerReadsForTest(t *testing.T) {
 	previous := enableLedgerReads
 	enableLedgerReads = wrapper.NewBoolConfig(memory.NewConfig(true), defaultEnableLedgerReads)
+	t.Cleanup(func() {
+		enableLedgerReads = previous
+	})
+}
+
+func disableLedgerReadsForTest(t *testing.T) {
+	previous := enableLedgerReads
+	enableLedgerReads = wrapper.NewBoolConfig(memory.NewConfig(false), defaultEnableLedgerReads)
 	t.Cleanup(func() {
 		enableLedgerReads = previous
 	})

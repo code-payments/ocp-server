@@ -127,13 +127,10 @@ type DatabaseData interface {
 	GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error)
 	GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error)
 	GetAllLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error)
+	CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
 	ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error
 	MarkBalanceAsUnlocked(ctx context.Context, tokenAccount string) error
 	BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error
-	GetCachedBalanceVersion(ctx context.Context, account string) (uint64, error)
-	AdvanceCachedBalanceVersion(ctx context.Context, account string, currentVersion uint64) error
-	CheckNotClosedForBalanceUpdate(ctx context.Context, account string) error
-	MarkAsClosedForBalanceUpdate(ctx context.Context, account string) error
 	SaveExternalBalanceCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error
 	GetExternalBalanceCheckpoint(ctx context.Context, account string) (*balance.ExternalCheckpointRecord, error)
 
@@ -490,23 +487,14 @@ func (dp *DatabaseProvider) GetAllLockedBalancesByMint(ctx context.Context, mint
 func (dp *DatabaseProvider) MarkBalanceAsUnlocked(ctx context.Context, tokenAccount string) error {
 	return dp.balance.MarkAsUnlocked(ctx, tokenAccount)
 }
+func (dp *DatabaseProvider) CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error) {
+	return dp.balance.CountLockedByMint(ctx, mint, minQuarks)
+}
 func (dp *DatabaseProvider) ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error {
 	return dp.balance.ApplyDeltas(ctx, deltas...)
 }
 func (dp *DatabaseProvider) BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
 	return dp.balance.Backfill(ctx, tokenAccount, fn)
-}
-func (dp *DatabaseProvider) GetCachedBalanceVersion(ctx context.Context, account string) (uint64, error) {
-	return dp.balance.GetCachedVersion(ctx, account)
-}
-func (dp *DatabaseProvider) AdvanceCachedBalanceVersion(ctx context.Context, account string, currentVersion uint64) error {
-	return dp.balance.AdvanceCachedVersion(ctx, account, currentVersion)
-}
-func (dp *DatabaseProvider) CheckNotClosedForBalanceUpdate(ctx context.Context, account string) error {
-	return dp.balance.CheckNotClosed(ctx, account)
-}
-func (dp *DatabaseProvider) MarkAsClosedForBalanceUpdate(ctx context.Context, account string) error {
-	return dp.balance.MarkAsClosed(ctx, account)
 }
 func (dp *DatabaseProvider) SaveExternalBalanceCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error {
 	return dp.balance.SaveExternalCheckpoint(ctx, record)

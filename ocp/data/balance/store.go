@@ -25,8 +25,6 @@ var (
 	// reviewed rather than recorded.
 	ErrNegativeBalance = errors.New("backfilled balance is negative")
 
-	ErrStaleCachedBalanceVersion = errors.New("cached balance version is stale")
-
 	ErrAccountClosed = errors.New("account open state is stale")
 
 	// ErrAccountUnlocked is returned when a delta other than a credit targets
@@ -93,6 +91,13 @@ type Store interface {
 	// ErrRecordNotFound is returned if no records exist.
 	GetAllLockedByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*Record, error)
 
+	// CountLockedByMint counts locked, backfilled records for a mint with at
+	// least minQuarks. Records that are not backfilled are excluded, since
+	// their balances are partial sums that can't be compared against a
+	// threshold. Unlocked records are excluded, since their balances are
+	// stale.
+	CountLockedByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
+
 	// ApplyDeltas atomically applies a set of deltas. Either every delta is
 	// applied or none are. Deltas are applied in SortDeltas order.
 	//
@@ -106,11 +111,12 @@ type Store interface {
 	//
 	// ErrInsufficientBalance is returned when a debit exceeds the balance.
 	// ErrBalanceChanged is returned when a drain or close doesn't match the
-	// balance. ErrAccountClosed is returned when a credit, drain or close
-	// targets a closed account. ErrAccountUnlocked is returned when a delta
-	// other than a credit targets an unlocked account, whose record is no
-	// longer maintained. DeltaAdjustUsdCostBasis carries no predicate and
-	// only ever fails when the record is missing.
+	// balance. ErrAccountClosed is returned when a credit, debit, drain or
+	// close targets a closed account, which is frozen. ErrAccountUnlocked is
+	// returned when a delta other than a credit targets an unlocked account,
+	// whose record is no longer maintained. DeltaAdjustUsdCostBasis carries
+	// no predicate: it moves no quarks, so it applies to closed and unlocked
+	// accounts alike and only fails when the record is missing.
 	ApplyDeltas(ctx context.Context, deltas ...*Delta) error
 
 	// MarkAsUnlocked marks an account's timelock vault as unlocked, which is
@@ -142,36 +148,4 @@ type Store interface {
 	//
 	// ErrCheckpointNotFound is returend if no DB record exists.
 	GetExternalCheckpoint(ctx context.Context, account string) (*ExternalCheckpointRecord, error)
-
-	// GetCachedVersion gets the current cached balance version, which can be used
-	// for optimistic locking cached balances for operations with outgoing transfers.
-	//
-	// Note: Use ApplyDeltas, whose predicates replace the version check.
-	// Retained for accounts that are not yet backfilled.
-	GetCachedVersion(ctx context.Context, account string) (uint64, error)
-
-	// AdvanceCachedVersion advances an account's cached balance version.
-	//
-	// ErrStaleCachedBalanceVersion is returned if the currentVersion is out of date.
-	//
-	// Note: Use ApplyDeltas, whose predicates replace the version check.
-	// Retained for accounts that are not yet backfilled.
-	AdvanceCachedVersion(ctx context.Context, account string, currentVersion uint64) error
-
-	// CheckNotClosed checks whether an account is closed under a lock to guarantee
-	// payments to a closeable destination with cached balances are made to an open
-	// account.
-	//
-	// ErrAccountClosed is returned if the account has been closed.
-	//
-	// Note: Use ApplyDeltas with DeltaCredit. Retained for accounts that
-	// are not yet backfilled.
-	CheckNotClosed(ctx context.Context, account string) error
-
-	// MarkAsClosed marks an account as being closed and unable to receive payments
-	// as a destination.
-	//
-	// Note: Use ApplyDeltas with DeltaDrain or DeltaClose. Retained for
-	// accounts that are not yet backfilled.
-	MarkAsClosed(ctx context.Context, account string) error
 }

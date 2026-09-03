@@ -180,6 +180,17 @@ func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuar
 	return res, nil
 }
 
+func dbCountLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int64) (uint64, error) {
+	var res uint64
+	query := `SELECT COUNT(*) FROM ` + tableName + `
+		WHERE mint_account = $1 AND quarks >= $2 AND is_locked AND is_backfilled`
+	err := db.GetContext(ctx, &res, query, mint, minQuarks)
+	if err != nil {
+		return 0, err
+	}
+	return res, nil
+}
+
 func dbMarkAsUnlocked(ctx context.Context, db *sqlx.DB, tokenAccount string) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		query := `UPDATE ` + tableName + `
@@ -217,7 +228,7 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 			case balance.DeltaDebit:
 				query = `UPDATE ` + tableName + `
 					SET quarks = quarks - $2, usd_cost_basis = usd_cost_basis - $3, updated_at = $4
-					WHERE token_account = $1 AND (NOT is_backfilled OR (is_locked AND quarks >= $2))`
+					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND is_locked AND quarks >= $2))`
 				args = []any{delta.TokenAccount, int64(delta.Quarks), delta.UsdCostBasis, time.Now().UTC()}
 			case balance.DeltaDrain:
 				query = `UPDATE ` + tableName + `
@@ -281,6 +292,9 @@ func classifyFailedDelta(delta *balance.Delta, current *balance.Record) error {
 	}
 	switch delta.Kind {
 	case balance.DeltaDebit:
+		if !current.IsOpen {
+			return balance.ErrAccountClosed
+		}
 		return balance.ErrInsufficientBalance
 	case balance.DeltaDrain, balance.DeltaClose:
 		if !current.IsOpen {

@@ -12,7 +12,6 @@ import (
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/grpc/client"
-	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
@@ -77,12 +76,6 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 		}, nil
 	}
 
-	globalBalanceLock, err := balance.GetOptimisticVersionLock(ctx, s.data, giftCardVault)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting balance lock")
-		return nil, status.Error(codes.Internal, "")
-	}
-
 	localAccountLock := s.getLocalAccountLock(giftCardVault)
 	localAccountLock.Lock()
 	defer localAccountLock.Unlock()
@@ -131,7 +124,7 @@ func (s *transactionServer) VoidGiftCard(ctx context.Context, req *transactionpb
 		}, nil
 	}
 
-	err = account_worker.InitiateProcessToAutoReturnGiftCard(ctx, s.data, giftCardVault, true, globalBalanceLock)
+	err = account_worker.InitiateProcessToAutoReturnGiftCard(ctx, s.data, giftCardVault, true)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure scheduling auto-return action")
 		return nil, status.Error(codes.Internal, "")

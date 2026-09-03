@@ -15,8 +15,8 @@ const (
 	// to the ledger at all. When disabled, it is a no-op.
 	EnableLedgerWritesConfigEnvName = "BALANCE_ENABLE_LEDGER_WRITES"
 
-	defaultEnableLedgerReads  = false
-	defaultEnableLedgerWrites = false
+	defaultEnableLedgerReads  = true
+	defaultEnableLedgerWrites = true
 )
 
 var (

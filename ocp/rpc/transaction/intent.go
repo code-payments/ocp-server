@@ -292,24 +292,24 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		return nil
 	}
 
-	// Lock any acccounts with fund movement that is not resistent to race conditions
-	//  1. Global DB layer lock to guarantee balance consistency in a mult-server environment
-	//  2. Local in memory lock to avoid over consumption of local resources (eg.
-	//     nonces) when we're likely to encounter a race resulting in DB txn rollback
-	//     (eg. mass attempt to claim gift card).
-	globalBalanceLocks, err := intentHandler.GetBalanceLocks(ctx, intentRecord, submitActionsReq.Metadata)
+	// Locally lock any acccounts with fund movement to avoid over consumption
+	// of local resources (eg. nonces) when we're likely to encounter a race
+	// resulting in DB txn rollback (eg. mass attempt to claim gift card).
+	// Cross-server race resistance comes from the balance ledger's predicates
+	// in the intent DB transaction.
+	accountsToLock, err := intentHandler.GetAccountsToLock(ctx, intentRecord, submitActionsReq.Metadata)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting accounts with balances to lock")
+		log.With(zap.Error(err)).Warn("failure getting accounts to lock")
 		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
 	}
 	localAccountLocks := make([]*sync.Mutex, 0)
 	locallyLockedAccounts := make(map[string]any)
-	for _, globalBalanceLock := range globalBalanceLocks {
-		_, ok := locallyLockedAccounts[globalBalanceLock.Account.PublicKey().ToBase58()]
+	for _, accountToLock := range accountsToLock {
+		_, ok := locallyLockedAccounts[accountToLock.PublicKey().ToBase58()]
 		if !ok {
-			localAccountLocks = append(localAccountLocks, s.getLocalAccountLock(globalBalanceLock.Account))
+			localAccountLocks = append(localAccountLocks, s.getLocalAccountLock(accountToLock))
 		}
-		locallyLockedAccounts[globalBalanceLock.Account.PublicKey().ToBase58()] = true
+		locallyLockedAccounts[accountToLock.PublicKey().ToBase58()] = true
 	}
 	for _, localAccountLock := range localAccountLocks {
 		localAccountLock.Lock()
@@ -715,14 +715,6 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failure saving fulfillment records")
 			return err
-		}
-
-		for _, globalBalanceLock := range globalBalanceLocks {
-			err = globalBalanceLock.CommitFn(ctx, s.data)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failure commiting balance update")
-				return err
-			}
 		}
 
 		// Reflect the intent in the balance ledger. Applied last, so the

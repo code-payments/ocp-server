@@ -86,6 +86,11 @@ func (s *store) GetAllLockedByMint(ctx context.Context, mint string, minQuarks i
 	return fromModels(models), nil
 }
 
+// CountLockedByMint implements balance.Store.CountLockedByMint
+func (s *store) CountLockedByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error) {
+	return dbCountLockedByMint(ctx, s.db, mint, minQuarks)
+}
+
 // MarkAsUnlocked implements balance.Store.MarkAsUnlocked
 func (s *store) MarkAsUnlocked(ctx context.Context, tokenAccount string) error {
 	return dbMarkAsUnlocked(ctx, s.db, tokenAccount)

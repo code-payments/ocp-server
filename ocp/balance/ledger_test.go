@@ -20,6 +20,7 @@ import (
 func TestApplyDeltasInTx_WritesDisabled(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
+	disableLedgerWritesForTest(t)
 
 	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
 
@@ -153,9 +154,12 @@ func TestCreateRecordInTx(t *testing.T) {
 
 	// Disabled writes are a no-op
 	primary := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
-	require.NoError(t, CreateRecordInTx(ctx, data, primary))
-	_, err := data.GetBalance(ctx, primary.TokenAccount)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
+	func() {
+		disableLedgerWritesForTest(t)
+		require.NoError(t, CreateRecordInTx(ctx, data, primary))
+		_, err := data.GetBalance(ctx, primary.TokenAccount)
+		assert.Equal(t, balance.ErrRecordNotFound, err)
+	}()
 
 	enableLedgerWritesForTest(t)
 
@@ -208,6 +212,14 @@ func newLedgerTestAccountInfo(t *testing.T, ctx context.Context, data ocp_data.P
 	}
 	require.NoError(t, data.CreateAccountInfo(ctx, record))
 	return record
+}
+
+func disableLedgerWritesForTest(t *testing.T) {
+	previous := enableLedgerWrites
+	enableLedgerWrites = wrapper.NewBoolConfig(memory.NewConfig(false), defaultEnableLedgerWrites)
+	t.Cleanup(func() {
+		enableLedgerWrites = previous
+	})
 }
 
 func enableLedgerWritesForTest(t *testing.T) {
