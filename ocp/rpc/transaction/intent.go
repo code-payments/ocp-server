@@ -720,17 +720,15 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		// Reflect the intent in the balance ledger. Applied last, so the
 		// ledger row locks are held for as little of the transaction as
 		// possible.
-		if balance.LedgerWritesEnabled(ctx) {
-			balanceDeltas, err := balance.DeltasForSubmittedIntent(intentRecord, actionRecords, s.conf.createOnSendWithdrawalFeeQuarks.Get(ctx))
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failure building balance deltas")
-				return err
-			}
-			err = balance.ApplyDeltasInTx(ctx, s.data, balanceDeltas...)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failure applying balance deltas")
-				return err
-			}
+		balanceDeltas, err := balance.DeltasForSubmittedIntent(intentRecord, actionRecords, s.conf.createOnSendWithdrawalFeeQuarks.Get(ctx))
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure building balance deltas")
+			return err
+		}
+		err = balance.ApplyDeltasInTx(ctx, s.data, balanceDeltas...)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure applying balance deltas")
+			return err
 		}
 
 		// Schedule app-defined tasks atomically with the intent, so their

@@ -9,62 +9,42 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
-	"github.com/code-payments/ocp-server/config/memory"
-	"github.com/code-payments/ocp-server/config/wrapper"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/testutil"
 )
 
-func TestApplyDeltasInTx_WritesDisabled(t *testing.T) {
+func TestApplyDeltasInTx_TrackedAccounts(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	disableLedgerWritesForTest(t)
 
-	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
-
-	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{
-		TokenAccount: source,
-		Kind:         balance.DeltaDebit,
-		Quarks:       100,
-	}))
-
-	_, err := data.GetBalance(ctx, source)
-	assert.Equal(t, balance.ErrRecordNotFound, err)
-}
-
-func TestApplyDeltasInTx_SeedsTimelockAccounts(t *testing.T) {
-	ctx := context.Background()
-	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
-
-	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
-	destination := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_REMOTE_SEND_GIFT_CARD)
+	source := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
+	destination := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_REMOTE_SEND_GIFT_CARD)
 	swap := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_SWAP)
 	external := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 
+	require.NoError(t, CreateRecordInTx(ctx, data, source))
+	require.NoError(t, CreateRecordInTx(ctx, data, destination))
+	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: source.TokenAccount, Kind: balance.DeltaCredit, Quarks: 100, UsdCostBasis: 1_000_000}))
+
 	require.NoError(t, ApplyDeltasInTx(ctx, data,
-		&balance.Delta{TokenAccount: source, Kind: balance.DeltaDebit, Quarks: 100, UsdCostBasis: 1_000_000},
-		&balance.Delta{TokenAccount: destination, Kind: balance.DeltaCredit, Quarks: 60, UsdCostBasis: 600_000},
+		&balance.Delta{TokenAccount: source.TokenAccount, Kind: balance.DeltaDebit, Quarks: 100, UsdCostBasis: 1_000_000},
+		&balance.Delta{TokenAccount: destination.TokenAccount, Kind: balance.DeltaCredit, Quarks: 60, UsdCostBasis: 600_000},
 		&balance.Delta{TokenAccount: swap, Kind: balance.DeltaCredit, Quarks: 20, UsdCostBasis: 200_000},
 		&balance.Delta{TokenAccount: external, Kind: balance.DeltaCredit, Quarks: 20, UsdCostBasis: 200_000},
 	))
 
-	// Existing accounts get a non-backfilled row that accumulates freely,
-	// including a negative balance for a source that predates the ledger
-	record, err := data.GetBalance(ctx, source)
+	record, err := data.GetBalance(ctx, source.TokenAccount)
 	require.NoError(t, err)
-	assert.EqualValues(t, -100, record.Quarks)
-	assert.EqualValues(t, -1_000_000, record.UsdCostBasis)
-	assert.False(t, record.IsBackfilled)
+	assert.EqualValues(t, 0, record.Quarks)
+	assert.EqualValues(t, 0, record.UsdCostBasis)
 	assert.True(t, record.IsOpen)
 
-	record, err = data.GetBalance(ctx, destination)
+	record, err = data.GetBalance(ctx, destination.TokenAccount)
 	require.NoError(t, err)
 	assert.EqualValues(t, 60, record.Quarks)
 	assert.EqualValues(t, 600_000, record.UsdCostBasis)
-	assert.False(t, record.IsBackfilled)
 
 	// Credits to accounts OCP doesn't hold a timelock for are dropped, and
 	// those accounts never get a row
@@ -73,24 +53,29 @@ func TestApplyDeltasInTx_SeedsTimelockAccounts(t *testing.T) {
 	_, err = data.GetBalance(ctx, external)
 	assert.Equal(t, balance.ErrRecordNotFound, err)
 
-	// Once backfilled, predicates are enforced
-	require.NoError(t, data.BackfillBalance(ctx, source, func(context.Context) (*balance.BackfillResult, error) {
-		return &balance.BackfillResult{Quarks: 400, UsdCostBasis: 4_000_000, IsOpen: true, IsLocked: true}, nil
-	}))
-	err = ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: source, Kind: balance.DeltaDebit, Quarks: 401})
+	// Predicates are enforced against every record
+	err = ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: destination.TokenAccount, Kind: balance.DeltaDebit, Quarks: 61})
 	assert.Equal(t, balance.ErrInsufficientBalance, err)
-	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: source, Kind: balance.DeltaDebit, Quarks: 400, UsdCostBasis: 4_000_000}))
+}
 
-	record, err = data.GetBalance(ctx, source)
-	require.NoError(t, err)
-	assert.EqualValues(t, 0, record.Quarks)
-	assert.True(t, record.IsBackfilled)
+func TestApplyDeltasInTx_MissingRecord(t *testing.T) {
+	ctx := context.Background()
+	data := ocp_data.NewTestDataProvider()
+
+	// A timelock account with no record is a broken invariant in either
+	// direction, not an account the ledger doesn't track
+	tokenAccount := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
+	for _, delta := range []*balance.Delta{
+		{TokenAccount: tokenAccount, Kind: balance.DeltaCredit, Quarks: 1},
+		{TokenAccount: tokenAccount, Kind: balance.DeltaDebit, Quarks: 1},
+	} {
+		assert.ErrorIs(t, ApplyDeltasInTx(ctx, data, delta), balance.ErrRecordNotFound)
+	}
 }
 
 func TestApplyDeltasInTx_UnknownSource(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	external := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 	swap := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_SWAP)
@@ -103,7 +88,6 @@ func TestApplyDeltasInTx_UnknownSource(t *testing.T) {
 func TestApplyDeltasInTx_OnlyUntrackedCredits(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	external := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 	require.NoError(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: external, Kind: balance.DeltaCredit, Quarks: 1}))
@@ -114,7 +98,6 @@ func TestApplyDeltasInTx_OnlyUntrackedCredits(t *testing.T) {
 func TestApplyDeltasInTx_UnlockedAccount(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	unlocked := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
 	require.NoError(t, CreateRecordInTx(ctx, data, unlocked))
@@ -139,7 +122,6 @@ func TestApplyDeltasInTx_UnlockedAccount(t *testing.T) {
 func TestApplyDeltasInTx_InvalidDelta(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
-	enableLedgerWritesForTest(t)
 
 	source := newLedgerTestAccount(t, ctx, data, commonpb.AccountType_PRIMARY)
 	assert.Error(t, ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: source, Kind: balance.DeltaDebit}))
@@ -152,19 +134,9 @@ func TestCreateRecordInTx(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()
 
-	// Disabled writes are a no-op
 	primary := newLedgerTestAccountInfo(t, ctx, data, commonpb.AccountType_PRIMARY)
-	func() {
-		disableLedgerWritesForTest(t)
-		require.NoError(t, CreateRecordInTx(ctx, data, primary))
-		_, err := data.GetBalance(ctx, primary.TokenAccount)
-		assert.Equal(t, balance.ErrRecordNotFound, err)
-	}()
 
-	enableLedgerWritesForTest(t)
-
-	// A new timelock account starts backfilled at zero, so predicates are
-	// enforced immediately
+	// A new timelock account starts at zero, with predicates enforced
 	require.NoError(t, CreateRecordInTx(ctx, data, primary))
 	record, err := data.GetBalance(ctx, primary.TokenAccount)
 	require.NoError(t, err)
@@ -174,7 +146,6 @@ func TestCreateRecordInTx(t *testing.T) {
 	assert.EqualValues(t, 0, record.Quarks)
 	assert.EqualValues(t, 0, record.UsdCostBasis)
 	assert.True(t, record.IsOpen)
-	assert.True(t, record.IsBackfilled)
 
 	err = ApplyDeltasInTx(ctx, data, &balance.Delta{TokenAccount: primary.TokenAccount, Kind: balance.DeltaDebit, Quarks: 1})
 	assert.Equal(t, balance.ErrInsufficientBalance, err)
@@ -212,20 +183,4 @@ func newLedgerTestAccountInfo(t *testing.T, ctx context.Context, data ocp_data.P
 	}
 	require.NoError(t, data.CreateAccountInfo(ctx, record))
 	return record
-}
-
-func disableLedgerWritesForTest(t *testing.T) {
-	previous := enableLedgerWrites
-	enableLedgerWrites = wrapper.NewBoolConfig(memory.NewConfig(false), defaultEnableLedgerWrites)
-	t.Cleanup(func() {
-		enableLedgerWrites = previous
-	})
-}
-
-func enableLedgerWritesForTest(t *testing.T) {
-	previous := enableLedgerWrites
-	enableLedgerWrites = wrapper.NewBoolConfig(memory.NewConfig(true), defaultEnableLedgerWrites)
-	t.Cleanup(func() {
-		enableLedgerWrites = previous
-	})
 }

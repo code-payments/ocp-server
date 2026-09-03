@@ -340,13 +340,17 @@ func LocalSimulation(ctx context.Context, data ocp_data.Provider, actions []*tra
 			tokenAccountsToFetchBalance = append(tokenAccountsToFetchBalance, sim.TokenAccount)
 		}
 	}
-	prefetchedBalances := make(map[string]uint64)
+	prefetchedBalances := make(map[string]*balance.Balance)
 	if len(tokenAccountsToFetchBalance) > 0 {
-		prefetchedBalances, err = balance.BatchCalculateFromCacheWithTokenAccounts(ctx, data, tokenAccountsToFetchBalance...)
-		if err == balance.ErrNotManagedByCode {
-			return nil, ErrSourceNotManagedByCode
-		} else if err != nil {
+		prefetchedBalances, err = balance.BatchCalculateFromCache(ctx, data, tokenAccountsToFetchBalance...)
+		if err != nil {
 			return nil, err
+		}
+
+		// The ledger omits accounts it doesn't manage, and every account we
+		// simulate against must be managed
+		if len(prefetchedBalances) != len(tokenAccountsToFetchBalance) {
+			return nil, ErrSourceNotManagedByCode
 		}
 	}
 
@@ -356,16 +360,16 @@ func LocalSimulation(ctx context.Context, data ocp_data.Provider, actions []*tra
 			continue
 		}
 
-		var ok bool
-		var balance uint64
+		var quarks uint64
 		if sim.RequiresBalanceFetch() {
-			balance, ok = prefetchedBalances[sim.TokenAccount.PublicKey().ToBase58()]
+			cached, ok := prefetchedBalances[sim.TokenAccount.PublicKey().ToBase58()]
 			if !ok {
 				return nil, errors.New("prefetched balance is unavailable")
 			}
+			quarks = cached.Quarks
 		}
 
-		err := sim.EnforceBalances(ctx, data, balance)
+		err := sim.EnforceBalances(ctx, data, quarks)
 		if err != nil {
 			return nil, err
 		}

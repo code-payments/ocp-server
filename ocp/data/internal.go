@@ -126,11 +126,10 @@ type DatabaseData interface {
 	GetBalanceBatch(ctx context.Context, tokenAccounts ...string) (map[string]*balance.Record, error)
 	GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error)
 	GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error)
-	GetAllLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error)
-	CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error)
+	GetAllLockedBalancesByMint(ctx context.Context, mint string, minQuarks uint64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error)
+	CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks uint64) (uint64, error)
 	ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error
 	MarkBalanceAsUnlocked(ctx context.Context, tokenAccount string) error
-	BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error
 	SaveExternalBalanceCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error
 	GetExternalBalanceCheckpoint(ctx context.Context, account string) (*balance.ExternalCheckpointRecord, error)
 
@@ -481,20 +480,17 @@ func (dp *DatabaseProvider) GetAllBalancesByOwner(ctx context.Context, owner str
 func (dp *DatabaseProvider) GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error) {
 	return dp.balance.GetAllByOwnerAndMint(ctx, owner, mint)
 }
-func (dp *DatabaseProvider) GetAllLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
+func (dp *DatabaseProvider) GetAllLockedBalancesByMint(ctx context.Context, mint string, minQuarks uint64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error) {
 	return dp.balance.GetAllLockedByMint(ctx, mint, minQuarks, cursor, limit, direction)
 }
 func (dp *DatabaseProvider) MarkBalanceAsUnlocked(ctx context.Context, tokenAccount string) error {
 	return dp.balance.MarkAsUnlocked(ctx, tokenAccount)
 }
-func (dp *DatabaseProvider) CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks int64) (uint64, error) {
+func (dp *DatabaseProvider) CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks uint64) (uint64, error) {
 	return dp.balance.CountLockedByMint(ctx, mint, minQuarks)
 }
 func (dp *DatabaseProvider) ApplyBalanceDeltas(ctx context.Context, deltas ...*balance.Delta) error {
 	return dp.balance.ApplyDeltas(ctx, deltas...)
-}
-func (dp *DatabaseProvider) BackfillBalance(ctx context.Context, tokenAccount string, fn balance.BackfillFunc) error {
-	return dp.balance.Backfill(ctx, tokenAccount, fn)
 }
 func (dp *DatabaseProvider) SaveExternalBalanceCheckpoint(ctx context.Context, record *balance.ExternalCheckpointRecord) error {
 	return dp.balance.SaveExternalCheckpoint(ctx, record)

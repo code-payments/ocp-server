@@ -315,21 +315,29 @@ func (s *server) GetTokenAccountInfos(ctx context.Context, req *accountpb.GetTok
 func (s *server) fetchBalances(ctx context.Context, allAccountRecords []*common.AccountRecords) (map[string]*balanceMetadata, error) {
 	balanceMetadataByTokenAccount := make(map[string]*balanceMetadata)
 
-	var mangedByCodeRecords []*common.AccountRecords
+	// Every Timelock account starts out without a balance, since the caching
+	// strategy isn't possible for the ones that have left the L2 system. The
+	// ledger omits those, so they keep this value.
+	var tokenAccounts []*common.Account
 	for _, accountRecords := range allAccountRecords {
-		if accountRecords.IsManagedByCode(ctx) {
-			mangedByCodeRecords = append(mangedByCodeRecords, accountRecords)
-		} else {
-			// Don't calculate a balance for now, since the caching strategy
-			// is not possible.
-			balanceMetadataByTokenAccount[accountRecords.General.TokenAccount] = &balanceMetadata{
-				quarks:       0,
-				usdCostBasis: 0,
-				source:       accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN,
-			}
+		if !accountRecords.IsTimelock() {
+			continue
 		}
+
+		balanceMetadataByTokenAccount[accountRecords.General.TokenAccount] = &balanceMetadata{
+			quarks:       0,
+			usdCostBasis: 0,
+			source:       accountpb.TokenAccountInfo_BALANCE_SOURCE_UNKNOWN,
+		}
+
+		tokenAccount, err := common.NewAccountFromPublicKeyString(accountRecords.General.TokenAccount)
+		if err != nil {
+			return nil, err
+		}
+		tokenAccounts = append(tokenAccounts, tokenAccount)
 	}
-	balancesByTokenAccount, err := balance.BatchCalculateWithUsdCostBasisFromCache(ctx, s.data, mangedByCodeRecords...)
+
+	balancesByTokenAccount, err := balance.BatchCalculateFromCache(ctx, s.data, tokenAccounts...)
 	if err != nil {
 		return nil, err
 	}

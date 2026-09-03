@@ -3,8 +3,6 @@ package account
 import (
 	"context"
 	"crypto/ed25519"
-	"fmt"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -19,20 +17,20 @@ import (
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/currency"
+	balance_util "github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/action"
+	"github.com/code-payments/ocp-server/ocp/data/balance"
 	exchange_memory "github.com/code-payments/ocp-server/ocp/data/currency/exchange/memory"
 	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
 	holder_memory "github.com/code-payments/ocp-server/ocp/data/currency/holder/memory"
 	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	reserve_memory "github.com/code-payments/ocp-server/ocp/data/currency/reserve/memory"
-	"github.com/code-payments/ocp-server/ocp/data/deposit"
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
-	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
@@ -519,9 +517,7 @@ func TestGetTokenAccountInfos_RemoteSendGiftCard_HappyPath(t *testing.T) {
 			require.NoError(t, env.data.PutAllActions(env.ctx, claimActionRecord))
 		}
 
-		accountRecords.Timelock.VaultState = tc.timelockState
-		accountRecords.Timelock.Block += 1
-		require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+		setTimelockState(t, env, accountRecords, tc.timelockState)
 
 		for _, requestingOwnerAccount := range []*common.Account{
 			nil,
@@ -631,10 +627,9 @@ func TestGetTokenAccountInfos_BlockchainState(t *testing.T) {
 		}
 
 		accountRecords := getDefaultTestAccountRecords(t, ownerAccount, ownerAccount, coreVmConfig, 0, commonpb.AccountType_PRIMARY)
-		accountRecords.Timelock.VaultState = tc.timelockState
-		accountRecords.Timelock.Block += 1
 		require.NoError(t, env.data.CreateAccountInfo(env.ctx, accountRecords.General))
-		require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+		require.NoError(t, balance_util.CreateRecordInTx(env.ctx, env.data, accountRecords.General))
+		setTimelockState(t, env, accountRecords, tc.timelockState)
 
 		resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 		require.NoError(t, err)
@@ -702,7 +697,11 @@ func TestGetTokenAccountInfos_ManagementState(t *testing.T) {
 		accountRecords.Timelock.VaultState = tc.timelockState
 		accountRecords.Timelock.Block = tc.block
 		require.NoError(t, env.data.CreateAccountInfo(env.ctx, accountRecords.General))
+		require.NoError(t, balance_util.CreateRecordInTx(env.ctx, env.data, accountRecords.General))
 		require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
+		if !accountRecords.Timelock.IsLocked() {
+			require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, accountRecords.General.TokenAccount))
+		}
 
 		resp, err := env.client.GetTokenAccountInfos(env.ctx, req)
 		require.NoError(t, err)
@@ -804,6 +803,7 @@ func setupAccountRecords(t *testing.T, env testEnv, ownerAccount, authorityAccou
 	accountRecords := getDefaultTestAccountRecords(t, ownerAccount, authorityAccount, vmConfig, index, accountType)
 
 	require.NoError(t, env.data.CreateAccountInfo(env.ctx, accountRecords.General))
+	require.NoError(t, balance_util.CreateRecordInTx(env.ctx, env.data, accountRecords.General))
 
 	if accountRecords.IsTimelock() {
 		accountRecords.Timelock.VaultState = timelock_token_v1.StateLocked
@@ -847,14 +847,22 @@ func getDefaultTestAccountRecords(t *testing.T, ownerAccount, authorityAccount *
 	}
 }
 
-func setupCachedBalance(t *testing.T, env testEnv, accountRecords *common.AccountRecords, balance uint64) {
-	depositRecord := &deposit.Record{
-		Signature:   fmt.Sprintf("txn%d", rand.Uint64()),
-		Destination: accountRecords.General.TokenAccount,
-		Amount:      balance,
+// setTimelockState transitions a vault the way the geyser worker does, moving
+// the ledger record's lock state with it so the two can't disagree.
+func setTimelockState(t *testing.T, env testEnv, accountRecords *common.AccountRecords, state timelock_token_v1.TimelockState) {
+	accountRecords.Timelock.VaultState = state
+	accountRecords.Timelock.Block += 1
+	require.NoError(t, env.data.SaveTimelock(env.ctx, accountRecords.Timelock))
 
-		ConfirmationState: transaction.ConfirmationFinalized,
-		Slot:              12345,
+	if !accountRecords.Timelock.IsLocked() {
+		require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, accountRecords.General.TokenAccount))
 	}
-	require.NoError(t, env.data.SaveExternalDeposit(env.ctx, depositRecord))
+}
+
+func setupCachedBalance(t *testing.T, env testEnv, accountRecords *common.AccountRecords, quarks uint64) {
+	require.NoError(t, balance_util.ApplyDeltasInTx(env.ctx, env.data, &balance.Delta{
+		TokenAccount: accountRecords.General.TokenAccount,
+		Kind:         balance.DeltaCredit,
+		Quarks:       quarks,
+	}))
 }

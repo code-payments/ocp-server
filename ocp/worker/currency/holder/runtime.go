@@ -4,16 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
-
 	"github.com/code-payments/ocp-server/metrics"
-	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	currency_holder "github.com/code-payments/ocp-server/ocp/data/currency/holder"
 	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
@@ -115,64 +110,5 @@ func (p *holderRuntime) countHoldersForMint(ctx context.Context, mint string, cu
 		return 0, nil
 	}
 
-	if balance.LedgerReadsEnabled(ctx) {
-		return p.data.CountLockedBalancesByMint(ctx, mint, int64(minHoldings))
-	}
-
-	accountRecords, err := p.data.GetAccountInfosByMintAndType(ctx, mint, commonpb.AccountType_PRIMARY)
-	if err == account.ErrAccountInfoNotFound {
-		return 0, nil
-	} else if err != nil {
-		return 0, errors.Wrap(err, "error getting primary accounts")
-	}
-
-	if len(accountRecords) == 0 {
-		return 0, nil
-	}
-
-	vaultAddresses := make([]string, len(accountRecords))
-	for i, record := range accountRecords {
-		vaultAddresses[i] = record.TokenAccount
-	}
-
-	timelockRecordsByVault, err := p.data.GetTimelockByVaultBatch(ctx, vaultAddresses...)
-	if err != nil {
-		return 0, errors.Wrap(err, "error getting timelock records")
-	}
-
-	tokenAccounts := make([]*common.Account, 0)
-	for _, record := range accountRecords {
-		timelockRecord, ok := timelockRecordsByVault[record.TokenAccount]
-		if !ok {
-			return 0, errors.Errorf("timelock record unexpectedly missing for vault %s", record.TokenAccount)
-		}
-
-		if !timelockRecord.IsLocked() {
-			continue
-		}
-
-		tokenAccount, err := common.NewAccountFromPublicKeyString(record.TokenAccount)
-		if err != nil {
-			return 0, errors.Wrap(err, "invalid token account public key")
-		}
-		tokenAccounts = append(tokenAccounts, tokenAccount)
-	}
-
-	if len(tokenAccounts) == 0 {
-		return 0, nil
-	}
-
-	balances, err := balance.BatchCalculateFromCacheWithTokenAccounts(ctx, p.data, tokenAccounts...)
-	if err != nil {
-		return 0, errors.Wrap(err, "error calculating balances batch")
-	}
-
-	var count uint64
-	for _, bal := range balances {
-		if bal >= minHoldings {
-			count++
-		}
-	}
-
-	return count, nil
+	return p.data.CountLockedBalancesByMint(ctx, mint, minHoldings)
 }

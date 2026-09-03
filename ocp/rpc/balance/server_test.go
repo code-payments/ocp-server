@@ -2,8 +2,6 @@ package balance
 
 import (
 	"context"
-	"fmt"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -15,17 +13,17 @@ import (
 	balancepb "github.com/code-payments/ocp-protobuf-api/generated/go/balance/v1"
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
+	balance_util "github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
+	"github.com/code-payments/ocp-server/ocp/data/balance"
 	exchange_memory "github.com/code-payments/ocp-server/ocp/data/currency/exchange/memory"
 	"github.com/code-payments/ocp-server/ocp/data/currency/holder"
 	holder_memory "github.com/code-payments/ocp-server/ocp/data/currency/holder/memory"
 	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	reserve_memory "github.com/code-payments/ocp-server/ocp/data/currency/reserve/memory"
-	"github.com/code-payments/ocp-server/ocp/data/deposit"
-	"github.com/code-payments/ocp-server/ocp/data/transaction"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/testutil"
@@ -133,9 +131,12 @@ func TestGetBalance_UnmanagedAccountsExcluded(t *testing.T) {
 
 	// The pool account has left the L2 system, so there isn't a cached balance that
 	// can be trusted for it.
+	// The geyser worker moves both records in the same transaction, so the
+	// ledger record's lock state can't disagree with the timelock record's
 	primaryCoreMintAccountRecords.Timelock.VaultState = timelock_token_v1.StateUnlocked
 	primaryCoreMintAccountRecords.Timelock.Block += 1
 	require.NoError(t, env.data.SaveTimelock(env.ctx, primaryCoreMintAccountRecords.Timelock))
+	require.NoError(t, env.data.MarkBalanceAsUnlocked(env.ctx, primaryCoreMintAccountRecords.General.TokenAccount))
 
 	resp, err := env.client.GetBalance(env.ctx, &balancepb.GetBalanceRequest{
 		Owner: ownerAccount.ToProto(),
@@ -197,6 +198,7 @@ func setupAccountRecords(t *testing.T, env testEnv, ownerAccount, authorityAccou
 
 	require.NoError(t, env.data.CreateAccountInfo(env.ctx, accountInfoRecord))
 	require.NoError(t, env.data.SaveTimelock(env.ctx, timelockRecord))
+	require.NoError(t, balance_util.CreateRecordInTx(env.ctx, env.data, accountInfoRecord))
 
 	return &common.AccountRecords{
 		General:  accountInfoRecord,
@@ -204,14 +206,10 @@ func setupAccountRecords(t *testing.T, env testEnv, ownerAccount, authorityAccou
 	}
 }
 
-func setupCachedBalance(t *testing.T, env testEnv, accountRecords *common.AccountRecords, balance uint64) {
-	depositRecord := &deposit.Record{
-		Signature:   fmt.Sprintf("txn%d", rand.Uint64()),
-		Destination: accountRecords.General.TokenAccount,
-		Amount:      balance,
-
-		ConfirmationState: transaction.ConfirmationFinalized,
-		Slot:              12345,
-	}
-	require.NoError(t, env.data.SaveExternalDeposit(env.ctx, depositRecord))
+func setupCachedBalance(t *testing.T, env testEnv, accountRecords *common.AccountRecords, quarks uint64) {
+	require.NoError(t, balance_util.ApplyDeltasInTx(env.ctx, env.data, &balance.Delta{
+		TokenAccount: accountRecords.General.TokenAccount,
+		Kind:         balance.DeltaCredit,
+		Quarks:       quarks,
+	}))
 }

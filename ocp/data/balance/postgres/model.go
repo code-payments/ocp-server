@@ -17,7 +17,10 @@ const (
 	tableName                   = "ocp__core_balance"
 	externalCheckpointTableName = "ocp__core_externalbalancecheckpoint"
 
-	allColumns = "id, token_account, owner_account, mint_account, quarks, usd_cost_basis, is_open, is_locked, is_backfilled, updated_at"
+	// Note: is_backfilled is deliberately absent. The column still exists in
+	// prod, where every row is backfilled, so it is written as TRUE on insert
+	// and never read.
+	allColumns = "id, token_account, owner_account, mint_account, quarks, usd_cost_basis, is_open, is_locked, updated_at"
 )
 
 type model struct {
@@ -27,12 +30,11 @@ type model struct {
 	OwnerAccount string `db:"owner_account"`
 	MintAccount  string `db:"mint_account"`
 
-	Quarks       int64 `db:"quarks"`
-	UsdCostBasis int64 `db:"usd_cost_basis"`
+	Quarks       uint64 `db:"quarks"`
+	UsdCostBasis int64  `db:"usd_cost_basis"`
 
-	IsOpen       bool `db:"is_open"`
-	IsLocked     bool `db:"is_locked"`
-	IsBackfilled bool `db:"is_backfilled"`
+	IsOpen   bool `db:"is_open"`
+	IsLocked bool `db:"is_locked"`
 
 	UpdatedAt time.Time `db:"updated_at"`
 }
@@ -50,9 +52,8 @@ func toModel(obj *balance.Record) (*model, error) {
 		Quarks:       obj.Quarks,
 		UsdCostBasis: obj.UsdCostBasis,
 
-		IsOpen:       obj.IsOpen,
-		IsLocked:     obj.IsLocked,
-		IsBackfilled: obj.IsBackfilled,
+		IsOpen:   obj.IsOpen,
+		IsLocked: obj.IsLocked,
 
 		UpdatedAt: obj.UpdatedAt,
 	}, nil
@@ -69,9 +70,8 @@ func fromModel(obj *model) *balance.Record {
 		Quarks:       obj.Quarks,
 		UsdCostBasis: obj.UsdCostBasis,
 
-		IsOpen:       obj.IsOpen,
-		IsLocked:     obj.IsLocked,
-		IsBackfilled: obj.IsBackfilled,
+		IsOpen:   obj.IsOpen,
+		IsLocked: obj.IsLocked,
 
 		UpdatedAt: obj.UpdatedAt,
 	}
@@ -81,7 +81,7 @@ func (m *model) dbCreate(ctx context.Context, db *sqlx.DB) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		query := `INSERT INTO ` + tableName + `
 			(token_account, owner_account, mint_account, quarks, usd_cost_basis, is_open, is_locked, is_backfilled, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
 			RETURNING ` + allColumns
 
 		m.UpdatedAt = time.Now()
@@ -96,7 +96,6 @@ func (m *model) dbCreate(ctx context.Context, db *sqlx.DB) error {
 			m.UsdCostBasis,
 			m.IsOpen,
 			m.IsLocked,
-			m.IsBackfilled,
 			m.UpdatedAt.UTC(),
 		).StructScan(m)
 
@@ -161,7 +160,7 @@ func dbGetAllByOwner(ctx context.Context, db *sqlx.DB, owner string, mint *strin
 	return res, nil
 }
 
-func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int64, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*model, error) {
+func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks uint64, cursor q.Cursor, limit uint64, direction q.Ordering) ([]*model, error) {
 	res := []*model{}
 
 	query := `SELECT ` + allColumns + ` FROM ` + tableName + `
@@ -180,10 +179,10 @@ func dbGetAllLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuar
 	return res, nil
 }
 
-func dbCountLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks int64) (uint64, error) {
+func dbCountLockedByMint(ctx context.Context, db *sqlx.DB, mint string, minQuarks uint64) (uint64, error) {
 	var res uint64
 	query := `SELECT COUNT(*) FROM ` + tableName + `
-		WHERE mint_account = $1 AND quarks >= $2 AND is_locked AND is_backfilled`
+		WHERE mint_account = $1 AND quarks >= $2 AND is_locked`
 	err := db.GetContext(ctx, &res, query, mint, minQuarks)
 	if err != nil {
 		return 0, err
@@ -213,7 +212,7 @@ func dbMarkAsUnlocked(ctx context.Context, db *sqlx.DB, tokenAccount string) err
 
 // dbApplyDeltas applies every delta in a single transaction. Each delta is one
 // conditional UPDATE, so its predicate is evaluated against the row after the
-// row lock is acquired. Predicates only apply to backfilled rows.
+// row lock is acquired.
 func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) error {
 	return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
 		for _, delta := range deltas {
@@ -223,25 +222,22 @@ func dbApplyDeltas(ctx context.Context, db *sqlx.DB, deltas []*balance.Delta) er
 			case balance.DeltaCredit:
 				query = `UPDATE ` + tableName + `
 					SET quarks = quarks + $2, usd_cost_basis = usd_cost_basis + $3, updated_at = $4
-					WHERE token_account = $1 AND (NOT is_backfilled OR is_open)`
+					WHERE token_account = $1 AND is_open`
 				args = []any{delta.TokenAccount, int64(delta.Quarks), delta.UsdCostBasis, time.Now().UTC()}
 			case balance.DeltaDebit:
 				query = `UPDATE ` + tableName + `
 					SET quarks = quarks - $2, usd_cost_basis = usd_cost_basis - $3, updated_at = $4
-					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND is_locked AND quarks >= $2))`
+					WHERE token_account = $1 AND is_open AND is_locked AND quarks >= $2`
 				args = []any{delta.TokenAccount, int64(delta.Quarks), delta.UsdCostBasis, time.Now().UTC()}
 			case balance.DeltaDrain:
 				query = `UPDATE ` + tableName + `
-					SET quarks = CASE WHEN is_backfilled THEN 0 ELSE quarks - $2 END,
-					    usd_cost_basis = CASE WHEN is_backfilled THEN 0 ELSE usd_cost_basis - $3 END,
-					    is_open = FALSE,
-					    updated_at = $4
-					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND is_locked AND quarks = $2))`
-				args = []any{delta.TokenAccount, int64(delta.Quarks), delta.UsdCostBasis, time.Now().UTC()}
+					SET quarks = 0, usd_cost_basis = 0, is_open = FALSE, updated_at = $3
+					WHERE token_account = $1 AND is_open AND is_locked AND quarks = $2`
+				args = []any{delta.TokenAccount, int64(delta.Quarks), time.Now().UTC()}
 			case balance.DeltaClose:
 				query = `UPDATE ` + tableName + `
 					SET is_open = FALSE, updated_at = $2
-					WHERE token_account = $1 AND (NOT is_backfilled OR (is_open AND is_locked AND quarks = 0))`
+					WHERE token_account = $1 AND is_open AND is_locked AND quarks = 0`
 				args = []any{delta.TokenAccount, time.Now().UTC()}
 			case balance.DeltaAdjustUsdCostBasis:
 				// No predicate: no quarks move, so nothing the other kinds
@@ -303,47 +299,6 @@ func classifyFailedDelta(delta *balance.Delta, current *balance.Record) error {
 		return balance.ErrBalanceChanged
 	}
 	return fmt.Errorf("unsupported delta kind: %s", delta.Kind)
-}
-
-func dbBackfill(ctx context.Context, db *sqlx.DB, tokenAccount string, fn balance.BackfillFunc) error {
-	return executeTxWithinCtxOrJoin(ctx, db, func(ctx context.Context) error {
-		return pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
-			var current model
-			err := tx.GetContext(ctx, &current, `SELECT `+allColumns+` FROM `+tableName+` WHERE token_account = $1 FOR UPDATE`, tokenAccount)
-			if err != nil {
-				return pgutil.CheckNoRows(err, balance.ErrRecordNotFound)
-			}
-			if current.IsBackfilled {
-				return balance.ErrAlreadyBackfilled
-			}
-
-			// The row lock is held across fn, so it observes every committed
-			// write to the account and blocks every in-flight one.
-			result, err := fn(ctx)
-			if err != nil {
-				return err
-			}
-			if result.Quarks < 0 {
-				return balance.ErrNegativeBalance
-			}
-
-			query := `UPDATE ` + tableName + `
-				SET quarks = $2, usd_cost_basis = $3, is_open = $4, is_locked = $5, is_backfilled = TRUE, updated_at = $6
-				WHERE token_account = $1`
-			_, err = tx.ExecContext(ctx, query, tokenAccount, result.Quarks, result.UsdCostBasis, result.IsOpen, result.IsLocked, time.Now().UTC())
-			return err
-		})
-	})
-}
-
-// executeTxWithinCtxOrJoin runs fn with a context carrying a DB transaction,
-// starting one if the context doesn't already have one.
-func executeTxWithinCtxOrJoin(ctx context.Context, db *sqlx.DB, fn func(ctx context.Context) error) error {
-	err := pgutil.ExecuteTxWithinCtx(ctx, db, sql.LevelDefault, fn)
-	if err == pgutil.ErrAlreadyInTx {
-		return fn(ctx)
-	}
-	return err
 }
 
 type externalCheckpointModel struct {

@@ -17,11 +17,9 @@ func RunTests(t *testing.T, s balance.Store, teardown func()) {
 	for _, tf := range []func(t *testing.T, s balance.Store){
 		testRecordHappyPath,
 		testGetAllLockedByMint,
-		testApplyDeltasBackfilled,
-		testApplyDeltasNotBackfilled,
+		testApplyDeltas,
 		testApplyDeltasAtomicity,
 		testApplyDeltasConcurrency,
-		testBackfill,
 		testMarkAsUnlocked,
 		testExternalCheckpointHappyPath,
 	} {
@@ -57,7 +55,6 @@ func testRecordHappyPath(t *testing.T, s balance.Store) {
 			UsdCostBasis: 200,
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}
 		cloned := expected.Clone()
 
@@ -105,14 +102,6 @@ func testRecordHappyPath(t *testing.T, s balance.Store) {
 
 		_, err = s.GetAllByOwnerAndMint(ctx, "owner_2", "mint_2")
 		assert.Equal(t, balance.ErrRecordNotFound, err)
-
-		assert.Error(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_5",
-			OwnerAccount: "owner_1",
-			MintAccount:  "mint_1",
-			Quarks:       -1,
-			IsBackfilled: true,
-		}))
 	})
 }
 
@@ -128,10 +117,9 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 				TokenAccount: "token_account_" + string(rune('a'+i)),
 				OwnerAccount: "owner",
 				MintAccount:  "mint_1",
-				Quarks:       int64(i * 10),
+				Quarks:       uint64(i * 10),
 				IsOpen:       true,
 				IsLocked:     true,
-				IsBackfilled: true,
 			}))
 		}
 		require.NoError(t, s.Create(ctx, &balance.Record{
@@ -141,7 +129,6 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 			Quarks:       1000,
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 
 		records, err := s.GetAllLockedByMint(ctx, "mint_1", 0, query.EmptyCursor, 10, query.Ascending)
@@ -186,7 +173,6 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 			MintAccount:  "mint_1",
 			Quarks:       1000,
 			IsOpen:       true,
-			IsBackfilled: true,
 		}))
 		records, err = s.GetAllLockedByMint(ctx, "mint_1", 0, query.EmptyCursor, 10, query.Ascending)
 		require.NoError(t, err)
@@ -195,18 +181,7 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 		_, err = s.GetAllLockedByMint(ctx, "mint_1", 0, query.ToCursor(5), 10, query.Ascending)
 		assert.Equal(t, balance.ErrRecordNotFound, err)
 
-		// Counting by mint uses the same threshold semantics, but only over
-		// backfilled records
-		require.NoError(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_not_backfilled",
-			OwnerAccount: "owner",
-			MintAccount:  "mint_1",
-			Quarks:       1000,
-			IsOpen:       true,
-			IsLocked:     true,
-			IsBackfilled: false,
-		}))
-
+		// Counting by mint uses the same threshold semantics
 		count, err := s.CountLockedByMint(ctx, "mint_1", 0)
 		require.NoError(t, err)
 		assert.EqualValues(t, 5, count)
@@ -225,8 +200,8 @@ func testGetAllLockedByMint(t *testing.T, s balance.Store) {
 	})
 }
 
-func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
-	t.Run("testApplyDeltasBackfilled", func(t *testing.T) {
+func testApplyDeltas(t *testing.T, s balance.Store) {
+	t.Run("testApplyDeltas", func(t *testing.T) {
 		ctx := context.Background()
 
 		require.NoError(t, s.Create(ctx, &balance.Record{
@@ -235,7 +210,6 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 			MintAccount:  "mint",
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 
 		// Every kind of delta requires a record
@@ -312,42 +286,9 @@ func testApplyDeltasBackfilled(t *testing.T, s balance.Store) {
 			MintAccount:  "mint",
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaClose}))
 		assertBalance(t, s, "token_account_2", 0, 0, false)
-	})
-}
-
-func testApplyDeltasNotBackfilled(t *testing.T, s balance.Store) {
-	t.Run("testApplyDeltasNotBackfilled", func(t *testing.T) {
-		ctx := context.Background()
-
-		require.NoError(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_1",
-			OwnerAccount: "owner",
-			MintAccount:  "mint",
-			IsOpen:       true,
-			IsLocked:     true,
-		}))
-
-		// No predicates are enforced, and the balance can go negative
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 30, UsdCostBasis: 10}))
-		assertBalance(t, s, "token_account_1", -30, -10, true)
-
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 100, UsdCostBasis: 50}))
-		assertBalance(t, s, "token_account_1", 70, 40, true)
-
-		// A drain records the delta rather than zeroing, but still closes
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDrain, Quarks: 100, UsdCostBasis: 60}))
-		assertBalance(t, s, "token_account_1", -30, -20, false)
-
-		// Closed accounts still accumulate
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 5, UsdCostBasis: 5}))
-		assertBalance(t, s, "token_account_1", -25, -15, false)
-
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaClose}))
-		assertBalance(t, s, "token_account_1", -25, -15, false)
 	})
 }
 
@@ -363,7 +304,6 @@ func testApplyDeltasAtomicity(t *testing.T, s balance.Store) {
 				Quarks:       100,
 				IsOpen:       true,
 				IsLocked:     true,
-				IsBackfilled: true,
 			}))
 		}
 
@@ -436,7 +376,6 @@ func testApplyDeltasConcurrency(t *testing.T, s balance.Store) {
 			Quarks:       initialBalance,
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 		require.NoError(t, s.Create(ctx, &balance.Record{
 			TokenAccount: "receiver",
@@ -444,7 +383,6 @@ func testApplyDeltasConcurrency(t *testing.T, s balance.Store) {
 			MintAccount:  "mint",
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 
 		// Concurrent sends of 1 quark each: exactly initialBalance succeed, and
@@ -524,80 +462,6 @@ func testApplyDeltasConcurrency(t *testing.T, s balance.Store) {
 	})
 }
 
-func testBackfill(t *testing.T, s balance.Store) {
-	t.Run("testBackfill", func(t *testing.T) {
-		ctx := context.Background()
-
-		fn := func(quarks, usdCostBasis int64, isOpen bool) balance.BackfillFunc {
-			return func(ctx context.Context) (*balance.BackfillResult, error) {
-				return &balance.BackfillResult{Quarks: quarks, UsdCostBasis: usdCostBasis, IsOpen: isOpen, IsLocked: true}, nil
-			}
-		}
-
-		assert.Equal(t, balance.ErrRecordNotFound, s.Backfill(ctx, "token_account_1", fn(1, 1, true)))
-
-		require.NoError(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_1",
-			OwnerAccount: "owner",
-			MintAccount:  "mint",
-			IsOpen:       true,
-			IsLocked:     true,
-		}))
-
-		// Deltas recorded before the backfill are discarded by it
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 30, UsdCostBasis: 10}))
-		assertBalance(t, s, "token_account_1", -30, -10, true)
-
-		// A failing computation leaves the record untouched
-		assert.Error(t, s.Backfill(ctx, "token_account_1", func(ctx context.Context) (*balance.BackfillResult, error) {
-			return nil, assert.AnError
-		}))
-		record, err := s.Get(ctx, "token_account_1")
-		require.NoError(t, err)
-		assert.False(t, record.IsBackfilled)
-		assert.EqualValues(t, -30, record.Quarks)
-
-		// So does a negative computed balance
-		assert.Equal(t, balance.ErrNegativeBalance, s.Backfill(ctx, "token_account_1", fn(-1, 0, true)))
-		record, err = s.Get(ctx, "token_account_1")
-		require.NoError(t, err)
-		assert.False(t, record.IsBackfilled)
-		assert.EqualValues(t, -30, record.Quarks)
-
-		require.NoError(t, s.Backfill(ctx, "token_account_1", fn(500, 250, true)))
-		record, err = s.Get(ctx, "token_account_1")
-		require.NoError(t, err)
-		assert.True(t, record.IsBackfilled)
-		assert.True(t, record.IsLocked)
-		assertBalance(t, s, "token_account_1", 500, 250, true)
-
-		// Predicates are enforced from now on
-		assert.Equal(t, balance.ErrInsufficientBalance, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 501}))
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaDebit, Quarks: 500}))
-		assertBalance(t, s, "token_account_1", 0, 250, true)
-
-		called := false
-		assert.Equal(t, balance.ErrAlreadyBackfilled, s.Backfill(ctx, "token_account_1", func(ctx context.Context) (*balance.BackfillResult, error) {
-			called = true
-			return &balance.BackfillResult{}, nil
-		}))
-		assert.False(t, called)
-		assertBalance(t, s, "token_account_1", 0, 250, true)
-
-		// A backfill can establish the account as closed, e.g. a claimed gift card
-		require.NoError(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_2",
-			OwnerAccount: "owner",
-			MintAccount:  "mint",
-			IsOpen:       true,
-			IsLocked:     true,
-		}))
-		require.NoError(t, s.Backfill(ctx, "token_account_2", fn(0, 0, false)))
-		assertBalance(t, s, "token_account_2", 0, 0, false)
-		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaCredit, Quarks: 1}))
-	})
-}
-
 func testMarkAsUnlocked(t *testing.T, s balance.Store) {
 	t.Run("testMarkAsUnlocked", func(t *testing.T) {
 		ctx := context.Background()
@@ -611,7 +475,6 @@ func testMarkAsUnlocked(t *testing.T, s balance.Store) {
 			Quarks:       100,
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 
 		require.NoError(t, s.MarkAsUnlocked(ctx, "token_account_1"))
@@ -649,23 +512,10 @@ func testMarkAsUnlocked(t *testing.T, s balance.Store) {
 			MintAccount:  "mint",
 			IsOpen:       true,
 			IsLocked:     true,
-			IsBackfilled: true,
 		}))
 		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_3", Kind: balance.DeltaClose}))
 		require.NoError(t, s.MarkAsUnlocked(ctx, "token_account_3"))
 		assert.Equal(t, balance.ErrAccountClosed, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_3", Kind: balance.DeltaCredit, Quarks: 1}))
-
-		// A record that is not backfilled accumulates without predicates,
-		// unlocked included; the backfill computes the truth for it
-		require.NoError(t, s.Create(ctx, &balance.Record{
-			TokenAccount: "token_account_2",
-			OwnerAccount: "owner",
-			MintAccount:  "mint",
-			IsOpen:       true,
-			IsLocked:     false,
-		}))
-		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_2", Kind: balance.DeltaCredit, Quarks: 5}))
-		assertBalance(t, s, "token_account_2", 5, 0, true)
 	})
 }
 
@@ -723,7 +573,7 @@ func testExternalCheckpointHappyPath(t *testing.T, s balance.Store) {
 	})
 }
 
-func assertBalance(t *testing.T, s balance.Store, tokenAccount string, quarks, usdCostBasis int64, isOpen bool) {
+func assertBalance(t *testing.T, s balance.Store, tokenAccount string, quarks uint64, usdCostBasis int64, isOpen bool) {
 	record, err := s.Get(context.Background(), tokenAccount)
 	require.NoError(t, err)
 	assert.EqualValues(t, quarks, record.Quarks, "quarks")
@@ -739,7 +589,6 @@ func assertEquivalentRecords(t *testing.T, obj1, obj2 *balance.Record) {
 	assert.Equal(t, obj1.IsLocked, obj2.IsLocked)
 	assert.Equal(t, obj1.UsdCostBasis, obj2.UsdCostBasis)
 	assert.Equal(t, obj1.IsOpen, obj2.IsOpen)
-	assert.Equal(t, obj1.IsBackfilled, obj2.IsBackfilled)
 }
 
 func assertEquivalentExternalCheckpoingRecords(t *testing.T, obj1, obj2 *balance.ExternalCheckpointRecord) {
