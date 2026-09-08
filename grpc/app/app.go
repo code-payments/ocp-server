@@ -56,6 +56,21 @@ type App interface {
 	// with the gRPC server.
 	RegisterWithGRPC(server *grpc.Server)
 
+	// Drain is called when shutdown begins, after the health server flips to
+	// NOT_SERVING but before the gRPC server's GracefulStop. It is the app's
+	// one chance to retract cross-instance advertisements (cluster
+	// registrations, subscriptions) and to actively end long-lived streams:
+	// GracefulStop blocks until every in-flight RPC completes, and a stream
+	// held open by a connected client never completes on its own. Cleanup that
+	// must outlive in-flight RPCs (deregistering the instance itself) belongs
+	// in Stop, which runs after GracefulStop returns.
+	//
+	// ctx is bounded by BaseConfig.DrainTimeout. Drain should be idempotent
+	// and best-effort — it runs on every shutdown path, and its failures must
+	// not prevent Stop from running. Apps with nothing to drain provide a
+	// no-op.
+	Drain(ctx context.Context)
+
 	// ShutdownChan returns a channel that is closed when the application is shutdown.
 	//
 	// If the channel is closed, the gRPC server will initiate a shutdown if it has
@@ -351,6 +366,14 @@ func Run(app App, options ...Option) error {
 		// and readiness probes stop routing new traffic to this instance while
 		// in-flight requests are allowed to complete by GracefulStop.
 		healthServer.Shutdown()
+
+		// Drain before GracefulStop: apps retract cross-instance
+		// advertisements and end their long-lived streams here — without this,
+		// GracefulStop waits on client-held streams until the grace period
+		// kills the process.
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), config.DrainTimeout)
+		app.Drain(drainCtx)
+		drainCancel()
 
 		// Both the gRPC server and the application should have idempotent
 		// shutdown methods, so it's fine call them both, regardless of the
