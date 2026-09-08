@@ -35,6 +35,7 @@ type BaseConfig struct {
 	TLSKey string `mapstructure:"tls_private_key"`
 
 	ShutdownGracePeriod time.Duration `mapstructure:"shutdown_grace_period"`
+	DrainTimeout        time.Duration `mapstructure:"drain_timeout"`
 
 	EnablePprof  bool `mapstructure:"enable_pprof"`
 	EnableExpvar bool `mapstructure:"enable_expvar"`
@@ -68,7 +69,8 @@ var defaultConfig = BaseConfig{
 	InsecureListenAddress: "localhost:8086",
 	DebugListenAddress:    ":8123",
 
-	ShutdownGracePeriod: 60 * time.Second,
+	ShutdownGracePeriod: 120 * time.Second,
+	DrainTimeout:        60 * time.Second,
 
 	EnablePprof:  true,
 	EnableExpvar: true,
@@ -93,6 +95,7 @@ func init() {
 	_ = viper.BindEnv("tls_private_key", "TLS_PRIVATE_KEY")
 
 	_ = viper.BindEnv("shutdown_grace_period", "SHUTDOWN_GRACE_PERIOD")
+	_ = viper.BindEnv("drain_timeout", "DRAIN_TIMEOUT")
 
 	_ = viper.BindEnv("enable_pprof", "ENABLE_PPROF")
 	_ = viper.BindEnv("enable_expvar", "ENABLE_EXPVAR")
