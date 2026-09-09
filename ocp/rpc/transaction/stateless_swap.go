@@ -31,7 +31,7 @@ import (
 // todo: Generalize this more when we have more than one swap kind similar to StatefulSwap
 
 const (
-	statelessSwapComputeUnitLimit = 80_000
+	statelessSwapComputeUnitLimit = 200_000
 	statelessSwapComputeUnitPrice = 10_000
 	statelessSwapMemoValue        = "coinbase_stable_swapper_v0"
 )

@@ -3,18 +3,20 @@ package coinbase_stable_swapper
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/mr-tron/base58"
 )
 
-// Minimum size without the dynamic supported_tokens vector
+// Minimum size with empty withdraw_recipients and supported_tokens vectors
 const (
 	LiquidityPoolAccountMinSize = (8 + // discriminator
-		32 + // operations_authority
 		32 + // pause_authority
+		32 + // unpause_authority
+		32 + // treasury_authority
+		32 + // configure_authority
 		32 + // fee_recipient
+		4 + // withdraw_recipients vector length (empty)
 		4 + // supported_tokens vector length (empty)
 		8 + // fee_rate
 		1 + // swaps_paused
@@ -22,15 +24,21 @@ const (
 		1) // bump
 )
 
+// LiquidityPoolAccount mirrors LiquidityPool in coinbase/stable-swapper
+// (solana/programs/stable-swapper/src/state.rs) after the role-based
+// authority migration (coinbase/stable-swapper#20).
 type LiquidityPoolAccount struct {
-	OperationsAuthority ed25519.PublicKey
-	PauseAuthority      ed25519.PublicKey
-	FeeRecipient        ed25519.PublicKey
-	SupportedTokens     []ed25519.PublicKey
-	FeeRate             uint64
-	SwapsPaused         bool
-	LiquidityPaused     bool
-	Bump                uint8
+	PauseAuthority     ed25519.PublicKey
+	UnpauseAuthority   ed25519.PublicKey
+	TreasuryAuthority  ed25519.PublicKey // Signs withdraw_liquidity
+	ConfigureAuthority ed25519.PublicKey // Signs add/remove_withdraw_recipient
+	FeeRecipient       ed25519.PublicKey
+	WithdrawRecipients []ed25519.PublicKey
+	SupportedTokens    []ed25519.PublicKey
+	FeeRate            uint64
+	SwapsPaused        bool
+	LiquidityPaused    bool
+	Bump               uint8
 }
 
 func (obj *LiquidityPoolAccount) Unmarshal(data []byte) error {
@@ -46,17 +54,21 @@ func (obj *LiquidityPoolAccount) Unmarshal(data []byte) error {
 		return ErrInvalidAccountData
 	}
 
-	getKey(data, &obj.OperationsAuthority, &offset)
 	getKey(data, &obj.PauseAuthority, &offset)
+	getKey(data, &obj.UnpauseAuthority, &offset)
+	getKey(data, &obj.TreasuryAuthority, &offset)
+	getKey(data, &obj.ConfigureAuthority, &offset)
 	getKey(data, &obj.FeeRecipient, &offset)
 
-	// Read supported_tokens vector (4-byte length prefix + pubkeys)
-	vecLen := binary.LittleEndian.Uint32(data[offset:])
-	offset += 4
+	if err := getKeyVec(data, &obj.WithdrawRecipients, &offset); err != nil {
+		return err
+	}
+	if err := getKeyVec(data, &obj.SupportedTokens, &offset); err != nil {
+		return err
+	}
 
-	obj.SupportedTokens = make([]ed25519.PublicKey, vecLen)
-	for i := uint32(0); i < vecLen; i++ {
-		getKey(data, &obj.SupportedTokens[i], &offset)
+	if len(data)-offset < 8+1+1+1 {
+		return ErrInvalidAccountData
 	}
 
 	getUint64(data, &obj.FeeRate, &offset)
@@ -68,20 +80,26 @@ func (obj *LiquidityPoolAccount) Unmarshal(data []byte) error {
 }
 
 func (obj *LiquidityPoolAccount) String() string {
-	tokensList := make([]string, len(obj.SupportedTokens))
-	for i, t := range obj.SupportedTokens {
-		tokensList[i] = base58.Encode(t)
-	}
-
 	return fmt.Sprintf(
-		"LiquidityPool{operations_authority=%s,pause_authority=%s,fee_recipient=%s,supported_tokens=%v,fee_rate=%d,swaps_paused=%t,liquidity_paused=%t,bump=%d}",
-		base58.Encode(obj.OperationsAuthority),
+		"LiquidityPool{pause_authority=%s,unpause_authority=%s,treasury_authority=%s,configure_authority=%s,fee_recipient=%s,withdraw_recipients=%v,supported_tokens=%v,fee_rate=%d,swaps_paused=%t,liquidity_paused=%t,bump=%d}",
 		base58.Encode(obj.PauseAuthority),
+		base58.Encode(obj.UnpauseAuthority),
+		base58.Encode(obj.TreasuryAuthority),
+		base58.Encode(obj.ConfigureAuthority),
 		base58.Encode(obj.FeeRecipient),
-		tokensList,
+		encodeKeys(obj.WithdrawRecipients),
+		encodeKeys(obj.SupportedTokens),
 		obj.FeeRate,
 		obj.SwapsPaused,
 		obj.LiquidityPaused,
 		obj.Bump,
 	)
+}
+
+func encodeKeys(keys []ed25519.PublicKey) []string {
+	encoded := make([]string, len(keys))
+	for i, k := range keys {
+		encoded[i] = base58.Encode(k)
+	}
+	return encoded
 }
