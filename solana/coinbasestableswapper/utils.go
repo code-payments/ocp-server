@@ -18,6 +18,27 @@ func getKey(src []byte, dst *ed25519.PublicKey, offset *int) {
 	*offset += ed25519.PublicKeySize
 }
 
+// getKeyVec reads a Borsh Vec<Pubkey> (u32 length prefix followed by 32-byte
+// keys), rejecting lengths that exceed the remaining data rather than trusting
+// them for allocation.
+func getKeyVec(src []byte, dst *[]ed25519.PublicKey, offset *int) error {
+	if len(src)-*offset < 4 {
+		return ErrInvalidAccountData
+	}
+	length := uint64(binary.LittleEndian.Uint32(src[*offset:]))
+	*offset += 4
+
+	if length > uint64(len(src)-*offset)/ed25519.PublicKeySize {
+		return ErrInvalidAccountData
+	}
+
+	*dst = make([]ed25519.PublicKey, length)
+	for i := range *dst {
+		getKey(src, &(*dst)[i], offset)
+	}
+	return nil
+}
+
 func putUint64(dst []byte, v uint64, offset *int) {
 	binary.LittleEndian.PutUint64(dst[*offset:], v)
 	*offset += 8
