@@ -30,6 +30,7 @@ type SwapInstructionAccounts struct {
 	FromMint                 ed25519.PublicKey
 	ToMint                   ed25519.PublicKey
 	User                     ed25519.PublicKey
+	Whitelist                ed25519.PublicKey
 }
 
 func NewSwapInstruction(
@@ -112,6 +113,11 @@ func NewSwapInstruction(
 				PublicKey:  accounts.User,
 				IsWritable: true,
 				IsSigner:   true,
+			},
+			{
+				PublicKey:  accounts.Whitelist,
+				IsWritable: false,
+				IsSigner:   false,
 			},
 			{
 				PublicKey:  SPL_TOKEN_PROGRAM_ID,

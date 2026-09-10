@@ -22,6 +22,7 @@ type CoinbaseSwapAccounts struct {
 	OutVault                 ed25519.PublicKey
 	InVaultTokenAccount      ed25519.PublicKey
 	OutVaultTokenAccount     ed25519.PublicKey
+	Whitelist                ed25519.PublicKey
 	FeeRecipient             ed25519.PublicKey
 	FeeRecipientTokenAccount ed25519.PublicKey
 }
@@ -64,6 +65,11 @@ func GetCoinbaseSwapAccounts(ctx context.Context, data ocp_data.Provider, fromMi
 		return nil, errors.Wrap(err, "error getting out vault token account address")
 	}
 
+	whitelist, _, err := coinbase_stable_swapper.GetWhitelistAddress()
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting whitelist address")
+	}
+
 	poolAccountInfo, _, err := data.GetBlockchainAccountInfo(ctx, base58.Encode(pool), solana.CommitmentProcessed)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting coinbase liquidity pool account info")
@@ -85,6 +91,7 @@ func GetCoinbaseSwapAccounts(ctx context.Context, data ocp_data.Provider, fromMi
 		OutVault:                 outVault,
 		InVaultTokenAccount:      inVaultTokenAccount,
 		OutVaultTokenAccount:     outVaultTokenAccount,
+		Whitelist:                whitelist,
 		FeeRecipient:             poolAccount.FeeRecipient,
 		FeeRecipientTokenAccount: feeRecipientTokenAccount,
 	}, nil
@@ -149,6 +156,7 @@ func MakeCoinbaseSwapInstruction(
 			FromMint:                 fromMint,
 			ToMint:                   toMint,
 			User:                     user,
+			Whitelist:                accounts.Whitelist,
 		},
 		&coinbase_stable_swapper.SwapInstructionArgs{
 			AmountIn:     amountIn,

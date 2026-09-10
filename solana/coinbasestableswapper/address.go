@@ -10,6 +10,7 @@ var (
 	LiquidityPoolPrefix     = []byte("liquidity_pool")
 	TokenVaultPrefix        = []byte("token_vault")
 	VaultTokenAccountPrefix = []byte("vault_token_account")
+	AddressWhitelistPrefix  = []byte("address_whitelist")
 )
 
 // GetPoolAddress returns the PDA for the liquidity pool
@@ -45,5 +46,13 @@ func GetVaultTokenAccountAddress(args *GetVaultTokenAccountAddressArgs) (ed25519
 		PROGRAM_ID,
 		VaultTokenAccountPrefix,
 		args.Vault,
+	)
+}
+
+// GetWhitelistAddress returns the PDA for the address whitelist
+func GetWhitelistAddress() (ed25519.PublicKey, uint8, error) {
+	return solana.FindProgramAddressAndBump(
+		PROGRAM_ID,
+		AddressWhitelistPrefix,
 	)
 }
