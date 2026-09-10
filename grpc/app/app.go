@@ -264,16 +264,16 @@ func Run(app App, options ...Option) error {
 	defaultUnaryServerInterceptors := []grpc.UnaryServerInterceptor{
 		grpc_recovery.UnaryServerInterceptor(recoveryOpt),
 		headers.UnaryServerInterceptor(),
-		grpc_metrics.UnaryServerInterceptor(metricsProvider, config.UserAgentName),
+		grpc_metrics.UnaryServerInterceptor(metricsProvider, config.UserAgentNames...),
 		validation.UnaryServerInterceptor(log),
-		client.MinVersionUnaryServerInterceptor(config.UserAgentName),
+		client.MinVersionUnaryServerInterceptor(config.UserAgentNames...),
 	}
 	defaultStreamServerInterceptors := []grpc.StreamServerInterceptor{
 		grpc_recovery.StreamServerInterceptor(recoveryOpt),
 		headers.StreamServerInterceptor(),
-		grpc_metrics.StreamServerInterceptor(metricsProvider, config.UserAgentName),
+		grpc_metrics.StreamServerInterceptor(metricsProvider, config.UserAgentNames...),
 		validation.StreamServerInterceptor(log),
-		client.MinVersionStreamServerInterceptor(config.UserAgentName),
+		client.MinVersionStreamServerInterceptor(config.UserAgentNames...),
 	}
 
 	opts := opts{

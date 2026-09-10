@@ -112,8 +112,9 @@ func errorTraceResultCodeHandler(trace metrics.Trace, resultCode string) {
 }
 
 // UnaryServerInterceptor creates a unary server interceptor that uses the
-// generic metrics.Provider interface.
-func UnaryServerInterceptor(provider metrics.Provider, userAgentName string) grpc_core.UnaryServerInterceptor {
+// generic metrics.Provider interface. The client user agent is matched
+// against each of the provided names in order.
+func UnaryServerInterceptor(provider metrics.Provider, userAgentNames ...string) grpc_core.UnaryServerInterceptor {
 	if provider == nil {
 		return func(ctx context.Context, req interface{}, info *grpc_core.UnaryServerInfo, handler grpc_core.UnaryHandler) (interface{}, error) {
 			return handler(ctx, req)
@@ -131,7 +132,7 @@ func UnaryServerInterceptor(provider metrics.Provider, userAgentName string) grp
 		ctx = metrics.NewContext(ctx, trace)
 
 		includeParsedFullMethodName(trace, info.FullMethod)
-		includeClientMetadata(ctx, trace, userAgentName)
+		includeClientMetadata(ctx, trace, userAgentNames)
 
 		resp, err := handler(ctx, req)
 		includeGRPCStatusCode(trace, err)
@@ -147,8 +148,9 @@ func UnaryServerInterceptor(provider metrics.Provider, userAgentName string) grp
 }
 
 // StreamServerInterceptor creates a stream server interceptor that uses the
-// generic metrics.Provider interface.
-func StreamServerInterceptor(provider metrics.Provider, userAgentName string) grpc_core.StreamServerInterceptor {
+// generic metrics.Provider interface. The client user agent is matched
+// against each of the provided names in order.
+func StreamServerInterceptor(provider metrics.Provider, userAgentNames ...string) grpc_core.StreamServerInterceptor {
 	if provider == nil {
 		return func(srv interface{}, ss grpc_core.ServerStream, info *grpc_core.StreamServerInfo, handler grpc_core.StreamHandler) error {
 			return handler(srv, ss)
@@ -166,7 +168,7 @@ func StreamServerInterceptor(provider metrics.Provider, userAgentName string) gr
 		ctx = metrics.NewContext(ctx, trace)
 
 		includeParsedFullMethodName(trace, info.FullMethod)
-		includeClientMetadata(ctx, trace, userAgentName)
+		includeClientMetadata(ctx, trace, userAgentNames)
 
 		err := handler(srv, newWrappedStream(ctx, trace, ss))
 		includeGRPCStatusCode(trace, err)
@@ -327,8 +329,8 @@ func includeParsedFullMethodName(trace metrics.Trace, fullMethodName string) {
 	trace.AddAttribute(grpcRequestMethodAttributeKey, methodName)
 }
 
-func includeClientMetadata(ctx context.Context, trace metrics.Trace, userAgentName string) {
-	userAgent, err := client.GetUserAgent(ctx, userAgentName)
+func includeClientMetadata(ctx context.Context, trace metrics.Trace, userAgentNames []string) {
+	userAgent, err := client.GetUserAgentByNames(ctx, userAgentNames...)
 	if err == nil {
 		trace.AddAttribute(clientUserAgentAttributeKey, userAgent.String())
 	}

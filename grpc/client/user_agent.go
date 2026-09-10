@@ -27,6 +27,24 @@ func (ua *UserAgent) String() string {
 	return fmt.Sprintf("%s/%s/%s", ua.Name, ua.DeviceType.String(), ua.Version.String())
 }
 
+// GetUserAgentByNames gets the client user agent value from headers in the
+// provided context, trying each name in order and returning the first match.
+func GetUserAgentByNames(ctx context.Context, names ...string) (*UserAgent, error) {
+	if len(names) == 0 {
+		return nil, errors.New("no user agent names provided")
+	}
+
+	var lastErr error
+	for _, name := range names {
+		userAgent, err := GetUserAgent(ctx, name)
+		if err == nil {
+			return userAgent, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 // GetUserAgent gets the client user agent value from headers in the provided
 // context
 func GetUserAgent(ctx context.Context, name string) (*UserAgent, error) {

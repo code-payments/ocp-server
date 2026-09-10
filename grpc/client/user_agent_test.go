@@ -63,6 +63,58 @@ func TestGetUserAgent_ParseError(t *testing.T) {
 	}
 }
 
+func TestGetUserAgentByNames(t *testing.T) {
+	for _, tc := range []struct {
+		headerValue  string
+		names        []string
+		expectedName string
+		expectErr    bool
+	}{
+		{
+			headerValue:  "OpenCodeProtocol/iOS/1.2.3",
+			names:        []string{"OpenCodeProtocol", "OpenCodeProtocol/Core"},
+			expectedName: "OpenCodeProtocol",
+		},
+		{
+			headerValue:  "OpenCodeProtocol/Core/Android/1.2.3",
+			names:        []string{"OpenCodeProtocol", "OpenCodeProtocol/Core"},
+			expectedName: "OpenCodeProtocol/Core",
+		},
+		{
+			headerValue:  "OpenCodeProtocol/Core/Android/1.2.3",
+			names:        []string{"OpenCodeProtocol/Core", "OpenCodeProtocol"},
+			expectedName: "OpenCodeProtocol/Core",
+		},
+		{
+			headerValue: "SomethingElse/iOS/1.2.3",
+			names:       []string{"OpenCodeProtocol", "OpenCodeProtocol/Core"},
+			expectErr:   true,
+		},
+		{
+			headerValue: "OpenCodeProtocol/iOS/1.2.3",
+			names:       nil,
+			expectErr:   true,
+		},
+	} {
+		ctx := context.Background()
+		ctx, err := headers.ContextWithHeaders(ctx)
+		require.NoError(t, err)
+		require.NoError(t, headers.SetASCIIHeader(ctx, UserAgentHeaderName, tc.headerValue))
+
+		userAgent, err := GetUserAgentByNames(ctx, tc.names...)
+		if tc.expectErr {
+			assert.Error(t, err, tc.headerValue)
+			continue
+		}
+
+		require.NoError(t, err, tc.headerValue)
+		assert.Equal(t, tc.expectedName, userAgent.Name)
+		assert.Equal(t, 1, userAgent.Version.Major)
+		assert.Equal(t, 2, userAgent.Version.Minor)
+		assert.Equal(t, 3, userAgent.Version.Patch)
+	}
+}
+
 func TestUserAgent_StringValue(t *testing.T) {
 	ua := UserAgent{
 		Name:       "OpenCodeProtocol",
