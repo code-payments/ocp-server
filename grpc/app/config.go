@@ -53,8 +53,11 @@ type BaseConfig struct {
 	// Metrics configuration across many providers
 	NewRelicLicenseKey string `mapstructure:"new_relic_license_key"`
 
-	// Name used in the user-agent header
-	UserAgentName string `mapstructure:"user_agent_name"`
+	// Names used in the user-agent header. The client user agent is matched
+	// against each name in order, so deployments where clients identify under
+	// more than one name can list them all. When set via environment variable,
+	// this is a comma-separated list.
+	UserAgentNames []string `mapstructure:"user_agent_names"`
 
 	// Arbitrary configuration that the service can define / implement.
 	//
@@ -81,7 +84,7 @@ var defaultConfig = BaseConfig{
 	EnableMemoryLeakCron:   false,
 	MemoryLeakCronSchedule: "0 5 * * *",
 
-	UserAgentName: "OpenCodeProtocol",
+	UserAgentNames: []string{"OpenCodeProtocol"},
 }
 
 func init() {
@@ -107,4 +110,6 @@ func init() {
 	_ = viper.BindEnv("memory_leak_cron_schedule", "MEMORY_LEAK_CRON_SCHEDULE")
 
 	_ = viper.BindEnv("new_relic_license_key", "NEW_RELIC_LICENSE_KEY")
+
+	_ = viper.BindEnv("user_agent_names", "USER_AGENT_NAMES")
 }

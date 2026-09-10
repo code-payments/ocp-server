@@ -110,8 +110,9 @@ func (v *Version) String() string {
 }
 
 // MinVersionUnaryServerInterceptor prevents versions below the minimum
-// version from accessing outdated APIs.
-func MinVersionUnaryServerInterceptor(userAgentName string) grpc.UnaryServerInterceptor {
+// version from accessing outdated APIs. The user agent is matched against
+// each of the provided names in order.
+func MinVersionUnaryServerInterceptor(userAgentNames ...string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		// Health checks are internal and don't have an external client user agent
 		//
@@ -121,7 +122,7 @@ func MinVersionUnaryServerInterceptor(userAgentName string) grpc.UnaryServerInte
 			return handler(ctx, req)
 		}
 
-		userAgent, err := GetUserAgent(ctx, userAgentName)
+		userAgent, err := GetUserAgentByNames(ctx, userAgentNames...)
 		if err != nil {
 			// Just continue on errors because we have a breaking change wrt the
 			// user agent header value atm
@@ -137,10 +138,11 @@ func MinVersionUnaryServerInterceptor(userAgentName string) grpc.UnaryServerInte
 }
 
 // MinVersionStreamServerInterceptor prevents versions below the minimum
-// version from accessing lower version APIs.
-func MinVersionStreamServerInterceptor(userAgentName string) grpc.StreamServerInterceptor {
+// version from accessing lower version APIs. The user agent is matched
+// against each of the provided names in order.
+func MinVersionStreamServerInterceptor(userAgentNames ...string) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		userAgent, err := GetUserAgent(ss.Context(), userAgentName)
+		userAgent, err := GetUserAgentByNames(ss.Context(), userAgentNames...)
 		if err != nil {
 			// Just continue on errors because we have a breaking change wrt the
 			// user agent header value atm
