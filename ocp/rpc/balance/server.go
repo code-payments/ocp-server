@@ -18,6 +18,10 @@ import (
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
+var (
+	dustValue = common.ToCoreMintQuarks(1) / 1000 // $0.0001
+)
+
 type server struct {
 	log              *zap.Logger
 	data             ocp_data.Provider
@@ -140,6 +144,10 @@ func (s *server) calculateCoreMintValueByMint(ctx context.Context, owner *common
 				ValueMintDecimals:     uint8(common.CoreMintDecimals),
 				SellFeeBps:            0,
 			})
+		}
+
+		if coreMintValue < dustValue {
+			continue
 		}
 
 		balancesByMint[mint] = &balancepb.MintBalance{
