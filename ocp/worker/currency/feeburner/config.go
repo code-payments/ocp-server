@@ -3,6 +3,7 @@ package feeburner
 import (
 	"github.com/code-payments/ocp-server/config"
 	"github.com/code-payments/ocp-server/config/env"
+	"github.com/code-payments/ocp-server/ocp/common"
 )
 
 const (
@@ -16,12 +17,19 @@ const (
 
 	MaxBurnsPerBatchConfigEnvName = envConfigPrefix + "MAX_BURNS_PER_BATCH"
 	defaultMaxBurnsPerBatch       = 10
+
+	MinBurnSizeConfigEnvName = envConfigPrefix + "MIN_BURN_SIZE"
+)
+
+var (
+	defaultMinBurnSize = common.ToCoreMintQuarks(1)
 )
 
 type conf struct {
 	subsidizer       config.String
 	batchSize        config.Uint64
 	maxBurnsPerBatch config.Uint64
+	minBurnSize      config.Uint64
 }
 
 // ConfigProvider defines how config values are pulled
@@ -34,6 +42,7 @@ func WithEnvConfigs() ConfigProvider {
 			subsidizer:       env.NewStringConfig(SubsidizerConfigEnvName, defaultSubsidizer),
 			batchSize:        env.NewUint64Config(BatchSizeConfigEnvName, defaultBatchSize),
 			maxBurnsPerBatch: env.NewUint64Config(MaxBurnsPerBatchConfigEnvName, defaultMaxBurnsPerBatch),
+			minBurnSize:      env.NewUint64Config(MinBurnSizeConfigEnvName, defaultMinBurnSize),
 		}
 	}
 }

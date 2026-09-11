@@ -133,7 +133,7 @@ func (p *runtime) hasFeesToBurn(ctx context.Context, record *currency.MetadataRe
 		return false, errors.Wrap(err, "invalid liquidity pool account data")
 	}
 
-	return pool.FeesAccumulated > 0, nil
+	return pool.FeesAccumulated >= p.conf.minBurnSize.Get(ctx), nil
 }
 
 // packBurnBatches greedily packs burn targets into the fewest transactions
