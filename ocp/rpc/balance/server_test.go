@@ -52,7 +52,7 @@ func setup(t *testing.T) (env testEnv, cleanup func()) {
 
 	exchangeRateStore := exchange_memory.New()
 	mintDataProvider := currency_util.NewMintDataProvider(log, env.data, exchangeRateStore, env.reserveStore, env.holderStore, 0, time.Second, time.Second)
-	s := NewBalanceServer(log, env.data, mintDataProvider)
+	s := NewBalanceServer(log, env.data, mintDataProvider, 0)
 
 	serv.RegisterService(func(server *grpc.Server) {
 		balancepb.RegisterBalanceServer(server, s)
