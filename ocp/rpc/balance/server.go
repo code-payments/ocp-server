@@ -32,6 +32,7 @@ func NewBalanceServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider 
 		log:              log,
 		data:             data,
 		mintDataProvider: mintDataProvider,
+		dustValue:        dustValue,
 	}
 }
 
