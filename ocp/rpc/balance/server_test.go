@@ -97,6 +97,7 @@ func TestGetBalance_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, balancepb.GetBalanceResponse_OK, resp.Result)
 	assert.EqualValues(t, 0, resp.CoreMintValue)
+	assert.Empty(t, resp.BalancesByMint)
 
 	setupCachedBalance(t, env, primaryCoreMintAccountRecords, common.ToCoreMintQuarks(42))
 	setupCachedBalance(t, env, primaryLaunchpadMintAccountRecords, currencycreator.ToQuarks(100))
@@ -115,6 +116,77 @@ func TestGetBalance_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, balancepb.GetBalanceResponse_OK, resp.Result)
 	assert.EqualValues(t, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, resp.CoreMintValue)
+	require.Len(t, resp.BalancesByMint, 2)
+	assertMintBalance(t, resp, common.CoreMintAccount, common.ToCoreMintQuarks(42))
+	assertMintBalance(t, resp, launchpadMint, expectedLaunchpadMintValue)
+}
+
+func TestGetBalance_MintFilter(t *testing.T) {
+	env, cleanup := setup(t)
+	defer cleanup()
+
+	coreVmConfig := testutil.NewRandomVmConfig(t, true)
+	launchpadMint := testutil.SetupLaunchpadCurrency(t, env.data, env.reserveStore, env.holderStore)
+	launchpadVmConfig, err := common.GetVmConfigForMint(env.ctx, env.data, launchpadMint)
+	require.NoError(t, err)
+
+	ownerAccount := testutil.NewRandomAccount(t)
+
+	primaryCoreMintAccountRecords := setupAccountRecords(t, env, ownerAccount, ownerAccount, coreVmConfig, 0, commonpb.AccountType_PRIMARY)
+	primaryLaunchpadMintAccountRecords := setupAccountRecords(t, env, ownerAccount, ownerAccount, launchpadVmConfig, 0, commonpb.AccountType_PRIMARY)
+
+	setupCachedBalance(t, env, primaryCoreMintAccountRecords, common.ToCoreMintQuarks(42))
+	setupCachedBalance(t, env, primaryLaunchpadMintAccountRecords, currencycreator.ToQuarks(100))
+
+	expectedLaunchpadMintValue, _ := currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
+		CurrentSupplyInQuarks: currencycreator.ToQuarks(1_000),
+		SellAmountInQuarks:    currencycreator.ToQuarks(100),
+		ValueMintDecimals:     uint8(common.CoreMintDecimals),
+		SellFeeBps:            0,
+	})
+	require.NotZero(t, expectedLaunchpadMintValue)
+
+	// Filtering to the core mint excludes the launchpad currency from both the
+	// total and the per-mint breakdown
+	resp, err := env.client.GetBalance(env.ctx, &balancepb.GetBalanceRequest{
+		Owner: ownerAccount.ToProto(),
+		Mints: []*commonpb.SolanaAccountId{common.CoreMintAccount.ToProto()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, balancepb.GetBalanceResponse_OK, resp.Result)
+	assert.EqualValues(t, common.ToCoreMintQuarks(42), resp.CoreMintValue)
+	require.Len(t, resp.BalancesByMint, 1)
+	assertMintBalance(t, resp, common.CoreMintAccount, common.ToCoreMintQuarks(42))
+
+	resp, err = env.client.GetBalance(env.ctx, &balancepb.GetBalanceRequest{
+		Owner: ownerAccount.ToProto(),
+		Mints: []*commonpb.SolanaAccountId{launchpadMint.ToProto()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, balancepb.GetBalanceResponse_OK, resp.Result)
+	assert.EqualValues(t, expectedLaunchpadMintValue, resp.CoreMintValue)
+	require.Len(t, resp.BalancesByMint, 1)
+	assertMintBalance(t, resp, launchpadMint, expectedLaunchpadMintValue)
+
+	// Duplicate mints in the filter don't double count
+	resp, err = env.client.GetBalance(env.ctx, &balancepb.GetBalanceRequest{
+		Owner: ownerAccount.ToProto(),
+		Mints: []*commonpb.SolanaAccountId{common.CoreMintAccount.ToProto(), launchpadMint.ToProto(), common.CoreMintAccount.ToProto()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, balancepb.GetBalanceResponse_OK, resp.Result)
+	assert.EqualValues(t, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, resp.CoreMintValue)
+	require.Len(t, resp.BalancesByMint, 2)
+
+	// A mint the owner doesn't hold results in an OK response with no balances
+	resp, err = env.client.GetBalance(env.ctx, &balancepb.GetBalanceRequest{
+		Owner: ownerAccount.ToProto(),
+		Mints: []*commonpb.SolanaAccountId{testutil.NewRandomAccount(t).ToProto()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, balancepb.GetBalanceResponse_OK, resp.Result)
+	assert.EqualValues(t, 0, resp.CoreMintValue)
+	assert.Empty(t, resp.BalancesByMint)
 }
 
 func TestGetBalance_UnmanagedAccountsExcluded(t *testing.T) {
@@ -204,6 +276,13 @@ func setupAccountRecords(t *testing.T, env testEnv, ownerAccount, authorityAccou
 		General:  accountInfoRecord,
 		Timelock: timelockRecord,
 	}
+}
+
+func assertMintBalance(t *testing.T, resp *balancepb.GetBalanceResponse, mint *common.Account, expectedCoreMintValue uint64) {
+	mintBalance, ok := resp.BalancesByMint[mint.PublicKey().ToBase58()]
+	require.True(t, ok)
+	assert.Equal(t, mint.PublicKey().ToBytes(), mintBalance.Mint.Value)
+	assert.EqualValues(t, expectedCoreMintValue, mintBalance.CoreMintValue)
 }
 
 func setupCachedBalance(t *testing.T, env testEnv, accountRecords *common.AccountRecords, quarks uint64) {
