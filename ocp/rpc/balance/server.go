@@ -18,19 +18,16 @@ import (
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
-var (
-	dustValue = common.ToCoreMintQuarks(1) / 1000 // $0.0001
-)
-
 type server struct {
 	log              *zap.Logger
 	data             ocp_data.Provider
 	mintDataProvider *currency_util.MintDataProvider
+	dustValue        uint64
 
 	balancepb.UnimplementedBalanceServer
 }
 
-func NewBalanceServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider *currency_util.MintDataProvider) balancepb.BalanceServer {
+func NewBalanceServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider *currency_util.MintDataProvider, dustValue uint64) balancepb.BalanceServer {
 	return &server{
 		log:              log,
 		data:             data,
@@ -146,7 +143,7 @@ func (s *server) calculateCoreMintValueByMint(ctx context.Context, owner *common
 			})
 		}
 
-		if coreMintValue < dustValue {
+		if coreMintValue < s.dustValue {
 			continue
 		}
 
