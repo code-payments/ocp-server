@@ -38,46 +38,6 @@ func NewBalanceServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider 
 	}
 }
 
-func (s *server) GetBalance(ctx context.Context, req *balancepb.GetBalanceRequest) (*balancepb.GetBalanceResponse, error) {
-	log := s.log.With(zap.String("method", "GetBalance"))
-	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
-
-	owner, err := common.NewAccountFromProto(req.Owner)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("invalid owner account")
-		return nil, status.Error(codes.Internal, "")
-	}
-	log = log.With(zap.String("owner_account", owner.PublicKey().ToBase58()))
-
-	mints, err := newMintFilter(req.Mints)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("invalid mint account")
-		return nil, status.Error(codes.Internal, "")
-	}
-
-	// The ledger holds a record for every account Code manages for the owner,
-	// and each carries the mint it holds. Accounts that have left the L2 system
-	// don't have a cached balance that can be trusted, so it omits them. The
-	// mint filter is applied at the ledger read.
-	balanceByTokenAccount, err := balance.BatchCalculateFromCacheByOwner(ctx, s.data, owner, mints...)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting cached balances")
-		return nil, status.Error(codes.Internal, "")
-	}
-
-	ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByTokenAccount, newReserveStateCache())
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure valuing owner balance")
-		return nil, status.Error(codes.Internal, "")
-	}
-
-	return &balancepb.GetBalanceResponse{
-		Result:         balancepb.GetBalanceResponse_OK,
-		CoreMintValue:  ownerBalance.CoreMintValue,
-		BalancesByMint: ownerBalance.BalancesByMint,
-	}, nil
-}
-
 func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequest) (*balancepb.GetBalancesResponse, error) {
 	log := s.log.With(zap.String("method", "GetBalances"))
 	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
