@@ -68,6 +68,20 @@ func (s *store) GetAllByOwner(ctx context.Context, owner string) ([]*balance.Rec
 	return fromModels(models), nil
 }
 
+// GetAllByOwnerBatch implements balance.Store.GetAllByOwnerBatch
+func (s *store) GetAllByOwnerBatch(ctx context.Context, owners, mints []string) (map[string][]*balance.Record, error) {
+	models, err := dbGetAllByOwnerBatch(ctx, s.db, owners, mints)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string][]*balance.Record)
+	for _, model := range models {
+		res[model.OwnerAccount] = append(res[model.OwnerAccount], fromModel(model))
+	}
+	return res, nil
+}
+
 // GetAllByOwnerAndMint implements balance.Store.GetAllByOwnerAndMint
 func (s *store) GetAllByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error) {
 	models, err := dbGetAllByOwner(ctx, s.db, owner, &mint)
