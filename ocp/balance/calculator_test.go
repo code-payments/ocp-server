@@ -120,6 +120,62 @@ func TestDefaultCalculationMethods_ByOwner(t *testing.T) {
 	assert.Empty(t, balanceByAccount)
 }
 
+func TestDefaultCalculationMethods_ByOwners(t *testing.T) {
+	env := setupBalanceTestEnv(t)
+
+	coreVmConfig := testutil.NewRandomVmConfig(t, true)
+	otherVmConfig := testutil.NewRandomVmConfig(t, false)
+
+	owner1 := testutil.NewRandomAccount(t)
+	owner2 := testutil.NewRandomAccount(t)
+	unknownOwner := testutil.NewRandomAccount(t)
+
+	owner1CoreMint := newBalanceTestAccountForOwner(t, env, owner1, coreVmConfig)
+	owner1OtherMint := newBalanceTestAccountForOwner(t, env, owner1, otherVmConfig)
+	owner2CoreMint := newBalanceTestAccountForOwner(t, env, owner2, coreVmConfig)
+	owner2Unlocked := newBalanceTestAccountForOwner(t, env, owner2, otherVmConfig)
+
+	saveBalanceTestRecord(t, env, owner1CoreMint, &balance.Record{Quarks: 42, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, owner1OtherMint, &balance.Record{Quarks: 33, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, owner2CoreMint, &balance.Record{Quarks: 7, IsOpen: true, IsLocked: true})
+	saveBalanceTestRecord(t, env, owner2Unlocked, &balance.Record{Quarks: 99, IsOpen: true})
+
+	// Every owner's managed accounts are reported in a single read. Unlocked
+	// accounts and owners the ledger holds nothing for are omitted.
+	balanceByOwnerAndAccount, err := BatchCalculateFromCacheByOwners(env.ctx, env.data, []*common.Account{owner1, owner2, unknownOwner}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]map[string]*Balance{
+		owner1.PublicKey().ToBase58(): {
+			owner1CoreMint.tokenAccount.PublicKey().ToBase58():  {MintAccount: owner1CoreMint.mint(), Quarks: 42},
+			owner1OtherMint.tokenAccount.PublicKey().ToBase58(): {MintAccount: owner1OtherMint.mint(), Quarks: 33},
+		},
+		owner2.PublicKey().ToBase58(): {
+			owner2CoreMint.tokenAccount.PublicKey().ToBase58(): {MintAccount: owner2CoreMint.mint(), Quarks: 7},
+		},
+	}, balanceByOwnerAndAccount)
+
+	// A mint filter limits the read to the provided mints
+	balanceByOwnerAndAccount, err = BatchCalculateFromCacheByOwners(env.ctx, env.data, []*common.Account{owner1, owner2}, []*common.Account{otherVmConfig.Mint})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]map[string]*Balance{
+		owner1.PublicKey().ToBase58(): {
+			owner1OtherMint.tokenAccount.PublicKey().ToBase58(): {MintAccount: owner1OtherMint.mint(), Quarks: 33},
+		},
+	}, balanceByOwnerAndAccount)
+
+	// The single owner variant applies the same filter
+	balanceByAccount, err := BatchCalculateFromCacheByOwner(env.ctx, env.data, owner1, otherVmConfig.Mint)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]*Balance{
+		owner1OtherMint.tokenAccount.PublicKey().ToBase58(): {MintAccount: owner1OtherMint.mint(), Quarks: 33},
+	}, balanceByAccount)
+
+	// A filter naming a mint nobody holds is empty rather than an error
+	balanceByOwnerAndAccount, err = BatchCalculateFromCacheByOwners(env.ctx, env.data, []*common.Account{owner1, owner2}, []*common.Account{testutil.NewRandomAccount(t)})
+	require.NoError(t, err)
+	assert.Empty(t, balanceByOwnerAndAccount)
+}
+
 func TestDefaultCalculation_ExternalAccount(t *testing.T) {
 	env := setupBalanceTestEnv(t)
 	externalAccount := testutil.NewRandomAccount(t)

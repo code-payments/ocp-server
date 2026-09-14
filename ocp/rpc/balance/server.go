@@ -3,11 +3,13 @@ package balance
 import (
 	"context"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	balancepb "github.com/code-payments/ocp-protobuf-api/generated/go/balance/v1"
+	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/balance"
@@ -47,39 +49,100 @@ func (s *server) GetBalance(ctx context.Context, req *balancepb.GetBalanceReques
 	}
 	log = log.With(zap.String("owner_account", owner.PublicKey().ToBase58()))
 
-	var mintFilter map[string]struct{}
-	if len(req.Mints) > 0 {
-		mintFilter = make(map[string]struct{}, len(req.Mints))
-		for i, protoMint := range req.Mints {
-			mint, err := common.NewAccountFromProto(protoMint)
-			if err != nil {
-				log.With(zap.Error(err), zap.Int("index", i)).Warn("invalid mint account")
-				return nil, status.Error(codes.Internal, "")
-			}
-			mintFilter[mint.PublicKey().ToBase58()] = struct{}{}
-		}
-	}
-
-	ownerMetadata, err := common.GetOwnerMetadata(ctx, s.data, owner)
-	if err == common.ErrOwnerNotFound {
-		return &balancepb.GetBalanceResponse{
-			Result: balancepb.GetBalanceResponse_NOT_FOUND,
-		}, nil
-	} else if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting owner metadata")
-		return nil, status.Error(codes.Internal, "")
-	}
-
-	if ownerMetadata.Type != common.OwnerTypeUser12Words {
-		return &balancepb.GetBalanceResponse{
-			Result: balancepb.GetBalanceResponse_NOT_FOUND,
-		}, nil
-	}
-
-	balancesByMint, err := s.calculateCoreMintValueByMint(ctx, owner, mintFilter)
+	mints, err := newMintFilter(req.Mints)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure calculating core mint value")
+		log.With(zap.Error(err)).Warn("invalid mint account")
 		return nil, status.Error(codes.Internal, "")
+	}
+
+	// The ledger holds a record for every account Code manages for the owner,
+	// and each carries the mint it holds. Accounts that have left the L2 system
+	// don't have a cached balance that can be trusted, so it omits them. The
+	// mint filter is applied at the ledger read.
+	balanceByTokenAccount, err := balance.BatchCalculateFromCacheByOwner(ctx, s.data, owner, mints...)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting cached balances")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByTokenAccount, newReserveStateCache())
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure valuing owner balance")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	return &balancepb.GetBalanceResponse{
+		Result:         balancepb.GetBalanceResponse_OK,
+		CoreMintValue:  ownerBalance.CoreMintValue,
+		BalancesByMint: ownerBalance.BalancesByMint,
+	}, nil
+}
+
+func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequest) (*balancepb.GetBalancesResponse, error) {
+	log := s.log.With(zap.String("method", "GetBalances"))
+	log = client.InjectLoggingMetadata(ctx, log, rpc.UserAgentName)
+
+	mints, err := newMintFilter(req.Mints)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("invalid mint account")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	// Duplicate owners collapse to a single entry
+	seenOwners := make(map[string]struct{}, len(req.Owners))
+	owners := make([]*common.Account, 0, len(req.Owners))
+	for i, protoOwner := range req.Owners {
+		owner, err := common.NewAccountFromProto(protoOwner)
+		if err != nil {
+			log.With(zap.Error(err), zap.Int("index", i)).Warn("invalid owner account")
+			return nil, status.Error(codes.Internal, "")
+		}
+
+		if _, ok := seenOwners[owner.PublicKey().ToBase58()]; ok {
+			continue
+		}
+		seenOwners[owner.PublicKey().ToBase58()] = struct{}{}
+		owners = append(owners, owner)
+	}
+
+	// All owners' ledger records are read in a single batch, with the mint
+	// filter applied at the ledger read. Owners the ledger holds nothing for
+	// are absent from the result, and are reported with an empty balance.
+	balanceByOwnerAndTokenAccount, err := balance.BatchCalculateFromCacheByOwners(ctx, s.data, owners, mints)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting cached balances")
+		return nil, status.Error(codes.Internal, "")
+	}
+
+	// A single reserve state cache values every owner's holdings in a mint
+	// against the same supply, even if the mint data provider refreshes
+	// mid-request.
+	reserveStateCache := newReserveStateCache()
+
+	balancesByOwner := make(map[string]*balancepb.OwnerBalance, len(owners))
+	for _, owner := range owners {
+		ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByOwnerAndTokenAccount[owner.PublicKey().ToBase58()], reserveStateCache)
+		if err != nil {
+			log.With(zap.Error(err), zap.String("owner_account", owner.PublicKey().ToBase58())).Warn("failure valuing owner balance")
+			return nil, status.Error(codes.Internal, "")
+		}
+
+		balancesByOwner[owner.PublicKey().ToBase58()] = ownerBalance
+	}
+
+	return &balancepb.GetBalancesResponse{
+		Result:          balancepb.GetBalancesResponse_OK,
+		BalancesByOwner: balancesByOwner,
+	}, nil
+}
+
+// valueOwnerBalance values an owner's cached holdings. Owner metadata checks
+// are intentionally skipped as an optimization, so an owner with no ledger
+// records has an empty balance.
+func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache) (*balancepb.OwnerBalance, error) {
+	balancesByMint, err := s.calculateCoreMintValueByMint(ctx, balanceByTokenAccount, reserveStateCache)
+	if err != nil {
+		return nil, err
 	}
 
 	var totalCoreMintValue uint64
@@ -87,32 +150,64 @@ func (s *server) GetBalance(ctx context.Context, req *balancepb.GetBalanceReques
 		totalCoreMintValue += mintBalance.CoreMintValue
 	}
 
-	return &balancepb.GetBalanceResponse{
-		Result:         balancepb.GetBalanceResponse_OK,
+	return &balancepb.OwnerBalance{
+		Owner:          owner.ToProto(),
 		CoreMintValue:  totalCoreMintValue,
 		BalancesByMint: balancesByMint,
 	}, nil
 }
 
-// calculateCoreMintValueByMint values the owner's holdings in each mint they
-// hold a non-zero balance of. A nil mintFilter includes every mint, otherwise
-// only mints in the filter are included.
-func (s *server) calculateCoreMintValueByMint(ctx context.Context, owner *common.Account, mintFilter map[string]struct{}) (map[string]*balancepb.MintBalance, error) {
-	// The ledger holds a record for every account Code manages for the owner,
-	// and each carries the mint it holds. Accounts that have left the L2 system
-	// don't have a cached balance that can be trusted, so it omits them.
-	balanceByTokenAccount, err := balance.BatchCalculateFromCacheByOwner(ctx, s.data, owner)
+// newMintFilter converts the request's mints into a deduplicated list for
+// filtering the ledger read. A nil filter is returned when no mints are
+// provided, which includes every mint.
+func newMintFilter(protoMints []*commonpb.SolanaAccountId) ([]*common.Account, error) {
+	if len(protoMints) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(protoMints))
+	mints := make([]*common.Account, 0, len(protoMints))
+	for i, protoMint := range protoMints {
+		mint, err := common.NewAccountFromProto(protoMint)
+		if err != nil {
+			return nil, errors.Wrapf(err, "invalid mint account at index %d", i)
+		}
+
+		if _, ok := seen[mint.PublicKey().ToBase58()]; ok {
+			continue
+		}
+		seen[mint.PublicKey().ToBase58()] = struct{}{}
+		mints = append(mints, mint)
+	}
+	return mints, nil
+}
+
+// reserveStateCache pins the live reserve state observed for each launchpad
+// mint so every valuation within a single RPC uses the same supply.
+type reserveStateCache map[string]*currency_util.LiveReserveStateData
+
+func newReserveStateCache() reserveStateCache {
+	return make(reserveStateCache)
+}
+
+func (s *server) getLiveReserveState(ctx context.Context, mint *common.Account, cache reserveStateCache) (*currency_util.LiveReserveStateData, error) {
+	if reserveState, ok := cache[mint.PublicKey().ToBase58()]; ok {
+		return reserveState, nil
+	}
+
+	reserveState, err := s.mintDataProvider.GetLiveReserveState(ctx, mint)
 	if err != nil {
 		return nil, err
 	}
+	cache[mint.PublicKey().ToBase58()] = reserveState
+	return reserveState, nil
+}
 
+// calculateCoreMintValueByMint values cached holdings in each mint with a
+// non-zero balance. Each balance carries the mint it holds.
+func (s *server) calculateCoreMintValueByMint(ctx context.Context, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache) (map[string]*balancepb.MintBalance, error) {
 	quarksByMint := make(map[string]uint64)
 	for _, cached := range balanceByTokenAccount {
-		if mintFilter != nil {
-			if _, ok := mintFilter[cached.MintAccount]; !ok {
-				continue
-			}
-		}
 		quarksByMint[cached.MintAccount] += cached.Quarks
 	}
 
@@ -131,7 +226,7 @@ func (s *server) calculateCoreMintValueByMint(ctx context.Context, owner *common
 		if mint == common.CoreMintAccount.PublicKey().ToBase58() {
 			coreMintValue = quarks
 		} else {
-			reserveState, err := s.mintDataProvider.GetLiveReserveState(ctx, mintAccount)
+			reserveState, err := s.getLiveReserveState(ctx, mintAccount, reserveStateCache)
 			if err != nil {
 				return nil, err
 			}

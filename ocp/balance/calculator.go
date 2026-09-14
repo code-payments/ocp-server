@@ -185,21 +185,56 @@ func BatchCalculateFromCache(ctx context.Context, data ocp_data.Provider, tokenA
 //
 // Note: Use this method when calculating balances for accounts that are managed by
 // Code (ie. Timelock account) and operate within the L2 system.
-func BatchCalculateFromCacheByOwner(ctx context.Context, data ocp_data.Provider, owner *common.Account) (map[string]*Balance, error) {
-	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateFromCacheByOwner")
-	tracer.AddAttribute("owner", owner.PublicKey().ToBase58())
+func BatchCalculateFromCacheByOwner(ctx context.Context, data ocp_data.Provider, owner *common.Account, mints ...*common.Account) (map[string]*Balance, error) {
+	balancesByOwner, err := BatchCalculateFromCacheByOwners(ctx, data, []*common.Account{owner}, mints)
+	if err != nil {
+		return nil, err
+	}
+
+	res, ok := balancesByOwner[owner.PublicKey().ToBase58()]
+	if !ok {
+		return make(map[string]*Balance), nil
+	}
+	return res, nil
+}
+
+// BatchCalculateFromCacheByOwners is BatchCalculateFromCacheByOwner for a set
+// of owners in a single ledger read. The result is keyed by owner, then by
+// token account. Owners the ledger holds nothing for are omitted. An empty
+// mints slice includes every mint, otherwise the read is limited to the
+// provided mints.
+func BatchCalculateFromCacheByOwners(ctx context.Context, data ocp_data.Provider, owners, mints []*common.Account) (map[string]map[string]*Balance, error) {
+	tracer := metrics.TraceMethodCall(ctx, metricsPackageName, "BatchCalculateFromCacheByOwners")
+	tracer.AddAttribute("owner_count", len(owners))
+	tracer.AddAttribute("mint_count", len(mints))
 	defer tracer.End()
 
-	balanceRecords, err := data.GetAllBalancesByOwner(ctx, owner.PublicKey().ToBase58())
-	if err != nil && err != balance.ErrRecordNotFound {
+	ownerAddresses := make([]string, len(owners))
+	for i, owner := range owners {
+		ownerAddresses[i] = owner.PublicKey().ToBase58()
+	}
+
+	mintAddresses := make([]string, len(mints))
+	for i, mint := range mints {
+		mintAddresses[i] = mint.PublicKey().ToBase58()
+	}
+
+	balanceRecordsByOwner, err := data.GetAllBalancesByOwnerBatch(ctx, ownerAddresses, mintAddresses)
+	if err != nil {
 		tracer.OnError(err)
 		return nil, err
 	}
 
-	res := make(map[string]*Balance, len(balanceRecords))
-	for _, balanceRecord := range balanceRecords {
-		if cached, ok := balanceFromRecord(balanceRecord); ok {
-			res[balanceRecord.TokenAccount] = cached
+	res := make(map[string]map[string]*Balance, len(balanceRecordsByOwner))
+	for owner, balanceRecords := range balanceRecordsByOwner {
+		balancesByTokenAccount := make(map[string]*Balance, len(balanceRecords))
+		for _, balanceRecord := range balanceRecords {
+			if cached, ok := balanceFromRecord(balanceRecord); ok {
+				balancesByTokenAccount[balanceRecord.TokenAccount] = cached
+			}
+		}
+		if len(balancesByTokenAccount) > 0 {
+			res[owner] = balancesByTokenAccount
 		}
 	}
 	return res, nil

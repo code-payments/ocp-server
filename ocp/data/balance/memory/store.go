@@ -90,6 +90,40 @@ func (s *store) GetAllByOwner(_ context.Context, owner string) ([]*balance.Recor
 	})
 }
 
+// GetAllByOwnerBatch implements balance.Store.GetAllByOwnerBatch
+func (s *store) GetAllByOwnerBatch(_ context.Context, owners, mints []string) (map[string][]*balance.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ownerSet := make(map[string]struct{}, len(owners))
+	for _, owner := range owners {
+		ownerSet[owner] = struct{}{}
+	}
+
+	var mintSet map[string]struct{}
+	if len(mints) > 0 {
+		mintSet = make(map[string]struct{}, len(mints))
+		for _, mint := range mints {
+			mintSet[mint] = struct{}{}
+		}
+	}
+
+	res := make(map[string][]*balance.Record)
+	for _, item := range s.balanceRecords {
+		if _, ok := ownerSet[item.OwnerAccount]; !ok {
+			continue
+		}
+		if mintSet != nil {
+			if _, ok := mintSet[item.MintAccount]; !ok {
+				continue
+			}
+		}
+		cloned := item.Clone()
+		res[item.OwnerAccount] = append(res[item.OwnerAccount], &cloned)
+	}
+	return res, nil
+}
+
 // GetAllByOwnerAndMint implements balance.Store.GetAllByOwnerAndMint
 func (s *store) GetAllByOwnerAndMint(_ context.Context, owner, mint string) ([]*balance.Record, error) {
 	s.mu.Lock()

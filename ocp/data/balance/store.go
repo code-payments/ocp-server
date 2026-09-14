@@ -51,6 +51,12 @@ type Store interface {
 	// ErrRecordNotFound is returned if no records exist.
 	GetAllByOwner(ctx context.Context, owner string) ([]*Record, error)
 
+	// GetAllByOwnerBatch gets all balance records for a set of owners, keyed
+	// by owner. An empty mints slice includes every mint, otherwise only
+	// records for the provided mints are returned. Owners without records
+	// are omitted from the result.
+	GetAllByOwnerBatch(ctx context.Context, owners, mints []string) (map[string][]*Record, error)
+
 	// GetAllByOwnerAndMint gets all balance records for an owner and mint.
 	//
 	// ErrRecordNotFound is returned if no records exist.

@@ -45,6 +45,10 @@ func testRecordHappyPath(t *testing.T, s balance.Store) {
 		require.NoError(t, err)
 		assert.Empty(t, batch)
 
+		byOwnerBatch, err := s.GetAllByOwnerBatch(ctx, []string{"owner_1", "owner_2"}, nil)
+		require.NoError(t, err)
+		assert.Empty(t, byOwnerBatch)
+
 		start := time.Now()
 
 		expected := &balance.Record{
@@ -94,6 +98,25 @@ func testRecordHappyPath(t *testing.T, s balance.Store) {
 		require.Len(t, byOwner, 2)
 		assert.Equal(t, "token_account_1", byOwner[0].TokenAccount)
 		assert.Equal(t, "token_account_2", byOwner[1].TokenAccount)
+
+		byOwnerBatch, err = s.GetAllByOwnerBatch(ctx, []string{"owner_1", "owner_2", "owner_3"}, nil)
+		require.NoError(t, err)
+		require.Len(t, byOwnerBatch, 2)
+		require.Len(t, byOwnerBatch["owner_1"], 2)
+		assertEquivalentRecords(t, &cloned, byOwnerBatch["owner_1"][0])
+		assert.Equal(t, "token_account_2", byOwnerBatch["owner_1"][1].TokenAccount)
+		require.Len(t, byOwnerBatch["owner_2"], 1)
+		assert.Equal(t, "token_account_3", byOwnerBatch["owner_2"][0].TokenAccount)
+
+		byOwnerBatch, err = s.GetAllByOwnerBatch(ctx, []string{"owner_1", "owner_2"}, []string{"mint_2"})
+		require.NoError(t, err)
+		require.Len(t, byOwnerBatch, 1)
+		require.Len(t, byOwnerBatch["owner_1"], 1)
+		assert.Equal(t, "token_account_2", byOwnerBatch["owner_1"][0].TokenAccount)
+
+		byOwnerBatch, err = s.GetAllByOwnerBatch(ctx, []string{"owner_1", "owner_2"}, []string{"mint_3"})
+		require.NoError(t, err)
+		assert.Empty(t, byOwnerBatch)
 
 		byOwnerAndMint, err := s.GetAllByOwnerAndMint(ctx, "owner_1", "mint_2")
 		require.NoError(t, err)

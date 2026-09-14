@@ -125,6 +125,7 @@ type DatabaseData interface {
 	GetBalance(ctx context.Context, tokenAccount string) (*balance.Record, error)
 	GetBalanceBatch(ctx context.Context, tokenAccounts ...string) (map[string]*balance.Record, error)
 	GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error)
+	GetAllBalancesByOwnerBatch(ctx context.Context, owners, mints []string) (map[string][]*balance.Record, error)
 	GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error)
 	GetAllLockedBalancesByMint(ctx context.Context, mint string, minQuarks uint64, cursor query.Cursor, limit uint64, direction query.Ordering) ([]*balance.Record, error)
 	CountLockedBalancesByMint(ctx context.Context, mint string, minQuarks uint64) (uint64, error)
@@ -476,6 +477,9 @@ func (dp *DatabaseProvider) GetBalanceBatch(ctx context.Context, tokenAccounts .
 }
 func (dp *DatabaseProvider) GetAllBalancesByOwner(ctx context.Context, owner string) ([]*balance.Record, error) {
 	return dp.balance.GetAllByOwner(ctx, owner)
+}
+func (dp *DatabaseProvider) GetAllBalancesByOwnerBatch(ctx context.Context, owners, mints []string) (map[string][]*balance.Record, error) {
+	return dp.balance.GetAllByOwnerBatch(ctx, owners, mints)
 }
 func (dp *DatabaseProvider) GetAllBalancesByOwnerAndMint(ctx context.Context, owner, mint string) ([]*balance.Record, error) {
 	return dp.balance.GetAllByOwnerAndMint(ctx, owner, mint)

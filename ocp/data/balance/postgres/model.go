@@ -136,6 +136,30 @@ func dbGetBatch(ctx context.Context, db *sqlx.DB, tokenAccounts ...string) ([]*m
 	return res, nil
 }
 
+func dbGetAllByOwnerBatch(ctx context.Context, db *sqlx.DB, owners, mints []string) ([]*model, error) {
+	res := []*model{}
+	if len(owners) == 0 {
+		return res, nil
+	}
+
+	query := `SELECT ` + allColumns + ` FROM ` + tableName + `
+		WHERE owner_account = ANY($1)`
+	args := []any{owners}
+	if len(mints) > 0 {
+		query += ` AND mint_account = ANY($2)`
+		args = append(args, mints)
+	}
+	query += ` ORDER BY id ASC`
+
+	err := pgutil.ExecuteInTx(ctx, db, sql.LevelDefault, func(tx *sqlx.Tx) error {
+		return tx.SelectContext(ctx, &res, query, args...)
+	})
+	if err != nil && !pgutil.IsNoRows(err) {
+		return nil, err
+	}
+	return res, nil
+}
+
 func dbGetAllByOwner(ctx context.Context, db *sqlx.DB, owner string, mint *string) ([]*model, error) {
 	res := []*model{}
 
