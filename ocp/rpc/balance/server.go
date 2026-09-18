@@ -2,6 +2,7 @@ package balance
 
 import (
 	"context"
+	"strings"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -79,9 +80,17 @@ func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequ
 	// mid-request.
 	reserveStateCache := newReserveStateCache()
 
+	// Exchange rates are pinned once per request so every balance denominated
+	// in a currency uses the same rate. Currencies without a rate are dropped.
+	exchangeRates, err := s.getExchangeRates(ctx, req.CurrencyCodes)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure getting live exchange rates")
+		return nil, status.Error(codes.Internal, "")
+	}
+
 	balancesByOwner := make(map[string]*balancepb.OwnerBalance, len(owners))
 	for _, owner := range owners {
-		ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByOwnerAndTokenAccount[owner.PublicKey().ToBase58()], reserveStateCache)
+		ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByOwnerAndTokenAccount[owner.PublicKey().ToBase58()], reserveStateCache, exchangeRates)
 		if err != nil {
 			log.With(zap.Error(err), zap.String("owner_account", owner.PublicKey().ToBase58())).Warn("failure valuing owner balance")
 			return nil, status.Error(codes.Internal, "")
@@ -99,7 +108,7 @@ func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequ
 // valueOwnerBalance values an owner's cached holdings. Owner metadata checks
 // are intentionally skipped as an optimization, so an owner with no ledger
 // records has an empty balance.
-func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache) (*balancepb.OwnerBalance, error) {
+func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache, exchangeRates exchangeRates) (*balancepb.OwnerBalance, error) {
 	balancesByMint, err := s.calculateCoreMintValueByMint(ctx, balanceByTokenAccount, reserveStateCache)
 	if err != nil {
 		return nil, err
@@ -108,12 +117,14 @@ func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, b
 	var totalCoreMintValue uint64
 	for _, mintBalance := range balancesByMint {
 		totalCoreMintValue += mintBalance.CoreMintValue
+		mintBalance.FiatValuesByCurrency = exchangeRates.toFiatValues(mintBalance.CoreMintValue)
 	}
 
 	return &balancepb.OwnerBalance{
-		Owner:          owner.ToProto(),
-		CoreMintValue:  totalCoreMintValue,
-		BalancesByMint: balancesByMint,
+		Owner:                owner.ToProto(),
+		CoreMintValue:        totalCoreMintValue,
+		BalancesByMint:       balancesByMint,
+		FiatValuesByCurrency: exchangeRates.toFiatValues(totalCoreMintValue),
 	}, nil
 }
 
@@ -140,6 +151,52 @@ func newMintFilter(protoMints []*commonpb.SolanaAccountId) ([]*common.Account, e
 		mints = append(mints, mint)
 	}
 	return mints, nil
+}
+
+// exchangeRates pins the live exchange rate observed for each requested
+// currency code so every valuation within a single RPC uses the same rate.
+type exchangeRates map[string]float64
+
+// getExchangeRates resolves the requested currency codes against the live
+// exchange rates. Codes without a live rate are omitted, so the result only
+// holds currencies that can be valued. Nothing is fetched when no codes are
+// requested.
+func (s *server) getExchangeRates(ctx context.Context, currencyCodes []string) (exchangeRates, error) {
+	if len(currencyCodes) == 0 {
+		return nil, nil
+	}
+
+	liveExchangeRates, err := s.mintDataProvider.GetLiveExchangeRates(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	rates := make(exchangeRates, len(currencyCodes))
+	for _, currencyCode := range currencyCodes {
+		currencyCode = strings.ToLower(currencyCode)
+
+		rate, ok := liveExchangeRates.Rates[currencyCode]
+		if !ok {
+			continue
+		}
+		rates[currencyCode] = rate
+	}
+	return rates, nil
+}
+
+// toFiatValues denominates a core mint value in every pinned currency. A nil
+// map is returned when there are no pinned currencies, which leaves the proto
+// field unset.
+func (r exchangeRates) toFiatValues(coreMintValue uint64) map[string]float64 {
+	if len(r) == 0 {
+		return nil
+	}
+
+	fiatValues := make(map[string]float64, len(r))
+	for currencyCode, rate := range r {
+		fiatValues[currencyCode] = currency_util.CalculateFiatValueFromCoreMintQuarks(coreMintValue, rate)
+	}
+	return fiatValues
 }
 
 // reserveStateCache pins the live reserve state observed for each launchpad
