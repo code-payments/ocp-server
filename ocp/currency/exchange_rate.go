@@ -20,3 +20,10 @@ func CalculateExchangeRate(mintAccount *common.Account, quarks uint64, nativeAmo
 	exchangeRate, _ := exchangeRateBig.Float64()
 	return exchangeRate
 }
+
+// CalculateFiatValueFromCoreMintQuarks calculates the fiat value of a core mint
+// amount in quarks given an exchange rate denominated in fiat per core mint unit.
+func CalculateFiatValueFromCoreMintQuarks(quarks uint64, exchangeRate float64) float64 {
+	coreMintUnits := float64(quarks) / float64(common.CoreMintQuarksPerUnit)
+	return coreMintUnits * exchangeRate
+}
