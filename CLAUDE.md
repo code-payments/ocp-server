@@ -27,7 +27,7 @@ go test -v ./...
 
 - Tests use `testify` (`assert`/`require`).
 - Postgres store tests spin up a `postgres:14` container via `ory/dockertest` (`database/postgres/test`), so Docker must be running for the full suite. Memory store tests need nothing.
-- Some stores (currency exchange/reserve/holder, messaging) are DynamoDB-backed; their tests use `database/dynamodb/test`.
+- Some stores (currency exchange/reserve/holder, messaging, balance watch) are DynamoDB-backed; their tests use `database/dynamodb/test` (a `dynamodb-local` container, so Docker is needed for these too).
 
 ### Building
 ```bash
@@ -58,7 +58,7 @@ Everything protocol-specific lives under `ocp/`. All other top-level packages ar
 - `ocp/data/`: data layer. `Provider` composes `BlockchainData` (Solana RPC), `DatabaseData` (stores), and `WebData` (external exchange rate APIs).
 - `ocp/integration/`: pluggable app hooks: `SubmitIntent`, `Swap`, `Geyser`, `Moderation`, `Antispam`, `TaskExecutor`. Default implementations exist for most (allow-everything or no-op).
 - `ocp/antispam/`, `ocp/aml/`: guards applied to intents that move user funds. Antispam delegates to the integration; AML enforces daily USD limits from the data layer.
-- `ocp/balance/`: cached balance ledger (see below)
+- `ocp/balance/`: cached balance ledger (see below), plus `Valuer`, the one definition of what holdings are worth in the core mint (`GetBalances` and balance watches both value through it), and `ocp/balance/watch/`, the pure watch evaluator (state machine with grace, `Exposed`/`Headroom`, and `Tiers` pacing the next evaluation)
 - `ocp/history/`: builds per-owner transaction history records from intents, deposits, swaps, and gift cards
 - `ocp/task/`: task scheduler (see below)
 - `ocp/currency/`: currency utilities: `MintDataProvider` (cached, pre-signed live mint data), exchange rate and USD market value helpers, fees, limits, market cap
@@ -80,7 +80,8 @@ Everything protocol-specific lives under `ocp/`. All other top-level packages ar
 ### Data layer
 
 - Each entity has `ocp/data/{entity}/store.go` (interface + sentinel errors), `memory/`, a `postgres/` or `dynamodb/` implementation, and `tests/tests.go` (shared conformance suite run by every implementation).
-- `ocp/data/internal.go` defines `DatabaseData` and `DatabaseProvider`. Most stores are exposed through the provider. **Currency exchange, reserve, and holder stores, and the messaging store, are not part of the provider.** They are constructed separately and passed explicitly to the workers and RPC servers that need them.
+- `ocp/data/internal.go` defines `DatabaseData` and `DatabaseProvider`. Most stores are exposed through the provider. **Currency exchange, reserve, and holder stores, the messaging store, and the balance watch store are not part of the provider.** They are constructed separately and passed explicitly to the workers and RPC servers that need them.
+- `ocp/data/balance/watch/` is the store behind the Balance service's watches (`ocp.balance.v1.Balance`, "Section: Watches"). Its package comment is the design: the **owner is the unit** (one DynamoDB partition per owner holding a `#meta` schedule item and every subscriber's watches on that owner; one claim, one read and one evaluation pass per owner however many watches it has), atomicity is **per commit, never per owner** (`CommitTransitions` writes ≤ `MaxTransitionsPerCommit` watch transitions plus their event in one transaction; more are chunked), and every racing write is a version CAS (`ErrStaleVersion`) rather than a lock. Two sparse GSIs (`by_subscriber` for listing, `by_due` for the evaluation queue) — a new item kind written into an owner's partition must omit their key attributes or it leaks into the index. Events sit in a second table sharded by owner, with UUIDv7 IDs that embed the shard (`watch.NewEventID` / `watch.EventShard`) so an ack can find its item from the ID alone; delivery is lease + ack. The evaluator is `ocp/balance/watch` (see "Balance watches" below); the RPC handlers and worker that drive the store are not built yet.
 - **Table DDL and migrations are external to this repository.** Each postgres store test embeds a `tableCreate` string used only for tests. When changing a schema, update the test DDL here and coordinate the real migration separately.
 - Postgres tables are named `ocp__core_{entity}`.
 - `NewTestDataProvider()` wires all-memory stores plus a testnet blockchain provider.
@@ -110,7 +111,14 @@ Race resistance comes from the balance ledger's predicates inside the intent tra
 - Once a vault unlocks, funds can move on chain without an intent, so the record stops being maintained. Unlocked records are excluded from reads and reject non-credit deltas.
 - `CalculateFromCache` for managed accounts, returning `ErrNotManagedByCode` when no locked record exists. `CalculateFromBlockchain` for external accounts.
 - USD values are stored as int64 micro-USD (6 decimals, matching USDF). Never do float USD arithmetic in the ledger.
+- Valuation lives in `valuation.go`: `Valuer.ValueHoldings` gives the core mint value per mint (core mint = quarks; launchpad currency = `EstimateSell` of the whole holding at live reserve state, no fee) against a per-operation `ReserveStateCache`. Anything that decides on a balance — the RPC, a watch — must go through it rather than re-deriving the arithmetic.
 - Delta rules (`delta.go`) only cover supported intent shapes and refuse anything else with `ErrUnsupportedBalanceChange`. A new money-moving intent type needs a delta rule before it can be committed.
+
+### Balance watches (`ocp/balance/watch`, `ocp/data/balance/watch`, `ocp/rpc/balance`)
+
+- `ocp/balance/watch.Evaluate` is pure: (record, per-mint core values, live rates, now) → `Outcome{Record, Previous, Transitioned, Headroom, Exposed}`. A core mint threshold compares quarks exactly; a fiat one allows half a minor unit of slack. Creation is never a transition. `Tiers.NextEvaluation` paces an owner by the tightest watch: exposed + thin headroom → 1 min, … not exposed → 24h backstop (the owner's own ledger changes re-evaluate them on their own). Grace deadlines cap a BELOW watch's wait.
+- Subscribers are authenticated by `ocp/rpc/balance/subscriber.go`: the same Ed25519 signature check as owners (`auth.RPCSignatureVerifier`) plus a registry, today the `BALANCE_SERVICE_WATCH_SUBSCRIBERS` allow-list (comma-separated base58 keys). Unregistered key and bad signature both map to `errSubscriberDenied` → the RPC's `DENIED` result, deliberately indistinguishable. Other `BALANCE_SERVICE_WATCH_*` config: max watches per owner per subscriber, max grace, default/max event lease.
+- Not yet built: the watch RPC handlers, the evaluation worker, and the ledger outbox that re-evaluates an owner when their balance changes.
 
 ### Task system (`ocp/task`, `ocp/worker/task`, `ocp/data/task`)
 

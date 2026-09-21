@@ -18,13 +18,13 @@ import (
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/rpc"
-	"github.com/code-payments/ocp-server/solana/currencycreator"
 )
 
 type server struct {
 	log              *zap.Logger
 	data             ocp_data.Provider
 	mintDataProvider *currency_util.MintDataProvider
+	valuer           *balance.Valuer
 	dustValue        uint64
 
 	balancepb.UnimplementedBalanceServer
@@ -35,6 +35,7 @@ func NewBalanceServer(log *zap.Logger, data ocp_data.Provider, mintDataProvider 
 		log:              log,
 		data:             data,
 		mintDataProvider: mintDataProvider,
+		valuer:           balance.NewValuer(data, mintDataProvider),
 		dustValue:        dustValue,
 	}
 }
@@ -78,7 +79,7 @@ func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequ
 	// A single reserve state cache values every owner's holdings in a mint
 	// against the same supply, even if the mint data provider refreshes
 	// mid-request.
-	reserveStateCache := newReserveStateCache()
+	reserveStateCache := balance.NewReserveStateCache()
 
 	// Exchange rates are pinned once per request so every balance denominated
 	// in a currency uses the same rate. Currencies without a rate are dropped.
@@ -108,7 +109,7 @@ func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequ
 // valueOwnerBalance values an owner's cached holdings. Owner metadata checks
 // are intentionally skipped as an optimization, so an owner with no ledger
 // records has an empty balance.
-func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache, exchangeRates exchangeRates) (*balancepb.OwnerBalance, error) {
+func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache balance.ReserveStateCache, exchangeRates exchangeRates) (*balancepb.OwnerBalance, error) {
 	balancesByMint, err := s.calculateCoreMintValueByMint(ctx, balanceByTokenAccount, reserveStateCache)
 	if err != nil {
 		return nil, err
@@ -199,65 +200,23 @@ func (r exchangeRates) toFiatValues(coreMintValue uint64) map[string]float64 {
 	return fiatValues
 }
 
-// reserveStateCache pins the live reserve state observed for each launchpad
-// mint so every valuation within a single RPC uses the same supply.
-type reserveStateCache map[string]*currency_util.LiveReserveStateData
-
-func newReserveStateCache() reserveStateCache {
-	return make(reserveStateCache)
-}
-
-func (s *server) getLiveReserveState(ctx context.Context, mint *common.Account, cache reserveStateCache) (*currency_util.LiveReserveStateData, error) {
-	if reserveState, ok := cache[mint.PublicKey().ToBase58()]; ok {
-		return reserveState, nil
-	}
-
-	reserveState, err := s.mintDataProvider.GetLiveReserveState(ctx, mint)
+// calculateCoreMintValueByMint values cached holdings in each mint through the
+// shared valuer, dropping mints whose value is dust.
+func (s *server) calculateCoreMintValueByMint(ctx context.Context, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache balance.ReserveStateCache) (map[string]*balancepb.MintBalance, error) {
+	coreMintValueByMint, err := s.valuer.ValueHoldings(ctx, balanceByTokenAccount, reserveStateCache)
 	if err != nil {
 		return nil, err
 	}
-	cache[mint.PublicKey().ToBase58()] = reserveState
-	return reserveState, nil
-}
 
-// calculateCoreMintValueByMint values cached holdings in each mint with a
-// non-zero balance. Each balance carries the mint it holds.
-func (s *server) calculateCoreMintValueByMint(ctx context.Context, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache) (map[string]*balancepb.MintBalance, error) {
-	quarksByMint := make(map[string]uint64)
-	for _, cached := range balanceByTokenAccount {
-		quarksByMint[cached.MintAccount] += cached.Quarks
-	}
-
-	balancesByMint := make(map[string]*balancepb.MintBalance)
-	for mint, quarks := range quarksByMint {
-		if quarks == 0 {
+	balancesByMint := make(map[string]*balancepb.MintBalance, len(coreMintValueByMint))
+	for mint, coreMintValue := range coreMintValueByMint {
+		if coreMintValue < s.dustValue {
 			continue
 		}
 
 		mintAccount, err := common.NewAccountFromPublicKeyString(mint)
 		if err != nil {
 			return nil, err
-		}
-
-		var coreMintValue uint64
-		if mint == common.CoreMintAccount.PublicKey().ToBase58() {
-			coreMintValue = quarks
-		} else {
-			reserveState, err := s.getLiveReserveState(ctx, mintAccount, reserveStateCache)
-			if err != nil {
-				return nil, err
-			}
-
-			coreMintValue, _ = currencycreator.EstimateSell(&currencycreator.EstimateSellArgs{
-				CurrentSupplyInQuarks: reserveState.SupplyFromBonding,
-				SellAmountInQuarks:    quarks,
-				ValueMintDecimals:     uint8(common.CoreMintDecimals),
-				SellFeeBps:            0,
-			})
-		}
-
-		if coreMintValue < s.dustValue {
-			continue
 		}
 
 		balancesByMint[mint] = &balancepb.MintBalance{
