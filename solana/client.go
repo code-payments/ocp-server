@@ -20,6 +20,8 @@ const (
 	// Reference: https://github.com/solana-labs/solana/blob/71e9958e061493d7545bd28d4ac7a85aaed6ffbb/client/src/rpc_custom_error.rs#L11
 	rpcNodeUnhealthyCode = -32005
 
+	minContextSlotNotReachedCode = -32016
+
 	invalidParamCode = -32602
 
 	// Highest transaction version the client can parse. RPC methods returning
@@ -220,31 +222,6 @@ func (c *client) call(out interface{}, method string, params ...interface{}) err
 	})
 
 	return err
-}
-
-func (c *client) callBatch(method string, requests jsonrpc.RPCRequests) (map[int]jsonrpc.RPCResponse, error) {
-	var returnValue map[int]jsonrpc.RPCResponse
-
-	_, err := c.retrier.Retry(func() error {
-		responses, err := c.client.CallBatch(requests)
-		if err != nil {
-			return c.handleRpcError(method, err)
-		}
-
-		responseByID := make(map[int]jsonrpc.RPCResponse)
-		for _, response := range responses {
-			if response.Error != nil {
-				return c.handleRpcError(method, response.Error)
-			}
-
-			responseByID[response.ID] = *response
-		}
-
-		returnValue = responseByID
-		return nil
-	})
-
-	return returnValue, err
 }
 
 func (c *client) handleRpcError(method string, err error) error {
@@ -637,87 +614,21 @@ func (c *client) GetAccountInfo(account ed25519.PublicKey, commitment Commitment
 }
 
 func (c *client) GetAccountDataAfterBlock(account ed25519.PublicKey, slot uint64) ([]byte, uint64, error) {
-	batchMethodName := "getAccountDataAfterBlock"
-
-	// Setup individual requests to send in the batch. In particular, we're fetching
-	// the account info along with additional node metadata to decrease the chance of
-	// getting stale/incorrect result due to the node being behind or on a micro fork.
+	// Require finalized state evaluated after the provided block, so an RPC node
+	// that's behind can't return account data from before it.
 	//
-	// Note: These checks don't protect us from a malicious RPC node
-
-	getBlockHeightRequest := jsonrpc.NewRequest("getBlockHeight", []interface{}{CommitmentFinalized})
-
-	getBlockRpcConfig := struct {
-		Encoding                       string `json:"encoding"`
-		TransactionDetails             string `json:"transactionDetails"`
-		Rewards                        bool   `json:"rewards"`
-		MaxSupportedTransactionVersion int    `json:"maxSupportedTransactionVersion"`
+	// Note: This doesn't protect us from a malicious RPC node
+	rpcConfig := struct {
+		Commitment     string `json:"commitment"`
+		Encoding       string `json:"encoding"`
+		MinContextSlot uint64 `json:"minContextSlot"`
 	}{
-		Encoding:                       "base64",
-		TransactionDetails:             "none",
-		Rewards:                        false,
-		MaxSupportedTransactionVersion: maxSupportedTransactionVersion,
-	}
-	getBlockRequest := jsonrpc.NewRequest("getBlock", slot, getBlockRpcConfig)
-
-	getAccountInfoRpcConfig := struct {
-		Commitment Commitment `json:"commitment"`
-		Encoding   string     `json:"encoding"`
-	}{
-		Commitment: CommitmentFinalized,
-		Encoding:   "base64",
-	}
-	getAccountInfoRequest := jsonrpc.NewRequest("getAccountInfo", base58.Encode(account[:]), getAccountInfoRpcConfig)
-
-	// Submit the batched RPC call
-
-	responsesByID, err := c.callBatch(
-		batchMethodName,
-		jsonrpc.RPCRequests{
-			getBlockHeightRequest,
-			getBlockRequest,
-			getAccountInfoRequest,
-		},
-	)
-	if err != nil {
-		return nil, 0, err
+		Commitment:     CommitmentFinalized.Commitment,
+		Encoding:       "base64",
+		MinContextSlot: slot + 1,
 	}
 
-	// Parse each individual RPC response
-
-	if len(responsesByID) != 3 {
-		return nil, 0, errors.New("received unexpected number of response objects")
-	}
-
-	getBlockHeightResp, ok := responsesByID[getBlockHeightRequest.ID]
-	if !ok {
-		return nil, 0, errors.New("getBlockHeight response missing")
-	}
-
-	var currentBlockHeight uint64
-	if err := getBlockHeightResp.GetObject(&currentBlockHeight); err != nil {
-		return nil, 0, errors.Wrap(err, "invalid getBlockHeight response")
-	}
-
-	getBlockResp, ok := responsesByID[getBlockRequest.ID]
-	if !ok {
-		return nil, 0, errors.New("getAccount response missing")
-	}
-
-	type getBlockResponseBody struct {
-		BlockHeight uint64 `json:"blockHeight"`
-	}
-	var unmarshalledGetBlockResp getBlockResponseBody
-	if err := getBlockResp.GetObject(&unmarshalledGetBlockResp); err != nil {
-		return nil, 0, errors.New("invalid getBlock response")
-	}
-
-	getAccountInfoResp, ok := responsesByID[getAccountInfoRequest.ID]
-	if !ok {
-		return nil, 0, errors.New("getAccountInfo response missing")
-	}
-
-	type getAccountInfoRespBody struct {
+	var resp struct {
 		Context struct {
 			Slot uint64 `json:"slot"`
 		} `json:"context"`
@@ -725,41 +636,27 @@ func (c *client) GetAccountDataAfterBlock(account ed25519.PublicKey, slot uint64
 			Data []string `json:"data"`
 		} `json:"value"`
 	}
-	var unmarshalledGetAccountInfoResp getAccountInfoRespBody
-	if err := getAccountInfoResp.GetObject(&unmarshalledGetAccountInfoResp); err != nil {
-		return nil, 0, errors.Wrap(err, "invalid getAccountInfo response")
+	if err := c.call(&resp, "getAccountInfo", base58.Encode(account[:]), rpcConfig); err != nil {
+		jsonRPCErr, ok := err.(*jsonrpc.RPCError)
+		if ok && jsonRPCErr.Code == minContextSlotNotReachedCode {
+			return nil, 0, ErrStaleData
+		}
+		return nil, 0, errors.Wrap(err, "getAccountInfo() failed to send request")
 	}
 
-	// Perform node state safety checks
-
-	// We shouldn't hit this case. The node shouldn't know about the block if
-	// its finalized blockheight is less than block we've queried for.
-	if currentBlockHeight < unmarshalledGetBlockResp.BlockHeight {
+	// Defensive in case the RPC node doesn't honour minContextSlot
+	if resp.Context.Slot <= slot {
 		return nil, 0, ErrStaleData
 	}
 
-	// Enforce 32 additional finalized blocks on top of the desired block. We're
-	// effectively enforcing 2x the number of finalized confirmations.
-	if currentBlockHeight-unmarshalledGetBlockResp.BlockHeight <= 32 {
-		return nil, 0, ErrStaleData
+	if resp.Value == nil {
+		return nil, resp.Context.Slot, ErrNoAccountInfo
 	}
-
-	// This shouldn't happen given the prior checks. It indicates the RPC node
-	// isn't evaluating account info at the latest finalized block. Regardless,
-	// it must fail the call because we want account data after a given block.
-	if unmarshalledGetAccountInfoResp.Context.Slot <= slot {
-		return nil, 0, ErrStaleData
-	}
-
-	// Everything checks out, so return the account data, if available
-	if unmarshalledGetAccountInfoResp.Value == nil {
-		return nil, unmarshalledGetAccountInfoResp.Context.Slot, ErrNoAccountInfo
-	}
-	rawData, err := base64.StdEncoding.DecodeString(unmarshalledGetAccountInfoResp.Value.Data[0])
+	rawData, err := base64.StdEncoding.DecodeString(resp.Value.Data[0])
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "invalid base64 encoded account data")
 	}
-	return rawData, unmarshalledGetAccountInfoResp.Context.Slot, nil
+	return rawData, resp.Context.Slot, nil
 }
 
 func (c *client) GetSignaturesForAddress(account ed25519.PublicKey, commitment Commitment, limit uint64, before, until string) ([]*TransactionSignature, error) {
