@@ -2,13 +2,11 @@ package data
 
 import (
 	"context"
-	"crypto/ed25519"
 
 	"github.com/mr-tron/base58"
 
 	"github.com/code-payments/ocp-server/database/query"
 	"github.com/code-payments/ocp-server/metrics"
-	"github.com/code-payments/ocp-server/ocp/config"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/token"
 )
@@ -24,15 +22,12 @@ type BlockchainData interface {
 	GetBlockchainAccountDataAfterBlock(ctx context.Context, account string, slot uint64) ([]byte, uint64, error)
 	GetBlockchainBalance(ctx context.Context, account string, commitment solana.Commitment) (uint64, uint64, error)
 	GetBlockchainBlock(ctx context.Context, slot uint64) (*solana.Block, error)
-	GetBlockchainBlockSignatures(ctx context.Context, slot uint64) ([]string, error)
-	GetBlockchainBlocksWithLimit(ctx context.Context, start uint64, limit uint64) ([]uint64, error)
 	GetBlockchainHistory(ctx context.Context, account string, commitment solana.Commitment, opts ...query.Option) ([]*solana.TransactionSignature, error)
 	GetBlockchainMinimumBalanceForRentExemption(ctx context.Context, size uint64) (uint64, error)
 	GetBlockchainLatestBlockhash(ctx context.Context) (solana.Blockhash, error)
 	GetBlockchainSignatureStatuses(ctx context.Context, signatures []solana.Signature) ([]*solana.SignatureStatus, error)
 	GetBlockchainSlot(ctx context.Context, commitment solana.Commitment) (uint64, error)
 	GetBlockchainTokenAccountInfo(ctx context.Context, account, mint string, commitment solana.Commitment) (*token.Account, error)
-	GetBlockchainTokenAccountsByOwner(ctx context.Context, account string) ([]ed25519.PublicKey, error)
 	GetBlockchainTransaction(ctx context.Context, sig string, commitment solana.Commitment) (*solana.ConfirmedTransaction, error)
 	GetBlockchainTransactionTokenBalances(ctx context.Context, sig string) (*solana.TransactionTokenBalances, error)
 	GetBlockchainFilteredProgramAccounts(ctx context.Context, program string, offset uint, filterValue []byte) ([]solana.ProgramAccount, uint64, error)
@@ -130,22 +125,6 @@ func (dp *BlockchainProvider) GetBlockchainTokenAccountInfo(ctx context.Context,
 	}
 	return res, err
 }
-func (dp *BlockchainProvider) GetBlockchainTokenAccountsByOwner(ctx context.Context, account string) ([]ed25519.PublicKey, error) {
-	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainTokenAccountsByOwner")
-	defer tracer.End()
-
-	accountId, err := base58.Decode(account)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := dp.sc.GetTokenAccountsByOwner(accountId, config.CoreMintPublicKeyBytes)
-
-	if err != nil {
-		tracer.OnError(err)
-	}
-	return res, err
-}
 func (dp *BlockchainProvider) GetBlockchainSlot(ctx context.Context, commitment solana.Commitment) (uint64, error) {
 	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainSlot")
 	defer tracer.End()
@@ -158,38 +137,11 @@ func (dp *BlockchainProvider) GetBlockchainSlot(ctx context.Context, commitment 
 	return res, err
 }
 
-func (dp *BlockchainProvider) GetBlockchainBlocksWithLimit(ctx context.Context, start uint64, limit uint64) ([]uint64, error) {
-	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainBlocksWithLimit")
-	defer tracer.End()
-
-	// TODO: this call is deprecated, remove it
-	// https://docs.solana.com/developing/clients/jsonrpc-api#getconfirmedblockswithlimit
-
-	res, err := dp.sc.GetConfirmedBlocksWithLimit(start, limit)
-
-	if err != nil {
-		tracer.OnError(err)
-	}
-	return res, err
-}
-
 func (dp *BlockchainProvider) GetBlockchainBlock(ctx context.Context, slot uint64) (*solana.Block, error) {
 	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainBlock")
 	defer tracer.End()
 
 	res, err := dp.sc.GetBlock(slot)
-
-	if err != nil {
-		tracer.OnError(err)
-	}
-	return res, err
-}
-
-func (dp *BlockchainProvider) GetBlockchainBlockSignatures(ctx context.Context, slot uint64) ([]string, error) {
-	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainBlockSignatures")
-	defer tracer.End()
-
-	res, err := dp.sc.GetBlockSignatures(slot)
 
 	if err != nil {
 		tracer.OnError(err)

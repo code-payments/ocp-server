@@ -28,8 +28,10 @@ func TestCreateAccount(t *testing.T) {
 	assert.Equal(t, size, instruction.Data[12:20])
 	assert.Equal(t, []byte(keys[2]), instruction.Data[20:52])
 
+	marshalled, err := solana.NewLegacyTransaction(keys[0], instruction).Marshal()
+	require.NoError(t, err)
 	var tx solana.Transaction
-	require.NoError(t, tx.Unmarshal(solana.NewLegacyTransaction(keys[0], instruction).Marshal()))
+	require.NoError(t, tx.Unmarshal(marshalled))
 
 	decompiled, err := DecompileCreateAccount(tx.Message, 0)
 	require.NoError(t, err)
@@ -80,8 +82,10 @@ func TestTransfer(t *testing.T) {
 	assert.Equal(t, command, instruction.Data[0:4])
 	assert.Equal(t, lamports, instruction.Data[4:12])
 
+	marshalled, err := solana.NewLegacyTransaction(keys[0], instruction).Marshal()
+	require.NoError(t, err)
 	var tx solana.Transaction
-	require.NoError(t, tx.Unmarshal(solana.NewLegacyTransaction(keys[0], instruction).Marshal()))
+	require.NoError(t, tx.Unmarshal(marshalled))
 
 	decompiled, err := DecompileTransfer(tx.Message, 0)
 	require.NoError(t, err)

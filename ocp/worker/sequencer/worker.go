@@ -261,7 +261,10 @@ func (p *runtime) handlePending(ctx context.Context, record *fulfillment.Record)
 			record.Signature = pointer.String(base58.Encode(txn.Signature()))
 			record.Nonce = pointer.String(selectedSolanaNonce.Account.PublicKey().ToBase58())
 			record.Blockhash = pointer.String(base58.Encode(selectedSolanaNonce.Blockhash[:]))
-			record.Data = txn.Marshal()
+			record.Data, err = txn.Marshal()
+			if err != nil {
+				return err
+			}
 
 			err = selectedSolanaNonce.MarkReservedWithSignature(ctx, *record.Signature)
 			if err != nil {

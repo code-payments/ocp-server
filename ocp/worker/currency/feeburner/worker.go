@@ -149,7 +149,12 @@ func (p *runtime) packBurnBatches(targets []*burnTarget, maxBurnsPerBatch int) [
 
 		candidate := append(current, target)
 		txn := p.makeBurnTransaction(candidate)
-		if len(txn.Marshal()) > solana.MaxTransactionSize {
+		marshalledTxn, err := txn.Marshal()
+		if err != nil {
+			p.log.With(zap.Error(err), zap.String("mint", target.mint)).Warn("skipping currency with unmarshallable burn transaction")
+			continue
+		}
+		if len(marshalledTxn) > solana.MaxLegacyTransactionSize {
 			if len(current) == 0 {
 				p.log.With(zap.String("mint", target.mint)).Warn("skipping currency with oversized burn transaction")
 				continue

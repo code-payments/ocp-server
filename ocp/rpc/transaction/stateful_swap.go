@@ -593,7 +593,11 @@ func (s *transactionServer) handleReserveStatefulSwap(
 
 	txn.SetBlockhash(selectedNonce.Blockhash)
 
-	marshalledTxnMessage := txn.Message.Marshal()
+	marshalledTxnMessage, err := txn.Message.Marshal()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure marshalling transaction message")
+		return handleStatefulSwapError(streamer, err)
+	}
 
 	//
 	// Section: Server parameters
@@ -657,10 +661,15 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			marshalledTxnMessage,
 			protoSignature.Value,
 		) {
+			errorDetails, err := toInvalidTxnSignatureErrorDetails(0, txn, protoSignature)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure creating error details")
+				return handleStatefulSwapError(streamer, err)
+			}
 			return handleStatefulSwapStructuredError(
 				streamer,
 				transactionpb.StatefulSwapResponse_Error_SIGNATURE_ERROR,
-				toInvalidTxnSignatureErrorDetails(0, txn, protoSignature),
+				errorDetails,
 			)
 		}
 
@@ -683,7 +692,11 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	marshalledTxn := txn.Marshal()
+	marshalledTxn, err := txn.Marshal()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure marshalling transaction")
+		return handleStatefulSwapError(streamer, err)
+	}
 
 	txnSignature := base58.Encode(txn.Signature())
 
@@ -1022,7 +1035,11 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 
 	txn.SetBlockhash(selectedNonce.Blockhash)
 
-	marshalledTxnMessage := txn.Message.Marshal()
+	marshalledTxnMessage, err := txn.Message.Marshal()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure marshalling transaction message")
+		return handleStatefulSwapError(streamer, err)
+	}
 
 	//
 	// Section: Server parameters
@@ -1082,10 +1099,15 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 			marshalledTxnMessage,
 			protoSignature.Value,
 		) {
+			errorDetails, err := toInvalidTxnSignatureErrorDetails(0, txn, protoSignature)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure creating error details")
+				return handleStatefulSwapError(streamer, err)
+			}
 			return handleStatefulSwapStructuredError(
 				streamer,
 				transactionpb.StatefulSwapResponse_Error_SIGNATURE_ERROR,
-				toInvalidTxnSignatureErrorDetails(0, txn, protoSignature),
+				errorDetails,
 			)
 		}
 
@@ -1101,7 +1123,11 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	marshalledTxn := txn.Marshal()
+	marshalledTxn, err := txn.Marshal()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure marshalling transaction")
+		return handleStatefulSwapError(streamer, err)
+	}
 
 	txnSignature := base58.Encode(txn.Signature())
 
