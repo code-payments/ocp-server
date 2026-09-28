@@ -2,7 +2,6 @@ package solana
 
 import (
 	"crypto/ed25519"
-	"time"
 
 	"github.com/pkg/errors"
 )
@@ -105,41 +104,6 @@ func (c *clientWithFallback) GetBlock(slot uint64) (*Block, error) {
 	)
 }
 
-func (c *clientWithFallback) GetBlockSignatures(slot uint64) ([]string, error) {
-	return withFallback(
-		func() ([]string, error) { return c.primary.GetBlockSignatures(slot) },
-		func() ([]string, error) { return c.fallback.GetBlockSignatures(slot) },
-	)
-}
-
-func (c *clientWithFallback) GetBlockTime(block uint64) (time.Time, error) {
-	return withFallback(
-		func() (time.Time, error) { return c.primary.GetBlockTime(block) },
-		func() (time.Time, error) { return c.fallback.GetBlockTime(block) },
-	)
-}
-
-func (c *clientWithFallback) GetConfirmationStatus(sig Signature, commitment Commitment) (bool, error) {
-	return withFallback(
-		func() (bool, error) { return c.primary.GetConfirmationStatus(sig, commitment) },
-		func() (bool, error) { return c.fallback.GetConfirmationStatus(sig, commitment) },
-	)
-}
-
-func (c *clientWithFallback) GetConfirmedBlock(slot uint64) (*Block, error) {
-	return withFallback(
-		func() (*Block, error) { return c.primary.GetConfirmedBlock(slot) },
-		func() (*Block, error) { return c.fallback.GetConfirmedBlock(slot) },
-	)
-}
-
-func (c *clientWithFallback) GetConfirmedBlocksWithLimit(start, limit uint64) ([]uint64, error) {
-	return withFallback(
-		func() ([]uint64, error) { return c.primary.GetConfirmedBlocksWithLimit(start, limit) },
-		func() ([]uint64, error) { return c.fallback.GetConfirmedBlocksWithLimit(start, limit) },
-	)
-}
-
 func (c *clientWithFallback) GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]ProgramAccount, uint64, error) {
 	return withFallback2(
 		func() ([]ProgramAccount, uint64, error) {
@@ -162,13 +126,6 @@ func (c *clientWithFallback) GetMinimumBalanceForRentExemption(size uint64) (uin
 	return withFallback(
 		func() (uint64, error) { return c.primary.GetMinimumBalanceForRentExemption(size) },
 		func() (uint64, error) { return c.fallback.GetMinimumBalanceForRentExemption(size) },
-	)
-}
-
-func (c *clientWithFallback) GetSignatureStatus(sig Signature, commitment Commitment) (*SignatureStatus, error) {
-	return withFallback(
-		func() (*SignatureStatus, error) { return c.primary.GetSignatureStatus(sig, commitment) },
-		func() (*SignatureStatus, error) { return c.fallback.GetSignatureStatus(sig, commitment) },
 	)
 }
 
@@ -201,13 +158,6 @@ func (c *clientWithFallback) GetTokenAccountBalance(account ed25519.PublicKey, c
 	return withFallback2(
 		func() (uint64, uint64, error) { return c.primary.GetTokenAccountBalance(account, commitment) },
 		func() (uint64, uint64, error) { return c.fallback.GetTokenAccountBalance(account, commitment) },
-	)
-}
-
-func (c *clientWithFallback) GetTokenAccountsByOwner(owner, mint ed25519.PublicKey) ([]ed25519.PublicKey, error) {
-	return withFallback(
-		func() ([]ed25519.PublicKey, error) { return c.primary.GetTokenAccountsByOwner(owner, mint) },
-		func() ([]ed25519.PublicKey, error) { return c.fallback.GetTokenAccountsByOwner(owner, mint) },
 	)
 }
 

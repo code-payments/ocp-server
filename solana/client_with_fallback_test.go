@@ -3,7 +3,6 @@ package solana
 import (
 	"crypto/ed25519"
 	"testing"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -75,26 +74,6 @@ func (m *mockClient) GetAccountDataAfterBlock(ed25519.PublicKey, uint64) ([]byte
 	m.callCount++
 	return nil, 0, nil
 }
-func (m *mockClient) GetBlockSignatures(uint64) ([]string, error) {
-	m.callCount++
-	return nil, nil
-}
-func (m *mockClient) GetBlockTime(uint64) (time.Time, error) {
-	m.callCount++
-	return time.Time{}, nil
-}
-func (m *mockClient) GetConfirmationStatus(Signature, Commitment) (bool, error) {
-	m.callCount++
-	return false, nil
-}
-func (m *mockClient) GetConfirmedBlock(uint64) (*Block, error) {
-	m.callCount++
-	return nil, nil
-}
-func (m *mockClient) GetConfirmedBlocksWithLimit(uint64, uint64) ([]uint64, error) {
-	m.callCount++
-	return nil, nil
-}
 func (m *mockClient) GetFilteredProgramAccounts(ed25519.PublicKey, uint, []byte) ([]ProgramAccount, uint64, error) {
 	m.callCount++
 	return nil, 0, nil
@@ -102,10 +81,6 @@ func (m *mockClient) GetFilteredProgramAccounts(ed25519.PublicKey, uint, []byte)
 func (m *mockClient) GetMinimumBalanceForRentExemption(uint64) (uint64, error) {
 	m.callCount++
 	return 0, nil
-}
-func (m *mockClient) GetSignatureStatus(Signature, Commitment) (*SignatureStatus, error) {
-	m.callCount++
-	return nil, nil
 }
 func (m *mockClient) GetSignatureStatuses([]Signature) ([]*SignatureStatus, error) {
 	m.callCount++
@@ -118,10 +93,6 @@ func (m *mockClient) GetSignaturesForAddress(ed25519.PublicKey, Commitment, uint
 func (m *mockClient) GetTokenAccountBalance(ed25519.PublicKey, Commitment) (uint64, uint64, error) {
 	m.callCount++
 	return 0, 0, nil
-}
-func (m *mockClient) GetTokenAccountsByOwner(ed25519.PublicKey, ed25519.PublicKey) ([]ed25519.PublicKey, error) {
-	m.callCount++
-	return nil, nil
 }
 func (m *mockClient) GetTransaction(Signature, Commitment) (ConfirmedTransaction, error) {
 	m.callCount++

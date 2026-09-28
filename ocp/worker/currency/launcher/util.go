@@ -757,7 +757,11 @@ func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, account
 		ixns...,
 	)
 
-	if len(txn.Marshal()) > solana.MaxTransactionSize {
+	marshalledTxn, err := txn.Marshal()
+	if err != nil {
+		return errors.Wrap(err, "error marshalling transaction")
+	}
+	if len(marshalledTxn) > solana.MaxLegacyTransactionSize {
 		return errors.New("transaction exceeds maximum size")
 	}
 

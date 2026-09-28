@@ -162,11 +162,16 @@ func toInvalidTxnSignatureErrorDetails(
 	actionId uint32,
 	txn solana.Transaction,
 	signature *commonpb.Signature,
-) *transactionpb.ErrorDetails {
+) (*transactionpb.ErrorDetails, error) {
 	// Clear out all signatures, so clients have no way of submitting this transaction
 	var emptySig solana.Signature
 	for i := range txn.Signatures {
 		copy(txn.Signatures[i][:], emptySig[:])
+	}
+
+	marshalledTxn, err := txn.Marshal()
+	if err != nil {
+		return nil, err
 	}
 
 	return &transactionpb.ErrorDetails{
@@ -175,13 +180,13 @@ func toInvalidTxnSignatureErrorDetails(
 				ActionId: actionId,
 				ExpectedBlob: &transactionpb.InvalidSignatureErrorDetails_ExpectedTransaction{
 					ExpectedTransaction: &commonpb.Transaction{
-						Value: txn.Marshal(),
+						Value: marshalledTxn,
 					},
 				},
 				ProvidedSignature: signature,
 			},
 		},
-	}
+	}, nil
 }
 
 func toInvalidVirtualIxnSignatureErrorDetails(

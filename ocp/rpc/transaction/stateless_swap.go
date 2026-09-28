@@ -274,7 +274,11 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 	}
 	txn.SetBlockhash(blockhash)
 
-	marshalledTxnMessage := txn.Message.Marshal()
+	marshalledTxnMessage, err := txn.Message.Marshal()
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure marshalling transaction message")
+		return handleStatelessSwapError(streamer, err)
+	}
 
 	//
 	// Section: Server parameters
@@ -322,10 +326,15 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		marshalledTxnMessage,
 		protoSignature.Value,
 	) {
+		errorDetails, err := toInvalidTxnSignatureErrorDetails(0, txn, protoSignature)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure creating error details")
+			return handleStatelessSwapError(streamer, err)
+		}
 		return handleStatelessSwapStructuredError(
 			streamer,
 			transactionpb.StatelessSwapResponse_Error_SIGNATURE_ERROR,
-			toInvalidTxnSignatureErrorDetails(0, txn, protoSignature),
+			errorDetails,
 		)
 	}
 

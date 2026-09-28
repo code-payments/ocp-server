@@ -5,16 +5,37 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
 	"github.com/mr-tron/base58/base58"
 	"github.com/pkg/errors"
+
+	"github.com/code-payments/ocp-server/pointer"
 )
 
 const (
-	// MaxTransactionSize taken from: https://github.com/solana-labs/solana/blob/39b3ac6a8d29e14faa1de73d8b46d390ad41797b/sdk/src/packet.rs#L9-L13
-	MaxTransactionSize = 1232
+	// MaxLegacyTransactionSize applies to both legacy and v0 transactions.
+	// Taken from: https://github.com/solana-labs/solana/blob/39b3ac6a8d29e14faa1de73d8b46d390ad41797b/sdk/src/packet.rs#L9-L13
+	MaxLegacyTransactionSize = 1232
+
+	// MaxV1TransactionSize taken from: https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0296-larger-transactions.md
+	MaxV1TransactionSize = 4096
+
+	// Sanitization constraints for v1 transactions from SIMD-0385
+	maxV1Signatures    = 12
+	maxV1Accounts      = 64
+	maxV1Instructions  = 64
+	minV1HeapSize      = 32 * 1024
+	maxV1HeapSize      = 256 * 1024
+	v1HeapSizeMultiple = 1024
+
+	// Runtime maximums for v1 config requests. Larger values aren't a
+	// sanitization failure, and are silently clamped by the runtime.
+	// Taken from: https://github.com/anza-xyz/agave/blob/443ba0e197adafd0206e651f86934d22a44d2729/program-runtime/src/execution_budget.rs#L26-L41
+	maxV1ComputeUnitLimit            = 1_400_000
+	maxV1LoadedAccountsDataSizeLimit = 64 * 1024 * 1024
 )
 
 type Signature [ed25519.SignatureSize]byte
@@ -25,6 +46,7 @@ type MessageVersion uint8
 const (
 	MessageVersionLegacy MessageVersion = iota
 	MessageVersion0
+	MessageVersion1
 )
 
 type Header struct {
@@ -40,6 +62,41 @@ type Message struct {
 	RecentBlockhash     Blockhash
 	Instructions        []CompiledInstruction
 	AddressTableLookups []MessageAddressTableLookup
+	Config              TransactionConfig
+}
+
+// TransactionConfig is the set of fee and resource requests carried in a v1
+// message, replacing ComputeBudgetProgram instructions (which are ignored for
+// configuration in v1 transactions).
+//
+// Unset fields use the minimum allowed value. Notably, an unset compute unit
+// limit or loaded accounts data size limit is zero, not the runtime default.
+// Fields are optional here so decoded transactions round trip exactly, but
+// NewV1Transaction requires both limits.
+type TransactionConfig struct {
+	PriorityFeeLamports         *uint64
+	ComputeUnitLimit            *uint32
+	LoadedAccountsDataSizeLimit *uint32
+	HeapSize                    *uint32
+
+	// Values for mask bits this package doesn't understand, keyed by bit, so
+	// transactions using config fields from future SIMDs still decode and
+	// round trip exactly.
+	unknown map[uint8][4]byte
+}
+
+func (c TransactionConfig) clone() TransactionConfig {
+	cloned := TransactionConfig{
+		PriorityFeeLamports:         pointer.Uint64Copy(c.PriorityFeeLamports),
+		ComputeUnitLimit:            pointer.Uint32Copy(c.ComputeUnitLimit),
+		LoadedAccountsDataSizeLimit: pointer.Uint32Copy(c.LoadedAccountsDataSizeLimit),
+		HeapSize:                    pointer.Uint32Copy(c.HeapSize),
+	}
+	if c.unknown != nil {
+		cloned.unknown = make(map[uint8][4]byte, len(c.unknown))
+		maps.Copy(cloned.unknown, c.unknown)
+	}
+	return cloned
 }
 
 type MessageAddressTableLookup struct {
@@ -142,6 +199,62 @@ func NewLegacyTransaction(payer ed25519.PublicKey, instructions ...Instruction) 
 		Signatures: make([]Signature, m.Header.NumSignatures),
 		Message:    m,
 	}
+}
+
+// NewV1Transaction builds a v1 transaction as specified in SIMD-0385. Account
+// ordering is unchanged from legacy transactions, but address lookup tables
+// are not supported and all accounts are included inline.
+//
+// The config must set nonzero compute unit and loaded accounts data size
+// limits, because v1 treats them as zero when unset, which fails every
+// transaction. Limits above the runtime maximum are rejected rather than left
+// for the runtime to clamp, since they indicate a misconfigured budget.
+// Transactions violating the SIMD-0385 sanitization constraints are rejected,
+// since they would never be included in a block.
+func NewV1Transaction(payer ed25519.PublicKey, config TransactionConfig, instructions ...Instruction) (Transaction, error) {
+	// Copy so later changes to the caller's config can't alter the signed message
+	config = config.clone()
+
+	if config.ComputeUnitLimit == nil {
+		return Transaction{}, errors.New("compute unit limit is required")
+	}
+	if *config.ComputeUnitLimit == 0 || *config.ComputeUnitLimit > maxV1ComputeUnitLimit {
+		return Transaction{}, errors.Errorf("compute unit limit must be between 1 and %d", maxV1ComputeUnitLimit)
+	}
+	if config.LoadedAccountsDataSizeLimit == nil {
+		return Transaction{}, errors.New("loaded accounts data size limit is required")
+	}
+	if *config.LoadedAccountsDataSizeLimit == 0 || *config.LoadedAccountsDataSizeLimit > maxV1LoadedAccountsDataSizeLimit {
+		return Transaction{}, errors.Errorf("loaded accounts data size limit must be between 1 and %d", maxV1LoadedAccountsDataSizeLimit)
+	}
+	if config.HeapSize != nil {
+		if *config.HeapSize < minV1HeapSize || *config.HeapSize > maxV1HeapSize || *config.HeapSize%v1HeapSizeMultiple != 0 {
+			return Transaction{}, errors.Errorf("heap size must be a multiple of %d between %d and %d", v1HeapSizeMultiple, minV1HeapSize, maxV1HeapSize)
+		}
+	}
+
+	txn := NewLegacyTransaction(payer, instructions...)
+	txn.Message.Version = MessageVersion1
+	txn.Message.Config = config
+
+	if txn.Message.Header.NumSignatures > maxV1Signatures {
+		return Transaction{}, errors.Errorf("transaction exceeds %d signatures", maxV1Signatures)
+	}
+	if len(txn.Message.Accounts) > maxV1Accounts {
+		return Transaction{}, errors.Errorf("transaction exceeds %d accounts", maxV1Accounts)
+	}
+	if len(txn.Message.Instructions) > maxV1Instructions {
+		return Transaction{}, errors.Errorf("transaction exceeds %d instructions", maxV1Instructions)
+	}
+	marshalled, err := txn.Marshal()
+	if err != nil {
+		return Transaction{}, err
+	}
+	if len(marshalled) > MaxV1TransactionSize {
+		return Transaction{}, errors.Errorf("transaction size %d exceeds %d bytes", len(marshalled), MaxV1TransactionSize)
+	}
+
+	return txn, nil
 }
 
 func NewV0Transaction(payer ed25519.PublicKey, addressLookupTables []AddressLookupTable, instructions []Instruction) Transaction {
@@ -314,7 +427,22 @@ func (t *Transaction) String() string {
 		sb.WriteString(fmt.Sprintf("      Accounts: %v\n", t.Message.Instructions[i].Accounts))
 		sb.WriteString(fmt.Sprintf("      Data: %v\n", t.Message.Instructions[i].Data))
 	}
-	if t.Message.Version >= MessageVersion0 {
+	if t.Message.Version == MessageVersion1 {
+		sb.WriteString("  Config:\n")
+		if t.Message.Config.PriorityFeeLamports != nil {
+			sb.WriteString(fmt.Sprintf("    PriorityFeeLamports: %d\n", *t.Message.Config.PriorityFeeLamports))
+		}
+		if t.Message.Config.ComputeUnitLimit != nil {
+			sb.WriteString(fmt.Sprintf("    ComputeUnitLimit: %d\n", *t.Message.Config.ComputeUnitLimit))
+		}
+		if t.Message.Config.LoadedAccountsDataSizeLimit != nil {
+			sb.WriteString(fmt.Sprintf("    LoadedAccountsDataSizeLimit: %d\n", *t.Message.Config.LoadedAccountsDataSizeLimit))
+		}
+		if t.Message.Config.HeapSize != nil {
+			sb.WriteString(fmt.Sprintf("    HeapSize: %d\n", *t.Message.Config.HeapSize))
+		}
+	}
+	if t.Message.Version == MessageVersion0 {
 		sb.WriteString("  Address Table Lookups:\n")
 		for i := range t.Message.AddressTableLookups {
 			sb.WriteString(fmt.Sprintf("    %s:\n", base58.Encode(t.Message.AddressTableLookups[i].PublicKey)))
@@ -331,7 +459,10 @@ func (t *Transaction) SetBlockhash(bh Blockhash) {
 }
 
 func (t *Transaction) Sign(signers ...ed25519.PrivateKey) error {
-	messageBytes := t.Message.Marshal()
+	messageBytes, err := t.Message.Marshal()
+	if err != nil {
+		return err
+	}
 
 	for _, s := range signers {
 		pub := s.Public().(ed25519.PublicKey)
@@ -397,6 +528,8 @@ func (v MessageVersion) String() string {
 		return "legacy"
 	case MessageVersion0:
 		return "v0"
+	case MessageVersion1:
+		return "v1"
 	}
 	return "unknown"
 }

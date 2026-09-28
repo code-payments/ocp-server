@@ -288,13 +288,16 @@ func (e *workerTestEnv) createAnyFulfillmentInState(t *testing.T, state fulfillm
 
 	txn.Sign(fakeCodeAccouht.PrivateKey().ToBytes())
 
+	marshalledTxn, err := txn.Marshal()
+	require.NoError(t, err)
+
 	fulfillmentRecord := &fulfillment.Record{
 		Intent:          testutil.NewRandomAccount(t).PublicKey().ToBase58(),
 		IntentType:      intent.OpenAccounts,
 		ActionId:        3,
 		ActionType:      action.OpenAccount,
 		FulfillmentType: fulfillment.InitializeLockedTimelockAccount,
-		Data:            txn.Marshal(),
+		Data:            marshalledTxn,
 		Signature:       pointer.String(base58.Encode(txn.Signature())),
 		Source:          "source",
 		Nonce:           pointer.String(fakeNonceAccount.PublicKey().ToBase58()),
@@ -372,7 +375,9 @@ func (e *workerTestEnv) assertFulfillmentCreatedOnDemand(t *testing.T, id uint64
 	assert.Equal(t, expectedSignature, *fulfillmentRecord.Signature)
 	assert.Equal(t, nonceAddress, *fulfillmentRecord.Nonce)
 	assert.Equal(t, blockhash, *fulfillmentRecord.Blockhash)
-	assert.Equal(t, expectedTxn.Marshal(), fulfillmentRecord.Data)
+	expectedData, err := expectedTxn.Marshal()
+	require.NoError(t, err)
+	assert.Equal(t, expectedData, fulfillmentRecord.Data)
 
 	e.assertNonceState(t, nonceAddress, nonce.StateReserved, expectedSignature, blockhash)
 }

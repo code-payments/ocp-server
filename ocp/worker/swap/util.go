@@ -399,7 +399,10 @@ func (p *runtime) markSwapCancelling(
 		swapRecord.Nonce = cancelNonce.Account.PublicKey().ToBase58()
 		swapRecord.Blockhash = base58.Encode(cancelNonce.Blockhash[:])
 		swapRecord.TransactionSignature = cancelTransactionSignature
-		swapRecord.TransactionBlob = cancelTxn.Marshal()
+		swapRecord.TransactionBlob, err = cancelTxn.Marshal()
+		if err != nil {
+			return err
+		}
 		swapRecord.State = swap.StateCancelling
 		return p.data.SaveSwap(ctx, swapRecord)
 	})

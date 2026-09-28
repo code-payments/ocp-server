@@ -92,11 +92,16 @@ func FromConfirmedTransaction(tx *solana.ConfirmedTransaction) (*Record, error) 
 		return nil, errors.New("unsupported transaction version")
 	}
 
+	data, err := tx.Transaction.Marshal()
+	if err != nil {
+		return nil, err
+	}
+
 	sig := tx.Transaction.Signature()
 	res := &Record{
 		Signature:         base58.Encode(sig),
 		Slot:              tx.Slot,
-		Data:              tx.Transaction.Marshal(),
+		Data:              data,
 		HasErrors:         tx.Err != nil,
 		ConfirmationState: ConfirmationFinalized,
 		CreatedAt:         time.Now(),
