@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"math"
 	"math/rand"
+	"slices"
 	"sort"
 	"testing"
 
@@ -639,6 +640,84 @@ func TestV1Transaction_Builder(t *testing.T) {
 	assert.EqualValues(t, 20_000, *tx.Message.Config.LoadedAccountsDataSizeLimit)
 	assert.Equal(t, marshalled, mustMarshal(t, tx))
 	assert.True(t, ed25519.Verify(public(payer), mustMarshalMessage(t, tx.Message), tx.Signatures[0][:]))
+}
+
+func TestV1Transaction_MatchesLegacyAccountOrdering(t *testing.T) {
+	keys := generateKeys(t, 9)
+	payer, program, program2 := keys[0], keys[1], keys[2]
+	writableSigner, readonlySigner, writable, readonly, upgraded, added := keys[3], keys[4], keys[5], keys[6], keys[7], keys[8]
+
+	config := TransactionConfig{
+		ComputeUnitLimit:            pointer.Uint32(10_000),
+		LoadedAccountsDataSizeLimit: pointer.Uint32(20_000),
+	}
+
+	for name, instructions := range map[string][]Instruction{
+		"single instruction": {
+			NewInstruction(
+				public(program),
+				[]byte{1},
+				NewReadonlyAccountMeta(public(readonly), false),
+				NewAccountMeta(public(writable), false),
+				NewReadonlyAccountMeta(public(readonlySigner), true),
+				NewAccountMeta(public(writableSigner), true),
+			),
+		},
+		"duplicate accounts with permission upgrades": {
+			NewInstruction(
+				public(program),
+				[]byte{1},
+				NewReadonlyAccountMeta(public(upgraded), false),
+				NewReadonlyAccountMeta(public(readonly), false),
+				NewAccountMeta(public(upgraded), true),
+				NewReadonlyAccountMeta(public(payer), false),
+			),
+		},
+		"multiple instructions": {
+			NewInstruction(
+				public(program2),
+				[]byte{1, 2},
+				NewReadonlyAccountMeta(public(readonlySigner), true),
+				NewAccountMeta(public(writable), false),
+			),
+			NewInstruction(
+				public(program),
+				[]byte{3},
+				NewReadonlyAccountMeta(public(writable), false),
+				NewAccountMeta(public(readonlySigner), false),
+				NewAccountMeta(public(added), true),
+				NewReadonlyAccountMeta(public(readonly), false),
+			),
+			NewInstruction(
+				public(program2),
+				nil,
+				NewReadonlyAccountMeta(public(program), false),
+			),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			legacy := NewLegacyTransaction(public(payer), instructions...)
+			v1, err := NewV1Transaction(public(payer), config, instructions...)
+			require.NoError(t, err)
+
+			assert.Equal(t, legacy.Message.Header, v1.Message.Header)
+			assert.Equal(t, legacy.Message.Accounts, v1.Message.Accounts)
+			assert.Equal(t, legacy.Message.Instructions, v1.Message.Instructions)
+			assert.Len(t, v1.Signatures, len(legacy.Signatures))
+
+			// Account ordering doesn't depend on the order instructions list them
+			reversed := make([]Instruction, len(instructions))
+			for i, ixn := range instructions {
+				metas := slices.Clone(ixn.Accounts)
+				slices.Reverse(metas)
+				reversed[len(instructions)-1-i] = NewInstruction(ixn.Program, ixn.Data, metas...)
+			}
+			reordered, err := NewV1Transaction(public(payer), config, reversed...)
+			require.NoError(t, err)
+			assert.Equal(t, v1.Message.Header, reordered.Message.Header)
+			assert.Equal(t, v1.Message.Accounts, reordered.Message.Accounts)
+		})
+	}
 }
 
 func TestV1Transaction_BuilderConstraints(t *testing.T) {
