@@ -90,7 +90,7 @@ func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequ
 
 	balancesByOwner := make(map[string]*balancepb.OwnerBalance, len(owners))
 	for _, owner := range owners {
-		ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByOwnerAndTokenAccount[owner.PublicKey().ToBase58()], reserveStateCache, exchangeRates)
+		ownerBalance, err := s.valueOwnerBalance(ctx, owner, balanceByOwnerAndTokenAccount[owner.PublicKey().ToBase58()], reserveStateCache, exchangeRates, req.ExcludePerMintBalances)
 		if err != nil {
 			log.With(zap.Error(err), zap.String("owner_account", owner.PublicKey().ToBase58())).Warn("failure valuing owner balance")
 			return nil, status.Error(codes.Internal, "")
@@ -107,8 +107,9 @@ func (s *server) GetBalances(ctx context.Context, req *balancepb.GetBalancesRequ
 
 // valueOwnerBalance values an owner's cached holdings. Owner metadata checks
 // are intentionally skipped as an optimization, so an owner with no ledger
-// records has an empty balance.
-func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache, exchangeRates exchangeRates) (*balancepb.OwnerBalance, error) {
+// records has an empty balance. Per-mint balances are still calculated when
+// excluded, since they make up the owner's total.
+func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache, exchangeRates exchangeRates, excludePerMintBalances bool) (*balancepb.OwnerBalance, error) {
 	balancesByMint, err := s.calculateCoreMintValueByMint(ctx, balanceByTokenAccount, reserveStateCache)
 	if err != nil {
 		return nil, err
@@ -117,7 +118,13 @@ func (s *server) valueOwnerBalance(ctx context.Context, owner *common.Account, b
 	var totalCoreMintValue uint64
 	for _, mintBalance := range balancesByMint {
 		totalCoreMintValue += mintBalance.CoreMintValue
-		mintBalance.FiatValuesByCurrency = exchangeRates.toFiatValues(mintBalance.CoreMintValue)
+		if !excludePerMintBalances {
+			mintBalance.FiatValuesByCurrency = exchangeRates.toFiatValues(mintBalance.CoreMintValue)
+		}
+	}
+
+	if excludePerMintBalances {
+		balancesByMint = nil
 	}
 
 	return &balancepb.OwnerBalance{
@@ -221,7 +228,8 @@ func (s *server) getLiveReserveState(ctx context.Context, mint *common.Account, 
 }
 
 // calculateCoreMintValueByMint values cached holdings in each mint with a
-// non-zero balance. Each balance carries the mint it holds.
+// non-zero balance. Each balance carries the mint it holds and the quarks of
+// that mint.
 func (s *server) calculateCoreMintValueByMint(ctx context.Context, balanceByTokenAccount map[string]*balance.Balance, reserveStateCache reserveStateCache) (map[string]*balancepb.MintBalance, error) {
 	quarksByMint := make(map[string]uint64)
 	for _, cached := range balanceByTokenAccount {
@@ -262,6 +270,7 @@ func (s *server) calculateCoreMintValueByMint(ctx context.Context, balanceByToke
 
 		balancesByMint[mint] = &balancepb.MintBalance{
 			Mint:          mintAccount.ToProto(),
+			Quarks:        quarks,
 			CoreMintValue: coreMintValue,
 		}
 	}

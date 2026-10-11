@@ -158,19 +158,19 @@ func TestGetBalances_HappyPath(t *testing.T) {
 
 	ownerBalance1 := assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 2)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), nil)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, expectedLaunchpadMintValue, nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, currencycreator.ToQuarks(100), expectedLaunchpadMintValue, nil)
 
 	ownerBalance2 := assertOwnerBalance(t, resp, ownerAccount2, common.ToCoreMintQuarks(7), nil)
 	require.Len(t, ownerBalance2.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), nil)
+	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), common.ToCoreMintQuarks(7), nil)
 
 	unknownOwnerBalance := assertOwnerBalance(t, resp, unknownOwnerAccount, 0, nil)
 	assert.Empty(t, unknownOwnerBalance.BalancesByMint)
 
 	giftCardOwnerBalance := assertOwnerBalance(t, resp, giftCardOwnerAccount, common.ToCoreMintQuarks(1), nil)
 	require.Len(t, giftCardOwnerBalance.BalancesByMint, 1)
-	assertMintBalance(t, giftCardOwnerBalance.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(1), nil)
+	assertMintBalance(t, giftCardOwnerBalance.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(1), common.ToCoreMintQuarks(1), nil)
 
 	// Every requested currency with a live rate is additionally populated on
 	// both the owner total and the per-mint breakdown, using the same rate
@@ -185,12 +185,12 @@ func TestGetBalances_HappyPath(t *testing.T) {
 
 	ownerBalance1 = assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, expectedCurrencyCodes)
 	require.Len(t, ownerBalance1.BalancesByMint, 2)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), expectedCurrencyCodes)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, expectedLaunchpadMintValue, expectedCurrencyCodes)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), expectedCurrencyCodes)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, currencycreator.ToQuarks(100), expectedLaunchpadMintValue, expectedCurrencyCodes)
 
 	ownerBalance2 = assertOwnerBalance(t, resp, ownerAccount2, common.ToCoreMintQuarks(7), expectedCurrencyCodes)
 	require.Len(t, ownerBalance2.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), expectedCurrencyCodes)
+	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), common.ToCoreMintQuarks(7), expectedCurrencyCodes)
 
 	// An owner with no balance still reports a zero fiat value in each
 	// available currency
@@ -199,7 +199,7 @@ func TestGetBalances_HappyPath(t *testing.T) {
 
 	giftCardOwnerBalance = assertOwnerBalance(t, resp, giftCardOwnerAccount, common.ToCoreMintQuarks(1), expectedCurrencyCodes)
 	require.Len(t, giftCardOwnerBalance.BalancesByMint, 1)
-	assertMintBalance(t, giftCardOwnerBalance.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(1), expectedCurrencyCodes)
+	assertMintBalance(t, giftCardOwnerBalance.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(1), common.ToCoreMintQuarks(1), expectedCurrencyCodes)
 
 	// Requesting only currencies without a live rate results in no fiat values
 	req.CurrencyCodes = []string{"jpy", "gbp"}
@@ -211,19 +211,19 @@ func TestGetBalances_HappyPath(t *testing.T) {
 
 	ownerBalance1 = assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 2)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), nil)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, expectedLaunchpadMintValue, nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, currencycreator.ToQuarks(100), expectedLaunchpadMintValue, nil)
 
 	ownerBalance2 = assertOwnerBalance(t, resp, ownerAccount2, common.ToCoreMintQuarks(7), nil)
 	require.Len(t, ownerBalance2.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), nil)
+	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), common.ToCoreMintQuarks(7), nil)
 
 	unknownOwnerBalance = assertOwnerBalance(t, resp, unknownOwnerAccount, 0, nil)
 	assert.Empty(t, unknownOwnerBalance.BalancesByMint)
 
 	giftCardOwnerBalance = assertOwnerBalance(t, resp, giftCardOwnerAccount, common.ToCoreMintQuarks(1), nil)
 	require.Len(t, giftCardOwnerBalance.BalancesByMint, 1)
-	assertMintBalance(t, giftCardOwnerBalance.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(1), nil)
+	assertMintBalance(t, giftCardOwnerBalance.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(1), common.ToCoreMintQuarks(1), nil)
 }
 
 func TestGetBalances_MintFilter(t *testing.T) {
@@ -262,11 +262,11 @@ func TestGetBalances_MintFilter(t *testing.T) {
 
 	ownerBalance1 := assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42), nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), nil)
 
 	ownerBalance2 := assertOwnerBalance(t, resp, ownerAccount2, common.ToCoreMintQuarks(7), nil)
 	require.Len(t, ownerBalance2.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), nil)
+	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), common.ToCoreMintQuarks(7), nil)
 
 	// The filter applies to every owner. An owner holding nothing in the
 	// filtered mints is still present with an empty balance.
@@ -280,7 +280,7 @@ func TestGetBalances_MintFilter(t *testing.T) {
 
 	ownerBalance1 = assertOwnerBalance(t, resp, ownerAccount1, expectedLaunchpadMintValue, nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, expectedLaunchpadMintValue, nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, currencycreator.ToQuarks(100), expectedLaunchpadMintValue, nil)
 
 	ownerBalance2 = assertOwnerBalance(t, resp, ownerAccount2, 0, nil)
 	assert.Empty(t, ownerBalance2.BalancesByMint)
@@ -296,12 +296,12 @@ func TestGetBalances_MintFilter(t *testing.T) {
 
 	ownerBalance1 = assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 2)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), nil)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, expectedLaunchpadMintValue, nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, launchpadMint, currencycreator.ToQuarks(100), expectedLaunchpadMintValue, nil)
 
 	ownerBalance2 = assertOwnerBalance(t, resp, ownerAccount2, common.ToCoreMintQuarks(7), nil)
 	require.Len(t, ownerBalance2.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), nil)
+	assertMintBalance(t, ownerBalance2.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(7), common.ToCoreMintQuarks(7), nil)
 
 	// A mint no owner holds results in an OK response with no balances
 	resp, err = env.client.GetBalances(env.ctx, &balancepb.GetBalancesRequest{
@@ -313,6 +313,65 @@ func TestGetBalances_MintFilter(t *testing.T) {
 	require.Len(t, resp.BalancesByOwner, 2)
 
 	ownerBalance1 = assertOwnerBalance(t, resp, ownerAccount1, 0, nil)
+	assert.Empty(t, ownerBalance1.BalancesByMint)
+
+	ownerBalance2 = assertOwnerBalance(t, resp, ownerAccount2, 0, nil)
+	assert.Empty(t, ownerBalance2.BalancesByMint)
+}
+
+func TestGetBalances_ExcludePerMintBalances(t *testing.T) {
+	env, cleanup := setup(t)
+	defer cleanup()
+
+	coreVmConfig := testutil.NewRandomVmConfig(t, true)
+	launchpadMint := testutil.SetupLaunchpadCurrency(t, env.data, env.reserveStore, env.holderStore)
+	launchpadVmConfig, err := common.GetVmConfigForMint(env.ctx, env.data, launchpadMint)
+	require.NoError(t, err)
+
+	ownerAccount1 := testutil.NewRandomAccount(t)
+	ownerAccount2 := testutil.NewRandomAccount(t)
+
+	owner1CoreMintAccountRecords := setupAccountRecords(t, env, ownerAccount1, ownerAccount1, coreVmConfig, 0, commonpb.AccountType_PRIMARY)
+	owner1LaunchpadMintAccountRecords := setupAccountRecords(t, env, ownerAccount1, ownerAccount1, launchpadVmConfig, 0, commonpb.AccountType_PRIMARY)
+	owner2CoreMintAccountRecords := setupAccountRecords(t, env, ownerAccount2, ownerAccount2, coreVmConfig, 0, commonpb.AccountType_PRIMARY)
+
+	setupCachedBalance(t, env, owner1CoreMintAccountRecords, common.ToCoreMintQuarks(42))
+	setupCachedBalance(t, env, owner1LaunchpadMintAccountRecords, currencycreator.ToQuarks(100))
+	setupCachedBalance(t, env, owner2CoreMintAccountRecords, common.ToCoreMintQuarks(7))
+
+	expectedLaunchpadMintValue := estimateLaunchpadSellValue(t, currencycreator.ToQuarks(100))
+
+	owners := []*commonpb.SolanaAccountId{ownerAccount1.ToProto(), ownerAccount2.ToProto()}
+	expectedCurrencyCodes := []string{"usd", "cad"}
+
+	// Owner totals still account for every mint, but the per-mint breakdown
+	// is omitted
+	resp, err := env.client.GetBalances(env.ctx, &balancepb.GetBalancesRequest{
+		Owners:                 owners,
+		CurrencyCodes:          expectedCurrencyCodes,
+		ExcludePerMintBalances: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, balancepb.GetBalancesResponse_OK, resp.Result)
+	require.Len(t, resp.BalancesByOwner, 2)
+
+	ownerBalance1 := assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42)+expectedLaunchpadMintValue, expectedCurrencyCodes)
+	assert.Empty(t, ownerBalance1.BalancesByMint)
+
+	ownerBalance2 := assertOwnerBalance(t, resp, ownerAccount2, common.ToCoreMintQuarks(7), expectedCurrencyCodes)
+	assert.Empty(t, ownerBalance2.BalancesByMint)
+
+	// The mint filter still applies to owner totals
+	resp, err = env.client.GetBalances(env.ctx, &balancepb.GetBalancesRequest{
+		Owners:                 owners,
+		Mints:                  []*commonpb.SolanaAccountId{launchpadMint.ToProto()},
+		ExcludePerMintBalances: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, balancepb.GetBalancesResponse_OK, resp.Result)
+	require.Len(t, resp.BalancesByOwner, 2)
+
+	ownerBalance1 = assertOwnerBalance(t, resp, ownerAccount1, expectedLaunchpadMintValue, nil)
 	assert.Empty(t, ownerBalance1.BalancesByMint)
 
 	ownerBalance2 = assertOwnerBalance(t, resp, ownerAccount2, 0, nil)
@@ -362,7 +421,7 @@ func TestGetBalances_UnmanagedAccountsExcluded(t *testing.T) {
 	// Only the account still managed by Code contributes to owner 1's balance
 	ownerBalance1 := assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42), nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), nil)
 
 	// An owner whose only account is unmanaged has an empty balance
 	ownerBalance2 := assertOwnerBalance(t, resp, ownerAccount2, 0, nil)
@@ -413,14 +472,14 @@ func TestGetBalances_DustHidden(t *testing.T) {
 	// Dust is excluded from both the total and the per-mint breakdown
 	ownerBalance1 := assertOwnerBalance(t, resp, ownerAccount1, common.ToCoreMintQuarks(42), nil)
 	require.Len(t, ownerBalance1.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), nil)
+	assertMintBalance(t, ownerBalance1.BalancesByMint, common.CoreMintAccount, common.ToCoreMintQuarks(42), common.ToCoreMintQuarks(42), nil)
 
 	ownerBalance2 := assertOwnerBalance(t, resp, ownerAccount2, 0, nil)
 	assert.Empty(t, ownerBalance2.BalancesByMint)
 
 	ownerBalance3 := assertOwnerBalance(t, resp, ownerAccount3, dustValue, nil)
 	require.Len(t, ownerBalance3.BalancesByMint, 1)
-	assertMintBalance(t, ownerBalance3.BalancesByMint, common.CoreMintAccount, dustValue, nil)
+	assertMintBalance(t, ownerBalance3.BalancesByMint, common.CoreMintAccount, dustValue, dustValue, nil)
 }
 
 func TestGetBalances_UnknownOwnerAccount(t *testing.T) {
@@ -567,10 +626,11 @@ func assertOwnerBalance(t *testing.T, resp *balancepb.GetBalancesResponse, owner
 	return ownerBalance
 }
 
-func assertMintBalance(t *testing.T, balancesByMint map[string]*balancepb.MintBalance, mint *common.Account, expectedCoreMintValue uint64, expectedCurrencyCodes []string) {
+func assertMintBalance(t *testing.T, balancesByMint map[string]*balancepb.MintBalance, mint *common.Account, expectedQuarks, expectedCoreMintValue uint64, expectedCurrencyCodes []string) {
 	mintBalance, ok := balancesByMint[mint.PublicKey().ToBase58()]
 	require.True(t, ok)
 	assert.Equal(t, mint.PublicKey().ToBytes(), mintBalance.Mint.Value)
+	assert.EqualValues(t, expectedQuarks, mintBalance.Quarks)
 	assert.EqualValues(t, expectedCoreMintValue, mintBalance.CoreMintValue)
 	assertFiatValues(t, mintBalance.FiatValuesByCurrency, expectedCoreMintValue, expectedCurrencyCodes)
 }
