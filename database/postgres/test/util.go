@@ -18,7 +18,7 @@ import (
 
 const (
 	containerName     = "postgres"
-	containerVersion  = "14.24"
+	containerVersion  = "18.6"
 	containerAutoKill = 120 // seconds
 
 	port     = 5432

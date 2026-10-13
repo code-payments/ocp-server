@@ -62,11 +62,11 @@ func NewWithUsernameAndPassword(username, password, hostname, port, dbname strin
 	// IMPORTANT: Supported by Aurora Serverless clusters
 
 	// Use password based authentication
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=prefer",
 		username, password, hostname, port, dbname,
 	)
 
-	// TODO: either switch to IAM (non-serverless only) or enable SSL (download the db cert)
+	// TODO: either switch to IAM (non-serverless only) or use sslmode=verify-full (download the db cert)
 	// (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Security.html)
 
 	// Try to open a connection pool using the "pgx" driver (instead of "postgres")

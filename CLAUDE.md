@@ -26,7 +26,7 @@ go test -v ./...
 ```
 
 - Tests use `testify` (`assert`/`require`).
-- Postgres store tests spin up a `postgres:14` container via `ory/dockertest` (`database/postgres/test`), so Docker must be running for the full suite. Memory store tests need nothing.
+- Postgres store tests spin up a `postgres:18` container via `ory/dockertest` (`database/postgres/test`), so Docker must be running for the full suite. Memory store tests need nothing.
 - Some stores (currency exchange/reserve/holder, messaging) are DynamoDB-backed; their tests use `database/dynamodb/test`.
 
 ### Building
