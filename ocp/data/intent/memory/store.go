@@ -82,6 +82,15 @@ func (s *store) findByOwner(owner string) []*intent.Record {
 				}
 			}
 		}
+
+		if item.SendPublicMultiPaymentMetadata != nil {
+			for _, payment := range item.SendPublicMultiPaymentMetadata.Payments {
+				if payment.DestinationOwnerAccount == owner {
+					res = append(res, item)
+					break
+				}
+			}
+		}
 	}
 
 	return res
@@ -182,12 +191,15 @@ func (s *store) filterByState(items []*intent.Record, include bool, states ...in
 	return res
 }
 
-func (s *store) filterByType(items []*intent.Record, intentType intent.Type) []*intent.Record {
+func (s *store) filterByType(items []*intent.Record, intentTypes ...intent.Type) []*intent.Record {
 	var res []*intent.Record
 
 	for _, item := range items {
-		if item.IntentType == intentType {
-			res = append(res, item)
+		for _, intentType := range intentTypes {
+			if item.IntentType == intentType {
+				res = append(res, item)
+				break
+			}
 		}
 	}
 
@@ -219,6 +231,10 @@ func (s *store) filterByWithdrawalFlag(items []*intent.Record, want bool) []*int
 			if item.SendPublicPaymentMetadata.IsWithdrawal == want {
 				res = append(res, item)
 			}
+		case intent.SendPublicMultiPayment:
+			if !want {
+				res = append(res, item)
+			}
 		}
 	}
 	return res
@@ -233,6 +249,9 @@ func sumQuarkAmount(items []*intent.Record) uint64 {
 		if item.ReceivePaymentsPubliclyMetadata != nil {
 			value += item.ReceivePaymentsPubliclyMetadata.Quantity
 		}
+		if item.SendPublicMultiPaymentMetadata != nil {
+			value += item.SendPublicMultiPaymentMetadata.Quantity
+		}
 	}
 	return value
 }
@@ -245,6 +264,9 @@ func sumUsdMarketValue(items []*intent.Record) float64 {
 		}
 		if item.ReceivePaymentsPubliclyMetadata != nil {
 			value += item.ReceivePaymentsPubliclyMetadata.UsdMarketValue
+		}
+		if item.SendPublicMultiPaymentMetadata != nil {
+			value += item.SendPublicMultiPaymentMetadata.UsdMarketValue
 		}
 	}
 	return value
@@ -359,7 +381,7 @@ func (s *store) GetTransactedAmountForAntiMoneyLaundering(ctx context.Context, o
 	defer s.mu.Unlock()
 
 	items := s.findByInitiatorOwnerSinceTimestamp(owner, since)
-	items = s.filterByType(items, intent.SendPublicPayment)
+	items = s.filterByType(items, intent.SendPublicPayment, intent.SendPublicMultiPayment)
 	items = s.filterByState(items, false, intent.StateRevoked)
 	items = s.filterByWithdrawalFlag(items, false)
 	return sumQuarkAmount(items), sumUsdMarketValue(items), nil
@@ -414,6 +436,17 @@ func (s *store) getUsdCostBasis(owner string, mint string) float64 {
 			// Owner as destination_owner is destination, add USD
 			if item.SendPublicPaymentMetadata.DestinationOwnerAccount == owner {
 				costBasis += item.SendPublicPaymentMetadata.UsdMarketValue
+			}
+		case intent.SendPublicMultiPayment:
+			// Owner as initiator is source, subtract total USD
+			if item.InitiatorOwnerAccount == owner {
+				costBasis -= item.SendPublicMultiPaymentMetadata.UsdMarketValue
+			}
+			// Owner as a payment's destination_owner is destination, add that payment's USD
+			for _, payment := range item.SendPublicMultiPaymentMetadata.Payments {
+				if payment.DestinationOwnerAccount == owner {
+					costBasis += payment.UsdMarketValue
+				}
 			}
 		}
 	}

@@ -34,6 +34,8 @@ func BuildRecordsForIntent(ctx context.Context, data ocp_data.DatabaseData, inte
 		return buildRecordsForSendPublicPaymentIntent(ctx, data, intentRecord, protoMetadata, actionRecords, withdrawalFeeQuarks)
 	case intent.ReceivePaymentsPublicly:
 		return buildRecordsForReceivePaymentsPubliclyIntent(intentRecord)
+	case intent.SendPublicMultiPayment:
+		return buildRecordsForSendPublicMultiPaymentIntent(intentRecord), nil
 	default:
 		// todo: Support remaining money movement intent types
 		return nil, nil
@@ -167,6 +169,48 @@ func buildRecordsForSendPublicPaymentIntent(ctx context.Context, data ocp_data.D
 	}
 
 	return []*history.Record{sent, received}, nil
+}
+
+// buildRecordsForSendPublicMultiPaymentIntent builds a single record for the
+// sender with the cumulative total of all payments, and one record for each
+// recipient with their individual payment. The sender's record has no
+// counterparty, since there's more than one. Recipient owners are unique and
+// never the sender, which SubmitIntent validates.
+func buildRecordsForSendPublicMultiPaymentIntent(intentRecord *intent.Record) []*history.Record {
+	metadata := intentRecord.SendPublicMultiPaymentMetadata
+
+	records := []*history.Record{{
+		ReferenceId:      intentRecord.IntentId,
+		ReferenceType:    history.IntentReference,
+		Type:             history.DirectlySent,
+		OwnerAccount:     intentRecord.InitiatorOwnerAccount,
+		ExchangeCurrency: metadata.ExchangeCurrency,
+		NativeAmount:     metadata.NativeAmount,
+		MintAccount:      intentRecord.MintAccount,
+		Quantity:         metadata.Quantity,
+		AppMetadata:      intentRecord.AppMetadata,
+		State:            history.StateCompleted,
+		CreatedAt:        intentRecord.CreatedAt,
+	}}
+
+	for _, payment := range metadata.Payments {
+		records = append(records, &history.Record{
+			ReferenceId:              intentRecord.IntentId,
+			ReferenceType:            history.IntentReference,
+			Type:                     history.DirectlyReceived,
+			OwnerAccount:             payment.DestinationOwnerAccount,
+			CounterpartyOwnerAccount: pointer.String(intentRecord.InitiatorOwnerAccount),
+			ExchangeCurrency:         metadata.ExchangeCurrency,
+			NativeAmount:             payment.NativeAmount,
+			MintAccount:              intentRecord.MintAccount,
+			Quantity:                 payment.Quantity,
+			AppMetadata:              intentRecord.AppMetadata,
+			State:                    history.StateCompleted,
+			CreatedAt:                intentRecord.CreatedAt,
+		})
+	}
+
+	return records
 }
 
 func buildRecordsForWithdrawalIntent(ctx context.Context, data ocp_data.DatabaseData, intentRecord *intent.Record, protoMetadata *transactionpb.Metadata, actionRecords []*action.Record, withdrawalFeeQuarks uint64) ([]*history.Record, error) {

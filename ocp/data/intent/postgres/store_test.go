@@ -68,6 +68,9 @@ const (
 
 			quantity BIGINT NULL CHECK (quantity >= 0),
 
+			native_amount NUMERIC(18, 9) NULL,
+			usd_market_value NUMERIC(18, 9) NULL,
+
 			CONSTRAINT ocp__core_intentaccountmetadata__uniq__paging_id__and__source UNIQUE (paging_id, source),
 			CONSTRAINT ocp__core_intentaccountmetadata__uniq__paging_id__and__destination UNIQUE (paging_id, destination)
 		)
