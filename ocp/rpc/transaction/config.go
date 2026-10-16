@@ -90,6 +90,7 @@ func WithEnvConfigs() ConfigProvider {
 
 type testOverrides struct {
 	disableSubmitIntent        bool
+	disableSwaps               bool
 	enableAntispamChecks       bool
 	enableAmlChecks            bool
 	clientReceiveTimeout       time.Duration
@@ -101,6 +102,7 @@ func withManualTestOverrides(overrides *testOverrides) ConfigProvider {
 	return func() *conf {
 		return &conf{
 			disableSubmitIntent:             wrapper.NewBoolConfig(memory.NewConfig(overrides.disableSubmitIntent), defaultDisableSubmitIntent),
+			disableSwaps:                    wrapper.NewBoolConfig(memory.NewConfig(overrides.disableSwaps), defaultDisableSwaps),
 			disableAntispamChecks:           wrapper.NewBoolConfig(memory.NewConfig(!overrides.enableAntispamChecks), false),
 			disableAmlChecks:                wrapper.NewBoolConfig(memory.NewConfig(!overrides.enableAmlChecks), false),
 			disableBlockchainChecks:         wrapper.NewBoolConfig(memory.NewConfig(true), true),
