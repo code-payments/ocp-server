@@ -29,6 +29,8 @@ var ErrUnsupportedBalanceChange = errors.New("unsupported balance change")
 // the gross amount leaving the source. A fee action carries the configured
 // fee's USD value and the principal carries the remainder, so an intent may
 // have at most one quantified principal action and at most one fee action.
+// The exception is a multi payment, where each payment's action carries that
+// payment's USD value and fees aren't supported.
 // withdrawalFeeQuarks is the configured create-on-send withdrawal fee, in
 // core mint quarks.
 func DeltasForSubmittedIntent(intentRecord *intent.Record, actionRecords []*action.Record, withdrawalFeeQuarks uint64) ([]*balance.Delta, error) {
@@ -37,7 +39,7 @@ func DeltasForSubmittedIntent(intentRecord *intent.Record, actionRecords []*acti
 	}
 
 	switch intentRecord.IntentType {
-	case intent.OpenAccounts, intent.SendPublicPayment, intent.ReceivePaymentsPublicly:
+	case intent.OpenAccounts, intent.SendPublicPayment, intent.ReceivePaymentsPublicly, intent.SendPublicMultiPayment:
 	default:
 		return nil, fmt.Errorf("%w: %d intent is not submitted", ErrUnsupportedBalanceChange, intentRecord.IntentType)
 	}
@@ -215,6 +217,14 @@ func UsdCostBasisForIntent(intentRecord *intent.Record) (int64, error) {
 		return balance.UsdCostBasisFromFloat(intentRecord.SendPublicPaymentMetadata.UsdMarketValue), nil
 	case intent.ReceivePaymentsPublicly:
 		return balance.UsdCostBasisFromFloat(intentRecord.ReceivePaymentsPubliclyMetadata.UsdMarketValue), nil
+	case intent.SendPublicMultiPayment:
+		// Summed per payment, so the gross matches what the payments' actions
+		// carry exactly
+		var gross int64
+		for _, payment := range intentRecord.SendPublicMultiPaymentMetadata.Payments {
+			gross += balance.UsdCostBasisFromFloat(payment.UsdMarketValue)
+		}
+		return gross, nil
 	default:
 		return 0, fmt.Errorf("%w: %d intent", ErrUnsupportedBalanceChange, intentRecord.IntentType)
 	}
@@ -238,6 +248,10 @@ func requireSupported(intentRecord *intent.Record, actionRecords []*action.Recor
 // usdCostBasisByAction splits an intent's USD cost basis across its
 // quantified actions, keyed by action ID.
 func usdCostBasisByAction(intentRecord *intent.Record, actionRecords []*action.Record, withdrawalFeeQuarks uint64) (map[uint32]int64, error) {
+	if intentRecord.IntentType == intent.SendPublicMultiPayment {
+		return usdCostBasisByMultiPaymentAction(intentRecord, actionRecords)
+	}
+
 	gross, err := UsdCostBasisForIntent(intentRecord)
 	if err != nil {
 		return nil, err
@@ -280,6 +294,56 @@ func usdCostBasisByAction(intentRecord *intent.Record, actionRecords []*action.R
 		res[principal.ActionId] = gross
 	} else if gross != 0 {
 		return nil, fmt.Errorf("%w: intent has value but no quantified action", ErrUnsupportedBalanceChange)
+	}
+	return res, nil
+}
+
+// usdCostBasisByMultiPaymentAction attributes each payment's USD cost basis
+// to the one action that pays it, keyed by action ID. Every action must be a
+// quantified transfer from the intent's source that pays exactly one payment.
+func usdCostBasisByMultiPaymentAction(intentRecord *intent.Record, actionRecords []*action.Record) (map[uint32]int64, error) {
+	metadata := intentRecord.SendPublicMultiPaymentMetadata
+
+	if len(actionRecords) != len(metadata.Payments) {
+		return nil, fmt.Errorf("%w: multi payment must have one action per payment", ErrUnsupportedBalanceChange)
+	}
+
+	unpaid := make(map[string]*intent.Payment)
+	for _, payment := range metadata.Payments {
+		unpaid[payment.DestinationTokenAccount] = payment
+	}
+
+	res := make(map[uint32]int64)
+	for _, actionRecord := range actionRecords {
+		if actionRecord.ActionType != action.NoPrivacyTransfer {
+			return nil, fmt.Errorf("%w: multi payment action is not a transfer", ErrUnsupportedBalanceChange)
+		}
+		if actionRecord.FeeType != nil {
+			return nil, fmt.Errorf("%w: multi payment pays a fee", ErrUnsupportedBalanceChange)
+		}
+		if actionRecord.Quantity == nil {
+			return nil, fmt.Errorf("%w: multi payment action has no quantity", ErrUnsupportedBalanceChange)
+		}
+		if actionRecord.Destination == nil {
+			return nil, errors.New("destination is required for a transfer")
+		}
+		if actionRecord.Source != metadata.Source {
+			return nil, errors.New("multi payment action does not match intent source")
+		}
+
+		payment, ok := unpaid[*actionRecord.Destination]
+		if !ok {
+			return nil, fmt.Errorf("%w: action does not pay exactly one payment", ErrUnsupportedBalanceChange)
+		}
+		if *actionRecord.Quantity != payment.Quantity {
+			return nil, errors.New("multi payment action quantity does not match payment")
+		}
+		delete(unpaid, *actionRecord.Destination)
+
+		res[actionRecord.ActionId] = balance.UsdCostBasisFromFloat(payment.UsdMarketValue)
+	}
+	if len(unpaid) > 0 {
+		return nil, fmt.Errorf("%w: payment has no action", ErrUnsupportedBalanceChange)
 	}
 	return res, nil
 }

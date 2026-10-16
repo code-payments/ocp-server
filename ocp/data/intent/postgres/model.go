@@ -131,6 +131,19 @@ func toIntentModel(obj *intent.Record) (*intentModel, error) {
 		for _, distribution := range obj.PublicDistributionMetadata.Distributions {
 			m.Accounts = append(m.Accounts, fromDistribution(m.Id.Int64, distribution))
 		}
+	case intent.SendPublicMultiPayment:
+		m.Source = obj.SendPublicMultiPaymentMetadata.Source
+		m.Quantity = obj.SendPublicMultiPaymentMetadata.Quantity
+
+		m.ExchangeCurrency = strings.ToLower(string(obj.SendPublicMultiPaymentMetadata.ExchangeCurrency))
+		m.ExchangeRate = obj.SendPublicMultiPaymentMetadata.ExchangeRate
+		m.NativeAmount = obj.SendPublicMultiPaymentMetadata.NativeAmount
+		m.UsdMarketValue = obj.SendPublicMultiPaymentMetadata.UsdMarketValue
+		m.OriginalUsdMarketValue = obj.SendPublicMultiPaymentMetadata.UsdMarketValue
+
+		for _, payment := range obj.SendPublicMultiPaymentMetadata.Payments {
+			m.Accounts = append(m.Accounts, fromPayment(m.Id.Int64, payment))
+		}
 	default:
 		return nil, errors.New("unsupported intent type")
 	}
@@ -218,6 +231,20 @@ func fromIntentModel(obj *intentModel) *intent.Record {
 		for _, account := range obj.Accounts {
 			record.PublicDistributionMetadata.Distributions = append(record.PublicDistributionMetadata.Distributions, toDistribution(account))
 		}
+	case intent.SendPublicMultiPayment:
+		record.SendPublicMultiPaymentMetadata = &intent.SendPublicMultiPaymentMetadata{
+			Source:   obj.Source,
+			Quantity: obj.Quantity,
+
+			ExchangeCurrency: currency.Code(obj.ExchangeCurrency),
+			ExchangeRate:     obj.ExchangeRate,
+			NativeAmount:     obj.NativeAmount,
+			UsdMarketValue:   obj.UsdMarketValue,
+		}
+
+		for _, account := range obj.Accounts {
+			record.SendPublicMultiPaymentMetadata.Payments = append(record.SendPublicMultiPaymentMetadata.Payments, toPayment(account))
+		}
 	}
 
 	return record
@@ -296,6 +323,9 @@ type intentAccountModel struct {
 	DestinationOwner sql.NullString `db:"destination_owner"`
 
 	Quantity uint64 `db:"quantity"`
+
+	NativeAmount   sql.NullFloat64 `db:"native_amount"`
+	UsdMarketValue sql.NullFloat64 `db:"usd_market_value"`
 }
 
 func fromDistribution(pagingID int64, obj *intent.Distribution) *intentAccountModel {
@@ -323,19 +353,56 @@ func toDistribution(obj *intentAccountModel) *intent.Distribution {
 	}
 }
 
+func fromPayment(pagingID int64, obj *intent.Payment) *intentAccountModel {
+	return &intentAccountModel{
+		PagingId: pagingID,
+
+		Destination: sql.NullString{
+			Valid:  true,
+			String: obj.DestinationTokenAccount,
+		},
+		DestinationOwner: sql.NullString{
+			Valid:  true,
+			String: obj.DestinationOwnerAccount,
+		},
+
+		Quantity: obj.Quantity,
+
+		NativeAmount: sql.NullFloat64{
+			Valid:   true,
+			Float64: obj.NativeAmount,
+		},
+		UsdMarketValue: sql.NullFloat64{
+			Valid:   true,
+			Float64: obj.UsdMarketValue,
+		},
+	}
+}
+
+func toPayment(obj *intentAccountModel) *intent.Payment {
+	return &intent.Payment{
+		DestinationOwnerAccount: obj.DestinationOwner.String,
+		DestinationTokenAccount: obj.Destination.String,
+		Quantity:                obj.Quantity,
+
+		NativeAmount:   obj.NativeAmount.Float64,
+		UsdMarketValue: obj.UsdMarketValue.Float64,
+	}
+}
+
 func dbBatchPutAccounts(ctx context.Context, tx *sqlx.Tx, models []*intentAccountModel) ([]*intentAccountModel, error) {
 	var res []*intentAccountModel
 
 	query := `INSERT INTO ` + accountsTableName + `
-			(paging_id, source, source_owner, destination, destination_owner, quantity)
+			(paging_id, source, source_owner, destination, destination_owner, quantity, native_amount, usd_market_value)
 			VALUES `
 	var parameters []any
 
 	for i, m := range models {
 		baseIndex := len(parameters)
 		query += fmt.Sprintf(
-			`($%d, $%d, $%d, $%d, $%d, $%d)`,
-			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6,
+			`($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)`,
+			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6, baseIndex+7, baseIndex+8,
 		)
 		if i != len(models)-1 {
 			query += ","
@@ -349,9 +416,11 @@ func dbBatchPutAccounts(ctx context.Context, tx *sqlx.Tx, models []*intentAccoun
 			m.Destination,
 			m.DestinationOwner,
 			m.Quantity,
+			m.NativeAmount,
+			m.UsdMarketValue,
 		)
 	}
-	query += ` RETURNING id, paging_id, source, source_owner, destination, destination_owner, quantity`
+	query += ` RETURNING id, paging_id, source, source_owner, destination, destination_owner, quantity, native_amount, usd_market_value`
 
 	err := tx.SelectContext(
 		ctx,
@@ -367,11 +436,11 @@ func dbBatchPutAccounts(ctx context.Context, tx *sqlx.Tx, models []*intentAccoun
 
 func dbGetAccounts(ctx context.Context, db *sqlx.DB, intentType intent.Type, pagingID int64) ([]*intentAccountModel, error) {
 	var res []*intentAccountModel
-	if intentType != intent.PublicDistribution {
+	if intentType != intent.PublicDistribution && intentType != intent.SendPublicMultiPayment {
 		return res, nil
 	}
 
-	query := `SELECT id, paging_id, source, source_owner, destination, destination_owner, quantity
+	query := `SELECT id, paging_id, source, source_owner, destination, destination_owner, quantity, native_amount, usd_market_value
 		FROM ` + accountsTableName + `
 		WHERE paging_id = $1
 		ORDER BY id ASC`
@@ -566,7 +635,7 @@ func dbGetTransactedAmountForAntiMoneyLaundering(ctx context.Context, db *sqlx.D
 	}{}
 
 	query := `SELECT SUM(quantity) AS total_quark_value, SUM(usd_market_value) AS total_usd_value FROM ` + intentTableName + `
-		WHERE owner = $1 AND created_at >= $2 AND intent_type = $3 AND state != $4 AND is_withdraw = FALSE
+		WHERE owner = $1 AND created_at >= $2 AND intent_type IN ($3, $5) AND state != $4 AND is_withdraw = FALSE
 	`
 	err := db.GetContext(
 		ctx,
@@ -576,6 +645,7 @@ func dbGetTransactedAmountForAntiMoneyLaundering(ctx context.Context, db *sqlx.D
 		since,
 		intent.SendPublicPayment,
 		intent.StateRevoked,
+		intent.SendPublicMultiPayment,
 	)
 	if err != nil {
 		return 0, 0, err
@@ -594,24 +664,27 @@ func dbGetUsdCostBasis(ctx context.Context, db *sqlx.DB, owner string, mint stri
 	var mintFilter string
 	var params []any
 	if mint == config.CoreMintPublicKeyString {
-		mintFilter = "mint IS NULL"
-		params = []any{owner, intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment}
+		mintFilter = "i.mint IS NULL"
+		params = []any{owner, intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, intent.SendPublicMultiPayment}
 	} else {
-		mintFilter = "mint = $6"
-		params = []any{owner, intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, mint}
+		mintFilter = "i.mint = $7"
+		params = []any{owner, intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, intent.SendPublicMultiPayment, mint}
 	}
 
 	// USD received as destination:
 	//   - ExternalDeposit, ReceivePaymentsPublicly where owner is initiator
 	//   - SendPublicPayment where owner is destination_owner
+	//   - SendPublicMultiPayment where owner is a payment's destination_owner
 	// USD sent as source:
-	//   - SendPublicPayment where owner is initiator
+	//   - SendPublicPayment, SendPublicMultiPayment where owner is initiator
 	query := fmt.Sprintf(`SELECT
-		(SELECT COALESCE(SUM(usd_market_value), 0) FROM %s WHERE owner = $1 AND %s AND intent_type IN ($3, $4) AND state != $2) +
-		(SELECT COALESCE(SUM(usd_market_value), 0) FROM %s WHERE destination_owner = $1 AND %s AND intent_type = $5 AND state != $2) -
-		(SELECT COALESCE(SUM(usd_market_value), 0) FROM %s WHERE owner = $1 AND %s AND intent_type = $5 AND state != $2);`,
+		(SELECT COALESCE(SUM(i.usd_market_value), 0) FROM %s i WHERE i.owner = $1 AND %s AND i.intent_type IN ($3, $4) AND i.state != $2) +
+		(SELECT COALESCE(SUM(i.usd_market_value), 0) FROM %s i WHERE i.destination_owner = $1 AND %s AND i.intent_type = $5 AND i.state != $2) +
+		(SELECT COALESCE(SUM(a.usd_market_value), 0) FROM %s a JOIN %s i ON i.id = a.paging_id WHERE a.destination_owner = $1 AND %s AND i.intent_type = $6 AND i.state != $2) -
+		(SELECT COALESCE(SUM(i.usd_market_value), 0) FROM %s i WHERE i.owner = $1 AND %s AND i.intent_type IN ($5, $6) AND i.state != $2);`,
 		intentTableName, mintFilter,
 		intentTableName, mintFilter,
+		accountsTableName, intentTableName, mintFilter,
 		intentTableName, mintFilter,
 	)
 
@@ -647,24 +720,28 @@ func dbGetUsdCostBasisBatch(ctx context.Context, db *sqlx.DB, mint string, owner
 	var mintFilter string
 	var params []any
 	if mint == config.CoreMintPublicKeyString {
-		mintFilter = "mint IS NULL"
-		params = []any{intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment}
+		mintFilter = "i.mint IS NULL"
+		params = []any{intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, intent.SendPublicMultiPayment}
 	} else {
-		mintFilter = "mint = $5"
-		params = []any{intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, mint}
+		mintFilter = "i.mint = $6"
+		params = []any{intent.StateRevoked, intent.ExternalDeposit, intent.ReceivePaymentsPublicly, intent.SendPublicPayment, intent.SendPublicMultiPayment, mint}
 	}
 
 	// USD received as destination (owner is initiator for ExternalDeposit, ReceivePaymentsPublicly):
 	// USD received as destination (owner is destination_owner for SendPublicPayment):
-	// USD sent as source (owner is initiator for SendPublicPayment):
+	// USD received as destination (owner is a payment's destination_owner for SendPublicMultiPayment):
+	// USD sent as source (owner is initiator for SendPublicPayment, SendPublicMultiPayment):
 	query := fmt.Sprintf(
-		`(SELECT owner AS owner, COALESCE(SUM(usd_market_value), 0) AS cost_basis FROM %s WHERE owner IN (%s) AND %s AND intent_type IN ($2, $3) AND state != $1 GROUP BY owner)
+		`(SELECT i.owner AS owner, COALESCE(SUM(i.usd_market_value), 0) AS cost_basis FROM %s i WHERE i.owner IN (%s) AND %s AND i.intent_type IN ($2, $3) AND i.state != $1 GROUP BY i.owner)
 		UNION ALL
-		(SELECT destination_owner AS owner, COALESCE(SUM(usd_market_value), 0) AS cost_basis FROM %s WHERE destination_owner IN (%s) AND %s AND intent_type = $4 AND state != $1 GROUP BY destination_owner)
+		(SELECT i.destination_owner AS owner, COALESCE(SUM(i.usd_market_value), 0) AS cost_basis FROM %s i WHERE i.destination_owner IN (%s) AND %s AND i.intent_type = $4 AND i.state != $1 GROUP BY i.destination_owner)
 		UNION ALL
-		(SELECT owner AS owner, -COALESCE(SUM(usd_market_value), 0) AS cost_basis FROM %s WHERE owner IN (%s) AND %s AND intent_type = $4 AND state != $1 GROUP BY owner);`,
+		(SELECT a.destination_owner AS owner, COALESCE(SUM(a.usd_market_value), 0) AS cost_basis FROM %s a JOIN %s i ON i.id = a.paging_id WHERE a.destination_owner IN (%s) AND %s AND i.intent_type = $5 AND i.state != $1 GROUP BY a.destination_owner)
+		UNION ALL
+		(SELECT i.owner AS owner, -COALESCE(SUM(i.usd_market_value), 0) AS cost_basis FROM %s i WHERE i.owner IN (%s) AND %s AND i.intent_type IN ($4, $5) AND i.state != $1 GROUP BY i.owner);`,
 		intentTableName, ownerFilter, mintFilter,
 		intentTableName, ownerFilter, mintFilter,
+		accountsTableName, intentTableName, ownerFilter, mintFilter,
 		intentTableName, ownerFilter, mintFilter,
 	)
 

@@ -2,6 +2,7 @@ package intent
 
 import (
 	"errors"
+	"math"
 	"time"
 
 	"github.com/code-payments/ocp-server/currency"
@@ -19,6 +20,10 @@ const (
 
 type Type uint8
 
+// multiPaymentTotalTolerance bounds float error between a multi payment's
+// totals and the sum of its payments. Values are persisted with 9 decimals.
+const multiPaymentTotalTolerance = 1e-6
+
 const (
 	UnknownType Type = iota
 	OpenAccounts
@@ -26,6 +31,7 @@ const (
 	SendPublicPayment
 	ReceivePaymentsPublicly
 	PublicDistribution
+	SendPublicMultiPayment
 )
 
 type Record struct {
@@ -43,6 +49,7 @@ type Record struct {
 	SendPublicPaymentMetadata       *SendPublicPaymentMetadata
 	ReceivePaymentsPubliclyMetadata *ReceivePaymentsPubliclyMetadata
 	PublicDistributionMetadata      *PublicDistributionMetadata
+	SendPublicMultiPaymentMetadata  *SendPublicMultiPaymentMetadata
 
 	AppMetadata []byte
 
@@ -113,6 +120,26 @@ type Distribution struct {
 	Quantity                uint64
 }
 
+type SendPublicMultiPaymentMetadata struct {
+	Source   string
+	Payments []*Payment
+	Quantity uint64
+
+	ExchangeCurrency currency.Code
+	ExchangeRate     float64
+	NativeAmount     float64
+	UsdMarketValue   float64
+}
+
+type Payment struct {
+	DestinationOwnerAccount string
+	DestinationTokenAccount string
+	Quantity                uint64
+
+	NativeAmount   float64
+	UsdMarketValue float64
+}
+
 func (r *Record) IsCompleted() bool {
 	return r.State == StateConfirmed
 }
@@ -148,6 +175,12 @@ func (r *Record) Clone() Record {
 		publicDistributionMetadata = &cloned
 	}
 
+	var sendPublicMultiPaymentMetadata *SendPublicMultiPaymentMetadata
+	if r.SendPublicMultiPaymentMetadata != nil {
+		cloned := r.SendPublicMultiPaymentMetadata.Clone()
+		sendPublicMultiPaymentMetadata = &cloned
+	}
+
 	var appMetadata []byte
 	if r.AppMetadata != nil {
 		appMetadata = make([]byte, len(r.AppMetadata))
@@ -169,6 +202,7 @@ func (r *Record) Clone() Record {
 		SendPublicPaymentMetadata:       sendPublicPaymentMetadata,
 		ReceivePaymentsPubliclyMetadata: receivePaymentsPubliclyMetadata,
 		PublicDistributionMetadata:      publicDistributionMetadata,
+		SendPublicMultiPaymentMetadata:  sendPublicMultiPaymentMetadata,
 
 		AppMetadata: appMetadata,
 
@@ -195,6 +229,7 @@ func (r *Record) CopyTo(dst *Record) {
 	dst.SendPublicPaymentMetadata = r.SendPublicPaymentMetadata
 	dst.ReceivePaymentsPubliclyMetadata = r.ReceivePaymentsPubliclyMetadata
 	dst.PublicDistributionMetadata = r.PublicDistributionMetadata
+	dst.SendPublicMultiPaymentMetadata = r.SendPublicMultiPaymentMetadata
 
 	dst.AppMetadata = r.AppMetadata
 
@@ -272,6 +307,17 @@ func (r *Record) Validate() error {
 		}
 
 		err := r.PublicDistributionMetadata.Validate()
+		if err != nil {
+			return err
+		}
+	}
+
+	if r.IntentType == SendPublicMultiPayment {
+		if r.SendPublicMultiPaymentMetadata == nil {
+			return errors.New("send public multi payment metadata must be present")
+		}
+
+		err := r.SendPublicMultiPaymentMetadata.Validate()
 		if err != nil {
 			return err
 		}
@@ -546,6 +592,143 @@ func (m *Distribution) Validate() error {
 	return nil
 }
 
+func (m *SendPublicMultiPaymentMetadata) Clone() SendPublicMultiPaymentMetadata {
+	clonedPayments := make([]*Payment, len(m.Payments))
+	for i, payment := range m.Payments {
+		cloned := payment.Clone()
+		clonedPayments[i] = &cloned
+	}
+
+	return SendPublicMultiPaymentMetadata{
+		Source:   m.Source,
+		Payments: clonedPayments,
+		Quantity: m.Quantity,
+
+		ExchangeCurrency: m.ExchangeCurrency,
+		ExchangeRate:     m.ExchangeRate,
+		NativeAmount:     m.NativeAmount,
+		UsdMarketValue:   m.UsdMarketValue,
+	}
+}
+
+func (m *SendPublicMultiPaymentMetadata) CopyTo(dst *SendPublicMultiPaymentMetadata) {
+	clonedPayments := make([]*Payment, len(m.Payments))
+	for i, payment := range m.Payments {
+		cloned := payment.Clone()
+		clonedPayments[i] = &cloned
+	}
+
+	dst.Source = m.Source
+	dst.Payments = clonedPayments
+	dst.Quantity = m.Quantity
+
+	dst.ExchangeCurrency = m.ExchangeCurrency
+	dst.ExchangeRate = m.ExchangeRate
+	dst.NativeAmount = m.NativeAmount
+	dst.UsdMarketValue = m.UsdMarketValue
+}
+
+func (m *SendPublicMultiPaymentMetadata) Validate() error {
+	if len(m.Source) == 0 {
+		return errors.New("source is required")
+	}
+
+	if len(m.Payments) == 0 {
+		return errors.New("payments are required")
+	}
+	var totalQuantity uint64
+	var totalNativeAmount, totalUsdMarketValue float64
+	destinations := make(map[string]struct{})
+	for _, payment := range m.Payments {
+		if err := payment.Validate(); err != nil {
+			return err
+		}
+
+		if _, ok := destinations[payment.DestinationTokenAccount]; ok {
+			return errors.New("payment destinations must be unique")
+		}
+		destinations[payment.DestinationTokenAccount] = struct{}{}
+
+		totalQuantity += payment.Quantity
+		totalNativeAmount += payment.NativeAmount
+		totalUsdMarketValue += payment.UsdMarketValue
+	}
+
+	if m.Quantity != totalQuantity {
+		return errors.New("quantity must be the sum of payment quantities")
+	}
+
+	if math.Abs(m.NativeAmount-totalNativeAmount) > multiPaymentTotalTolerance {
+		return errors.New("native amount must be the sum of payment native amounts")
+	}
+
+	if math.Abs(m.UsdMarketValue-totalUsdMarketValue) > multiPaymentTotalTolerance {
+		return errors.New("usd market value must be the sum of payment usd market values")
+	}
+
+	if len(m.ExchangeCurrency) == 0 {
+		return errors.New("exchange currency is required")
+	}
+
+	if m.ExchangeRate == 0 {
+		return errors.New("exchange rate cannot be zero")
+	}
+
+	if m.NativeAmount == 0 {
+		return errors.New("native amount cannot be zero")
+	}
+
+	if m.UsdMarketValue == 0 {
+		return errors.New("usd market value cannot be zero")
+	}
+
+	return nil
+}
+
+func (m *Payment) Clone() Payment {
+	return Payment{
+		DestinationOwnerAccount: m.DestinationOwnerAccount,
+		DestinationTokenAccount: m.DestinationTokenAccount,
+		Quantity:                m.Quantity,
+
+		NativeAmount:   m.NativeAmount,
+		UsdMarketValue: m.UsdMarketValue,
+	}
+}
+
+func (m *Payment) CopyTo(dst *Payment) {
+	dst.DestinationOwnerAccount = m.DestinationOwnerAccount
+	dst.DestinationTokenAccount = m.DestinationTokenAccount
+	dst.Quantity = m.Quantity
+
+	dst.NativeAmount = m.NativeAmount
+	dst.UsdMarketValue = m.UsdMarketValue
+}
+
+func (m *Payment) Validate() error {
+	if len(m.DestinationOwnerAccount) == 0 {
+		return errors.New("destination owner account is required")
+	}
+
+	if len(m.DestinationTokenAccount) == 0 {
+		return errors.New("destination token account is required")
+	}
+
+	if m.Quantity == 0 {
+		return errors.New("quantity cannot be zero")
+	}
+
+	if m.NativeAmount == 0 {
+		return errors.New("native amount cannot be zero")
+	}
+
+	if m.UsdMarketValue == 0 {
+		return errors.New("usd market value cannot be zero")
+	}
+
+	return nil
+}
+
 func (s State) IsTerminal() bool {
 	switch s {
 	case StateConfirmed:
@@ -589,6 +772,8 @@ func (t Type) String() string {
 		return "receive_payments_publicly"
 	case PublicDistribution:
 		return "public_distribution"
+	case SendPublicMultiPayment:
+		return "send_public_multi_payment"
 	}
 
 	return "unknown"

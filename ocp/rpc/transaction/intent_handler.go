@@ -9,6 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
@@ -1601,6 +1602,564 @@ func (h *PublicDistributionIntentHandler) OnPreSaveToDB(ctx context.Context) err
 
 func (h *PublicDistributionIntentHandler) OnCommitToDB(ctx context.Context) error {
 	return nil
+}
+
+// multiPaymentCount is the exact number of payments a multi payment intent
+// must make
+const multiPaymentCount = 2
+
+type SendPublicMultiPaymentIntentHandler struct {
+	conf          *conf
+	log           *zap.Logger
+	data          ocp_data.Provider
+	antispamGuard *antispam.Guard
+	amlGuard      *aml.Guard
+
+	// Indexed by payment, in the order provided by the client
+	cachedDestinations []*multiPaymentDestination
+}
+
+type multiPaymentDestination struct {
+	tokenAccount *common.Account
+	ownerAccount *common.Account
+
+	// Exactly one is set, depending on whether the destination primary account
+	// already exists or will be auto-opened as a precursor synthetic
+	// OpenAccounts intent.
+	accountInfo *account.Record
+	autoOpen    *autoOpenPrimaryAccount
+}
+
+func NewSendPublicMultiPaymentIntentHandler(
+	conf *conf,
+	log *zap.Logger,
+	data ocp_data.Provider,
+	antispamGuard *antispam.Guard,
+	amlGuard *aml.Guard,
+) CreateIntentHandler {
+	return &SendPublicMultiPaymentIntentHandler{
+		conf:          conf,
+		log:           log,
+		data:          data,
+		antispamGuard: antispamGuard,
+		amlGuard:      amlGuard,
+	}
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) PopulateMetadata(ctx context.Context, intentRecord *intent.Record, protoMetadata *transactionpb.Metadata) error {
+	typedProtoMetadata := protoMetadata.GetSendPublicMultiPayment()
+	if typedProtoMetadata == nil {
+		return errors.New("unexpected metadata proto message")
+	}
+
+	if len(typedProtoMetadata.Payments) != multiPaymentCount {
+		return NewIntentValidationErrorf("must send exactly %d payments", multiPaymentCount)
+	}
+
+	mint, err := common.GetBackwardsCompatMint(typedProtoMetadata.Mint)
+	if err != nil {
+		return err
+	}
+
+	source, err := common.NewAccountFromProto(typedProtoMetadata.Source)
+	if err != nil {
+		return err
+	}
+
+	metadata := &intent.SendPublicMultiPaymentMetadata{
+		Source: source.PublicKey().ToBase58(),
+	}
+	h.cachedDestinations = make([]*multiPaymentDestination, len(typedProtoMetadata.Payments))
+	for i, protoPayment := range typedProtoMetadata.Payments {
+		clientExchangeData := protoPayment.GetClientExchangeData()
+		if clientExchangeData == nil {
+			return NewIntentDeniedError("client exchange data not provided")
+		}
+		coreMintFiatExchangeRate := clientExchangeData.GetCoreMintFiatExchangeRate().GetExchangeRate()
+		if coreMintFiatExchangeRate == nil {
+			return NewIntentValidationError("core mint fiat exchange rate not provided")
+		}
+
+		destination, err := h.resolveDestination(ctx, protoPayment, mint)
+		if err != nil {
+			return err
+		}
+		h.cachedDestinations[i] = destination
+
+		usdMarketValue, err := currency_util.CalculateUsdMarketValueFromFiatAmount(clientExchangeData.NativeAmount, coreMintFiatExchangeRate.ExchangeRate)
+		if err != nil {
+			return err
+		}
+
+		// Validated to be consistent across payments in AllowCreation
+		metadata.ExchangeCurrency = currency_lib.Code(coreMintFiatExchangeRate.CurrencyCode)
+		if common.IsCoreMint(mint) {
+			metadata.ExchangeRate = coreMintFiatExchangeRate.ExchangeRate
+		}
+
+		metadata.Payments = append(metadata.Payments, &intent.Payment{
+			DestinationOwnerAccount: destination.ownerAccount.PublicKey().ToBase58(),
+			DestinationTokenAccount: destination.tokenAccount.PublicKey().ToBase58(),
+			Quantity:                clientExchangeData.Quarks,
+
+			NativeAmount:   clientExchangeData.NativeAmount,
+			UsdMarketValue: usdMarketValue,
+		})
+		metadata.Quantity += clientExchangeData.Quarks
+		metadata.NativeAmount += clientExchangeData.NativeAmount
+		metadata.UsdMarketValue += usdMarketValue
+	}
+	if !common.IsCoreMint(mint) {
+		metadata.ExchangeRate = currency_util.CalculateExchangeRate(mint, metadata.Quantity, metadata.NativeAmount)
+	}
+
+	intentRecord.IntentType = intent.SendPublicMultiPayment
+	intentRecord.MintAccount = mint.PublicKey().ToBase58()
+	intentRecord.SendPublicMultiPaymentMetadata = metadata
+
+	return nil
+}
+
+// resolveDestination resolves a payment's destination to either an existing
+// primary account, or one that will be auto-opened for an existing OCP user.
+// Further validation on the destination happens in AllowCreation.
+func (h *SendPublicMultiPaymentIntentHandler) resolveDestination(ctx context.Context, protoPayment *transactionpb.SendPublicMultiPaymentMetadata_Payment, mint *common.Account) (*multiPaymentDestination, error) {
+	destination, err := common.NewAccountFromProto(protoPayment.Destination)
+	if err != nil {
+		return nil, err
+	}
+
+	var destinationOwner *common.Account
+	if protoPayment.DestinationOwner != nil {
+		destinationOwner, err = common.NewAccountFromProto(protoPayment.DestinationOwner)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	accountInfoRecord, err := h.data.GetAccountInfoByTokenAddress(ctx, destination.PublicKey().ToBase58())
+	switch err {
+	case nil:
+		owner, err := common.NewAccountFromPublicKeyString(accountInfoRecord.OwnerAccount)
+		if err != nil {
+			return nil, err
+		}
+
+		if destinationOwner != nil && destinationOwner.PublicKey().ToBase58() != owner.PublicKey().ToBase58() {
+			return nil, NewIntentValidationErrorf("destination owner for %s must be %s", destination.PublicKey().ToBase58(), owner.PublicKey().ToBase58())
+		}
+
+		return &multiPaymentDestination{
+			tokenAccount: destination,
+			ownerAccount: owner,
+			accountInfo:  accountInfoRecord,
+		}, nil
+	case account.ErrAccountInfoNotFound:
+		if destinationOwner == nil {
+			return nil, NewIntentValidationErrorf("destination owner is required for %s, which isn't an existing ocp account", destination.PublicKey().ToBase58())
+		}
+
+		autoOpen, err := detectAutoOpenPrimaryAccount(ctx, h.data, destinationOwner, destination, mint)
+		if err != nil {
+			return nil, err
+		} else if autoOpen == nil {
+			return nil, NewIntentValidationErrorf("destination %s must be an ocp primary account", destination.PublicKey().ToBase58())
+		}
+
+		return &multiPaymentDestination{
+			tokenAccount: destination,
+			ownerAccount: destinationOwner,
+			autoOpen:     autoOpen,
+		}, nil
+	default:
+		return nil, err
+	}
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) CreatesNewUser(ctx context.Context, metadata *transactionpb.Metadata) (bool, error) {
+	return false, nil
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) IsNoop(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata, actions []*transactionpb.Action) (bool, error) {
+	return false, nil
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) GetAccountsToLock(ctx context.Context, intentRecord *intent.Record, metadata *transactionpb.Metadata) ([]*common.Account, error) {
+	return nil, nil
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) AllowCreation(ctx context.Context, intentRecord *intent.Record, untypedMetadata *transactionpb.Metadata, actions []*transactionpb.Action) error {
+	typedMetadata := untypedMetadata.GetSendPublicMultiPayment()
+	if typedMetadata == nil {
+		return errors.New("unexpected metadata proto message")
+	}
+
+	initiatiorOwnerAccount, err := common.NewAccountFromPublicKeyString(intentRecord.InitiatorOwnerAccount)
+	if err != nil {
+		return err
+	}
+
+	intentMintAccount, err := common.GetBackwardsCompatMint(typedMetadata.Mint)
+	if err != nil {
+		return err
+	}
+
+	initiatorAccountsByMintAndType, err := common.GetLatestCodeTimelockAccountRecordsForOwner(ctx, h.data, initiatiorOwnerAccount)
+	if err != nil {
+		return err
+	}
+	initiatorAccountsByType, ok := initiatorAccountsByMintAndType[intentMintAccount.PublicKey().ToBase58()]
+	if !ok {
+		return errors.New("initiator mint accounts don't exist")
+	}
+
+	initiatorAccounts := make([]*common.AccountRecords, 0)
+	initiatorAccountsByVault := make(map[string]*common.AccountRecords)
+	for _, batchRecords := range initiatorAccountsByType {
+		for _, records := range batchRecords {
+			initiatorAccounts = append(initiatorAccounts, records)
+			initiatorAccountsByVault[records.General.TokenAccount] = records
+		}
+	}
+
+	//
+	// Part 1: Antispam guard checks against the owner
+	//
+
+	if !h.conf.disableAntispamChecks.Get(ctx) {
+		for _, destination := range h.cachedDestinations {
+			allow, err := h.antispamGuard.AllowSendPayment(ctx, initiatiorOwnerAccount, destination.tokenAccount, true)
+			if err != nil {
+				return err
+			} else if !allow {
+				return ErrTooManyPayments
+			}
+		}
+	}
+
+	//
+	// Part 2: AML checks against the owner
+	//
+
+	if !h.conf.disableAmlChecks.Get(ctx) {
+		allow, err := h.amlGuard.AllowMoneyMovement(ctx, intentRecord)
+		if err != nil {
+			return err
+		} else if !allow {
+			return ErrTransactionLimitExceeded
+		}
+	}
+
+	//
+	// Part 3: Account validation to determine if it's managed by Code
+	//
+
+	err = validateAllUserAccountsManagedByCode(ctx, initiatorAccounts)
+	if err != nil {
+		return err
+	}
+
+	//
+	// Part 4: Exchange data validation
+	//
+
+	var firstClientExchangeData *transactionpb.VerifiedExchangeData
+	for _, payment := range typedMetadata.Payments {
+		clientExchangeData := payment.GetClientExchangeData()
+		if clientExchangeData == nil {
+			return NewIntentDeniedError("client exchange data not provided")
+		}
+
+		if err := validateExchangeDataWithinIntent(typedMetadata.Mint, clientExchangeData); err != nil {
+			return err
+		}
+
+		// Every payment must be valued at the same exchange rate, so the intent
+		// has a single, well-defined exchange rate and currency
+		if firstClientExchangeData == nil {
+			firstClientExchangeData = clientExchangeData
+			continue
+		}
+		if !proto.Equal(firstClientExchangeData.CoreMintFiatExchangeRate, clientExchangeData.CoreMintFiatExchangeRate) {
+			return NewIntentValidationError("all payments must use the same core mint fiat exchange rate")
+		}
+		if !proto.Equal(firstClientExchangeData.LaunchpadCurrencyReserveState, clientExchangeData.LaunchpadCurrencyReserveState) {
+			return NewIntentValidationError("all payments must use the same launchpad currency reserve state")
+		}
+	}
+
+	//
+	// Part 5: Local simulation
+	//
+
+	simResult, err := LocalSimulation(ctx, h.data, actions)
+	if err != nil {
+		return err
+	}
+
+	//
+	// Part 6: Validate fee payments
+	//
+
+	err = validateFeePayments(ctx, h.conf, intentRecord, simResult, nil)
+	if err != nil {
+		return err
+	}
+
+	//
+	// Part 7: Validate reserved intent IDs
+	//
+
+	_, err = validateSwapFunding(ctx, h.conf, h.data, intentRecord)
+	if err != nil {
+		return err
+	}
+
+	//
+	// Part 8: Validate the individual actions
+	//
+
+	return h.validateActions(
+		ctx,
+		initiatiorOwnerAccount,
+		initiatorAccountsByVault,
+		typedMetadata,
+		actions,
+		simResult,
+	)
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) validateActions(
+	ctx context.Context,
+	initiatorOwnerAccount *common.Account,
+	initiatorAccountsByVault map[string]*common.AccountRecords,
+	metadata *transactionpb.SendPublicMultiPaymentMetadata,
+	actions []*transactionpb.Action,
+	simResult *LocalSimulationResult,
+) error {
+	if len(actions) != len(metadata.Payments) {
+		return NewIntentValidationError("expected 1 action per payment")
+	}
+	if len(h.cachedDestinations) != len(metadata.Payments) {
+		return errors.New("destinations not resolved for every payment")
+	}
+
+	//
+	// Part 1: Validate intent and action mints match
+	//
+
+	intentMint, err := common.GetBackwardsCompatMint(metadata.Mint)
+	if err != nil {
+		return err
+	}
+	err = validateIntentAndActionMintsMatch(intentMint, actions)
+	if err != nil {
+		return err
+	}
+
+	//
+	// Part 2: Check the source and destination accounts are valid
+	//
+
+	source, err := common.NewAccountFromProto(metadata.Source)
+	if err != nil {
+		return err
+	}
+
+	sourceAccountRecords, ok := initiatorAccountsByVault[source.PublicKey().ToBase58()]
+	if !ok || sourceAccountRecords.General.AccountType != commonpb.AccountType_PRIMARY {
+		return NewIntentValidationError("source account must be a PRIMARY account")
+	}
+
+	destinationSet := make(map[string]any)
+	destinationOwnerSet := make(map[string]any)
+	for _, destination := range h.cachedDestinations {
+		destinationAddress := destination.tokenAccount.PublicKey().ToBase58()
+		destinationOwnerAddress := destination.ownerAccount.PublicKey().ToBase58()
+
+		if destinationAddress == source.PublicKey().ToBase58() {
+			return NewIntentValidationError("payment is a no-op")
+		}
+		if destinationOwnerAddress == initiatorOwnerAccount.PublicKey().ToBase58() {
+			return NewIntentValidationError("cannot send a payment to an account owned by the source owner")
+		}
+
+		if _, ok := destinationSet[destinationAddress]; ok {
+			return NewIntentValidationErrorf("duplicate destination account detected: %s", destinationAddress)
+		}
+		destinationSet[destinationAddress] = true
+
+		if _, ok := destinationOwnerSet[destinationOwnerAddress]; ok {
+			return NewIntentValidationErrorf("duplicate destination owner account detected: %s", destinationOwnerAddress)
+		}
+		destinationOwnerSet[destinationOwnerAddress] = true
+
+		// Auto-opened primary accounts are validated as part of detection
+		if destination.autoOpen != nil {
+			continue
+		}
+
+		if destination.accountInfo.AccountType != commonpb.AccountType_PRIMARY {
+			return NewIntentValidationErrorf("destination account %s must be a PRIMARY account", destinationAddress)
+		}
+
+		if destination.accountInfo.MintAccount != intentMint.PublicKey().ToBase58() {
+			return NewIntentValidationErrorf("destination account %s is not of %s mint", destinationAddress, intentMint.PublicKey().ToBase58())
+		}
+
+		timelockRecord, err := h.data.GetTimelockByVault(ctx, destinationAddress)
+		if err != nil {
+			return err
+		}
+		if !common.IsManagedByCode(ctx, timelockRecord) {
+			if timelockRecord.IsClosed() {
+				return NewStaleStateErrorf("destination account %s has been closed", destinationAddress)
+			}
+			return ErrDestinationNotManagedByCode
+		}
+	}
+
+	//
+	// Part 3: Validate actions match intent metadata
+	//
+
+	//
+	// Part 3.1: Check each destination account is paid the exact quark amount
+	//           from the source account in one public transfer
+	//
+
+	var totalQuarks uint64
+	for i, payment := range metadata.Payments {
+		quarks := payment.GetClientExchangeData().Quarks
+		totalQuarks += quarks
+
+		destinationAddress := h.cachedDestinations[i].tokenAccount.PublicKey().ToBase58()
+		destinationSimulation, ok := simResult.SimulationsByAccount[destinationAddress]
+		if !ok {
+			return NewIntentValidationErrorf("must send payment to destination account %s", destinationAddress)
+		} else if len(destinationSimulation.Transfers) != 1 {
+			return NewIntentValidationErrorf("must send payment to destination account %s in one action", destinationAddress)
+		} else if destinationSimulation.Transfers[0].IsPrivate || destinationSimulation.Transfers[0].IsWithdraw {
+			return NewActionValidationError(destinationSimulation.Transfers[0].Action, "payment sent to destination must be a public transfer")
+		} else if destinationSimulation.GetDeltaQuarks(false) != int64(quarks) {
+			return NewActionValidationErrorf(destinationSimulation.Transfers[0].Action, "must send %d quarks to destination account", quarks)
+		}
+	}
+
+	//
+	// Part 3.2: Check that the user's primary account was used as the source
+	//           of funds for every payment
+	//
+
+	sourceSimulation, ok := simResult.SimulationsByAccount[source.PublicKey().ToBase58()]
+	if !ok {
+		return NewIntentValidationErrorf("must send payments from source account %s", source.PublicKey().ToBase58())
+	} else if len(sourceSimulation.Transfers) != len(metadata.Payments) {
+		return NewIntentValidationErrorf("must send %d payments from source account", len(metadata.Payments))
+	} else if sourceSimulation.GetDeltaQuarks(false) != -int64(totalQuarks) {
+		return NewIntentValidationErrorf("must send %d quarks from source account", totalQuarks)
+	}
+	for _, transfer := range sourceSimulation.Transfers {
+		if transfer.IsPrivate || transfer.IsWithdraw {
+			return NewActionValidationError(transfer.Action, "payment sent from source must be a public transfer")
+		}
+	}
+
+	// Part 4: Generic validation of actions that move money
+
+	err = validateMoneyMovementActionUserAccounts(ctx, h.data, intent.SendPublicMultiPayment, initiatorAccountsByVault, actions)
+	if err != nil {
+		return err
+	}
+
+	// Part 5: Validate open and closed accounts
+
+	if len(simResult.GetOpenedAccounts()) > 0 {
+		return NewIntentValidationError("cannot open any account")
+	}
+
+	if len(simResult.GetClosedAccounts()) > 0 {
+		return NewIntentValidationError("cannot close any account")
+	}
+
+	return nil
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) OnPreSaveToDB(ctx context.Context) error {
+	for _, destination := range h.cachedDestinations {
+		err := saveAutoOpenPrimaryAccountIntent(ctx, h.data, destination.autoOpen)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) OnCommitToDB(ctx context.Context) error {
+	return nil
+}
+
+// toSendPublicMultiPaymentProtoMetadata converts a submitted multi payment
+// intent into its metadata proto with server exchange data for each payment.
+//
+// Each payment's exchange rate is its own. Core mint payments share the
+// verified rate, but each launchpad currency payment is valued by its own sell
+// against the bonding curve, so its rate is derived from its quarks and native
+// amount.
+func toSendPublicMultiPaymentProtoMetadata(intentRecord *intent.Record) (*transactionpb.Metadata, error) {
+	metadata := intentRecord.SendPublicMultiPaymentMetadata
+
+	mintAccount, err := common.NewAccountFromPublicKeyString(intentRecord.MintAccount)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid mint account")
+	}
+
+	sourceAccount, err := common.NewAccountFromPublicKeyString(metadata.Source)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid source account")
+	}
+
+	var payments []*transactionpb.SendPublicMultiPaymentMetadata_Payment
+	for _, payment := range metadata.Payments {
+		destinationAccount, err := common.NewAccountFromPublicKeyString(payment.DestinationTokenAccount)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid destination account")
+		}
+
+		destinationOwnerAccount, err := common.NewAccountFromPublicKeyString(payment.DestinationOwnerAccount)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid destination owner account")
+		}
+
+		exchangeRate := metadata.ExchangeRate
+		if !common.IsCoreMint(mintAccount) {
+			exchangeRate = currency_util.CalculateExchangeRate(mintAccount, payment.Quantity, payment.NativeAmount)
+		}
+
+		payments = append(payments, &transactionpb.SendPublicMultiPaymentMetadata_Payment{
+			Destination:      destinationAccount.ToProto(),
+			DestinationOwner: destinationOwnerAccount.ToProto(),
+			ExchangeData: &transactionpb.SendPublicMultiPaymentMetadata_Payment_ServerExchangeData{
+				ServerExchangeData: &transactionpb.ExchangeData{
+					Currency:     strings.ToLower(string(metadata.ExchangeCurrency)),
+					ExchangeRate: exchangeRate,
+					NativeAmount: payment.NativeAmount,
+					Quarks:       payment.Quantity,
+					Mint:         mintAccount.ToProto(),
+				},
+			},
+		})
+	}
+
+	return &transactionpb.Metadata{
+		Type: &transactionpb.Metadata_SendPublicMultiPayment{
+			SendPublicMultiPayment: &transactionpb.SendPublicMultiPaymentMetadata{
+				Source:   sourceAccount.ToProto(),
+				Payments: payments,
+				Mint:     mintAccount.ToProto(),
+			},
+		},
+	}, nil
 }
 
 func validateAllUserAccountsManagedByCode(ctx context.Context, initiatorAccounts []*common.AccountRecords) error {

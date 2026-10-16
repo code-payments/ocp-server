@@ -118,6 +118,10 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		log = log.With(zap.String("intent_type", "public_distribution"))
 		intentHandler = NewPublicDistributionIntentHandler(s.conf, s.log, s.data, s.antispamGuard, s.amlGuard)
 		protoMint = typed.PublicDistribution.Mint
+	case *transactionpb.Metadata_SendPublicMultiPayment:
+		log = log.With(zap.String("intent_type", "send_public_multi_payment"))
+		intentHandler = NewSendPublicMultiPaymentIntentHandler(s.conf, s.log, s.data, s.antispamGuard, s.amlGuard)
+		protoMint = typed.SendPublicMultiPayment.Mint
 	default:
 		return handleSubmitIntentError(ctx, streamer, intentRecord, status.Error(codes.InvalidArgument, "SubmitIntentRequest.SubmitActions.Metadata is nil"))
 	}
@@ -855,14 +859,19 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 
 	log = log.With(zap.String("intent_type", intentRecord.IntentType.String()))
 
-	var destinationOwnerAccount string
+	destinationOwnerAccounts := make(map[string]any)
 	switch intentRecord.IntentType {
 	case intent.SendPublicPayment:
-		destinationOwnerAccount = intentRecord.SendPublicPaymentMetadata.DestinationOwnerAccount
+		destinationOwnerAccounts[intentRecord.SendPublicPaymentMetadata.DestinationOwnerAccount] = true
+	case intent.SendPublicMultiPayment:
+		for _, payment := range intentRecord.SendPublicMultiPaymentMetadata.Payments {
+			destinationOwnerAccounts[payment.DestinationOwnerAccount] = true
+		}
 	}
 
 	if req.Owner != nil {
-		if signer.PublicKey().ToBase58() != intentRecord.InitiatorOwnerAccount && signer.PublicKey().ToBase58() != destinationOwnerAccount {
+		_, isDestinationOwner := destinationOwnerAccounts[signer.PublicKey().ToBase58()]
+		if signer.PublicKey().ToBase58() != intentRecord.InitiatorOwnerAccount && !isDestinationOwner {
 			return &transactionpb.GetIntentMetadataResponse{
 				Result: transactionpb.GetIntentMetadataResponse_DENIED,
 			}, nil
@@ -950,6 +959,12 @@ func (s *transactionServer) GetIntentMetadata(ctx context.Context, req *transact
 					Mint: mintAccount.ToProto(),
 				},
 			},
+		}
+	case intent.SendPublicMultiPayment:
+		metadata, err = toSendPublicMultiPaymentProtoMetadata(intentRecord)
+		if err != nil {
+			log.With(zap.Error(err)).Warn("failure converting intent metadata")
+			return nil, status.Error(codes.Internal, "")
 		}
 	default:
 		return &transactionpb.GetIntentMetadataResponse{

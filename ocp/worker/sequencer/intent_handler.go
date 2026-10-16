@@ -156,6 +156,46 @@ func (h *PublicDistributionIntentHandler) OnActionUpdated(ctx context.Context, i
 	return markIntentConfirmed(ctx, h.data, intentId)
 }
 
+type SendPublicMultiPaymentIntentHandler struct {
+	data ocp_data.Provider
+}
+
+func NewSendPublicMultiPaymentIntentHandler(data ocp_data.Provider) IntentHandler {
+	return &SendPublicMultiPaymentIntentHandler{
+		data: data,
+	}
+}
+
+func (h *SendPublicMultiPaymentIntentHandler) OnActionUpdated(ctx context.Context, intentId string) error {
+	actionRecords, err := h.data.GetAllActionsByIntent(ctx, intentId)
+	if err != nil {
+		return err
+	}
+
+	// Every action is a payment, so all are checked to fail the intent as soon
+	// as any payment fails, regardless of the state of the others
+	allConfirmed := true
+	anyFailures := false
+	for _, actionRecord := range actionRecords {
+		switch actionRecord.State {
+		case action.StateConfirmed:
+		case action.StateFailed:
+			anyFailures = true
+			fallthrough
+		default:
+			allConfirmed = false
+		}
+	}
+
+	if anyFailures {
+		return markIntentFailed(ctx, h.data, intentId)
+	}
+	if allConfirmed {
+		return markIntentConfirmed(ctx, h.data, intentId)
+	}
+	return nil
+}
+
 func validateIntentState(record *intent.Record, states ...intent.State) error {
 	for _, validState := range states {
 		if record.State == validState {
@@ -208,5 +248,6 @@ func getIntentHandlers(data ocp_data.Provider) map[intent.Type]IntentHandler {
 	handlersByType[intent.SendPublicPayment] = NewSendPublicPaymentIntentHandler(data)
 	handlersByType[intent.ReceivePaymentsPublicly] = NewReceivePaymentsPubliclyIntentHandler(data)
 	handlersByType[intent.PublicDistribution] = NewPublicDistributionIntentHandler(data)
+	handlersByType[intent.SendPublicMultiPayment] = NewSendPublicMultiPaymentIntentHandler(data)
 	return handlersByType
 }

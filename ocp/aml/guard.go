@@ -60,6 +60,13 @@ func (g *Guard) AllowMoneyMovement(ctx context.Context, intentRecord *intent.Rec
 		usdMarketValue = intentRecord.SendPublicPaymentMetadata.UsdMarketValue
 		consumptionCalculator = g.data.GetTransactedAmountForAntiMoneyLaundering
 		action = actionSendPayment
+	case intent.SendPublicMultiPayment:
+		// Limits apply to the intent's total value across all payments
+		currency = intentRecord.SendPublicMultiPaymentMetadata.ExchangeCurrency
+		nativeAmount = intentRecord.SendPublicMultiPaymentMetadata.NativeAmount
+		usdMarketValue = intentRecord.SendPublicMultiPaymentMetadata.UsdMarketValue
+		consumptionCalculator = g.data.GetTransactedAmountForAntiMoneyLaundering
+		action = actionSendPayment
 	case intent.ReceivePaymentsPublicly:
 		// Public receives are always allowed
 		return true, nil

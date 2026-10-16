@@ -78,6 +78,75 @@ func TestBuildRecordsForIntent_SelfPayment(t *testing.T) {
 	assert.NoError(t, records[0].Validate())
 }
 
+func TestBuildRecordsForIntent_MultiPayment(t *testing.T) {
+	ctx := context.Background()
+	data := ocp_data.NewTestDataProvider()
+
+	intentRecord := &intent.Record{
+		IntentId:              "send_public_multi_payment_intent",
+		IntentType:            intent.SendPublicMultiPayment,
+		MintAccount:           "mint",
+		InitiatorOwnerAccount: "sender_owner",
+		SendPublicMultiPaymentMetadata: &intent.SendPublicMultiPaymentMetadata{
+			Source: "sender_token_account",
+			Payments: []*intent.Payment{
+				{DestinationOwnerAccount: "receiver_owner_1", DestinationTokenAccount: "receiver_token_account_1", Quantity: 100_000, NativeAmount: 12.5, UsdMarketValue: 10.0},
+				{DestinationOwnerAccount: "receiver_owner_2", DestinationTokenAccount: "receiver_token_account_2", Quantity: 40_000, NativeAmount: 5.0, UsdMarketValue: 4.0},
+			},
+			Quantity:         140_000,
+			ExchangeCurrency: "cad",
+			ExchangeRate:     1.25,
+			NativeAmount:     17.5,
+			UsdMarketValue:   14.0,
+		},
+		AppMetadata: []byte("app_metadata"),
+		State:       intent.StatePending,
+		CreatedAt:   time.Now(),
+	}
+
+	records, err := BuildRecordsForIntent(ctx, data, intentRecord, nil, nil, testWithdrawalFeeQuarks)
+	require.NoError(t, err)
+	require.Len(t, records, 3)
+
+	// The sender has a single record for the cumulative total, without a
+	// counterparty since there's more than one
+	sent := records[0]
+	assert.Equal(t, history.DirectlySent, sent.Type)
+	assert.Equal(t, intentRecord.InitiatorOwnerAccount, sent.OwnerAccount)
+	assert.Nil(t, sent.CounterpartyOwnerAccount)
+	assert.EqualValues(t, 140_000, sent.Quantity)
+	assert.Equal(t, 17.5, sent.NativeAmount)
+
+	// Each recipient has a record for their individual payment
+	for i, payment := range intentRecord.SendPublicMultiPaymentMetadata.Payments {
+		received := records[i+1]
+		assert.Equal(t, history.DirectlyReceived, received.Type)
+		assert.Equal(t, payment.DestinationOwnerAccount, received.OwnerAccount)
+		require.NotNil(t, received.CounterpartyOwnerAccount)
+		assert.Equal(t, intentRecord.InitiatorOwnerAccount, *received.CounterpartyOwnerAccount)
+		assert.Equal(t, payment.Quantity, received.Quantity)
+		assert.Equal(t, payment.NativeAmount, received.NativeAmount)
+	}
+
+	for _, record := range records {
+		assert.Equal(t, intentRecord.IntentId, record.ReferenceId)
+		assert.Equal(t, history.IntentReference, record.ReferenceType)
+		assert.Equal(t, intentRecord.SendPublicMultiPaymentMetadata.ExchangeCurrency, record.ExchangeCurrency)
+		assert.Equal(t, intentRecord.MintAccount, record.MintAccount)
+		assert.Equal(t, intentRecord.AppMetadata, record.AppMetadata)
+		assert.Nil(t, record.GiftCardVault)
+		assert.Equal(t, history.StateCompleted, record.State)
+		assert.Equal(t, intentRecord.CreatedAt, record.CreatedAt)
+		assert.NoError(t, record.Validate())
+	}
+
+	// Records satisfy the one record per owner per reference constraint
+	saveRecordsForIntent(t, data, intentRecord)
+	saved, err := data.GetAllTransactionHistoryByReference(ctx, history.IntentReference, intentRecord.IntentId)
+	require.NoError(t, err)
+	assert.Len(t, saved, 3)
+}
+
 func TestBuildRecordsForIntent_GiftCardIssuance(t *testing.T) {
 	ctx := context.Background()
 	data := ocp_data.NewTestDataProvider()

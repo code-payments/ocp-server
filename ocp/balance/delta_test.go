@@ -208,6 +208,134 @@ func TestDeltasForSubmittedIntent_Unsupported(t *testing.T) {
 	}
 }
 
+func TestDeltasForSubmittedIntent_SendPublicMultiPayment(t *testing.T) {
+	intentRecord := newDeltaTestSendPublicMultiPaymentIntent(t)
+	actionRecords := []*action.Record{
+		newDeltaTestTransferAction(intentRecord, 0, "source", "destination_2", 50_000),
+		newDeltaTestTransferAction(intentRecord, 1, "source", "destination_1", 100_000),
+	}
+
+	// Each payment's cost basis is converted on its own, so the source is
+	// debited exactly what the destinations are credited
+	deltas, err := DeltasForSubmittedIntent(intentRecord, actionRecords, testWithdrawalFeeQuarks)
+	require.NoError(t, err)
+	assert.Equal(t, []*balance.Delta{
+		{TokenAccount: "destination_1", Kind: balance.DeltaCredit, Quarks: 100_000, UsdCostBasis: 1_000_000},
+		{TokenAccount: "destination_2", Kind: balance.DeltaCredit, Quarks: 50_000, UsdCostBasis: 333_333},
+		{TokenAccount: "source", Kind: balance.DeltaDebit, Quarks: 50_000, UsdCostBasis: 333_333},
+		{TokenAccount: "source", Kind: balance.DeltaDebit, Quarks: 100_000, UsdCostBasis: 1_000_000},
+	}, deltas)
+
+	usdCostBasis, err := UsdCostBasisForIntent(intentRecord)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1_333_333, usdCostBasis)
+}
+
+func TestDeltasForSubmittedIntent_SendPublicMultiPayment_Unsupported(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*intent.Record, []*action.Record) []*action.Record
+	}{
+		{
+			name: "missing payment",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				return a[:1]
+			},
+		},
+		{
+			name: "payment paid twice",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1].Destination = a[0].Destination
+				a[1].Quantity = a[0].Quantity
+				return a
+			},
+		},
+		{
+			name: "unknown destination",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1].Destination = pointer.String("other")
+				return a
+			},
+		},
+		{
+			name: "quantity mismatch",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1].Quantity = pointer.Uint64(*a[1].Quantity + 1)
+				return a
+			},
+		},
+		{
+			name: "source mismatch",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1].Source = "other"
+				return a
+			},
+		},
+		{
+			name: "withdraw",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1].ActionType = action.NoPrivacyWithdraw
+				return a
+			},
+		},
+		{
+			name: "fee",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				feeType := transactionpb.FeePaymentAction_CREATE_ON_SEND_WITHDRAWAL
+				fee := newDeltaTestTransferAction(i, 2, "source", "fee_collector", testWithdrawalFeeQuarks)
+				fee.FeeType = &feeType
+				return append(a, fee)
+			},
+		},
+		{
+			name: "fee paying a payment",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				feeType := transactionpb.FeePaymentAction_CREATE_ON_SEND_WITHDRAWAL
+				a[1].FeeType = &feeType
+				return a
+			},
+		},
+		{
+			name: "close action",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				return append(a, &action.Record{Intent: i.IntentId, ActionId: 2, ActionType: action.CloseEmptyAccount, Source: "source", State: action.StatePending})
+			},
+		},
+		{
+			name: "open action",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				return append(a, &action.Record{Intent: i.IntentId, ActionId: 2, ActionType: action.OpenAccount, Source: "destination_1", State: action.StatePending})
+			},
+		},
+		{
+			name: "close action replacing a payment",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1] = &action.Record{Intent: i.IntentId, ActionId: 1, ActionType: action.CloseEmptyAccount, Source: "source", State: action.StatePending}
+				return a
+			},
+		},
+		{
+			name: "transfer without quantity",
+			mutate: func(i *intent.Record, a []*action.Record) []*action.Record {
+				a[1].Quantity = nil
+				return a
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			intentRecord := newDeltaTestSendPublicMultiPaymentIntent(t)
+			actionRecords := []*action.Record{
+				newDeltaTestTransferAction(intentRecord, 0, "source", "destination_1", 100_000),
+				newDeltaTestTransferAction(intentRecord, 1, "source", "destination_2", 50_000),
+			}
+			actionRecords = tc.mutate(intentRecord, actionRecords)
+
+			_, err := DeltasForSubmittedIntent(intentRecord, actionRecords, testWithdrawalFeeQuarks)
+			assert.Error(t, err)
+		})
+	}
+}
+
 func TestDeltasForExternalDeposit(t *testing.T) {
 	intentRecord := &intent.Record{
 		IntentId:              testutil.NewRandomAccount(t).PublicKey().ToBase58(),
@@ -412,6 +540,28 @@ func newDeltaTestSendPublicPaymentIntent(t *testing.T, quantity uint64, usd floa
 			ExchangeRate:            1.0,
 			NativeAmount:            usd,
 			UsdMarketValue:          usd,
+		},
+		State: intent.StatePending,
+	}
+}
+
+func newDeltaTestSendPublicMultiPaymentIntent(t *testing.T) *intent.Record {
+	return &intent.Record{
+		IntentId:              testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		IntentType:            intent.SendPublicMultiPayment,
+		MintAccount:           "mint",
+		InitiatorOwnerAccount: "owner",
+		SendPublicMultiPaymentMetadata: &intent.SendPublicMultiPaymentMetadata{
+			Source: "source",
+			Payments: []*intent.Payment{
+				{DestinationOwnerAccount: "destination_owner_1", DestinationTokenAccount: "destination_1", Quantity: 100_000, NativeAmount: 1.0, UsdMarketValue: 1.0},
+				{DestinationOwnerAccount: "destination_owner_2", DestinationTokenAccount: "destination_2", Quantity: 50_000, NativeAmount: 0.333333333, UsdMarketValue: 0.333333333},
+			},
+			Quantity:         150_000,
+			ExchangeCurrency: currency_lib.USD,
+			ExchangeRate:     1.0,
+			NativeAmount:     1.333333333,
+			UsdMarketValue:   1.333333333,
 		},
 		State: intent.StatePending,
 	}
