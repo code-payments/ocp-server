@@ -5339,6 +5339,117 @@ func TestSubmitIntent_SendPublicMultiPayment_HappyPath(t *testing.T) {
 	env.requireReservedNonces(t, result)
 }
 
+func TestSubmitIntent_SendPublicMultiPayment_MaxPayments(t *testing.T) {
+	env := setupTestEnv(t)
+
+	const count = 10
+
+	sender := env.newFundedUser(t, common.ToCoreMintQuarks(100))
+	senderVault := env.getVault(t, sender, common.CoreMintAccount)
+
+	receivers := make([]*common.Account, count)
+	receiverVaults := make([]*common.Account, count)
+	payments := make([]testMultiPayment, count)
+	for i := range count {
+		receivers[i] = env.newUser(t)
+		receiverVaults[i] = env.getVault(t, receivers[i], common.CoreMintAccount)
+		payments[i] = testMultiPayment{destination: receiverVaults[i], quarks: common.ToCoreMintQuarks(uint64(i + 1))}
+	}
+
+	req := env.multiPaymentRequest(t, sender, common.CoreMintAccount, payments...)
+
+	before := env.snapshot(t, append([]*common.Account{sender}, receivers...)...)
+	result := env.submitIntent(t, req)
+	result.requireSuccess(t)
+	nonceCounts := make([]int, count)
+	for i := range nonceCounts {
+		nonceCounts[i] = 1
+	}
+	requireServerParameterNonces(t, result.serverParameters, nonceCounts...)
+
+	intentRecord := env.requireIntent(t, req.intentId)
+
+	// 1 + 2 + ... + 10
+	const total = 55
+
+	expected := &dbChanges{
+		intents: []*intent.Record{{
+			IntentId:              req.intentId.PublicKey().ToBase58(),
+			IntentType:            intent.SendPublicMultiPayment,
+			MintAccount:           common.CoreMintAccount.PublicKey().ToBase58(),
+			InitiatorOwnerAccount: sender.PublicKey().ToBase58(),
+			SendPublicMultiPaymentMetadata: &intent.SendPublicMultiPaymentMetadata{
+				Source:           senderVault.PublicKey().ToBase58(),
+				Quantity:         common.ToCoreMintQuarks(total),
+				ExchangeCurrency: currency_lib.USD,
+				ExchangeRate:     1.0,
+				NativeAmount:     total,
+				UsdMarketValue:   total,
+			},
+			State: intent.StatePending,
+		}},
+		balances: []*balance.Record{
+			expectedBalance(senderVault, sender, common.CoreMintAccount, common.ToCoreMintQuarks(100-total), -usdCostBasis(total), true),
+		},
+		history: []*history.Record{
+			// The sender has a single record for the total, with no counterparty
+			expectedHistory(intentRecord, history.DirectlySent, sender, nil, currency_lib.USD, total, common.ToCoreMintQuarks(total)),
+		},
+	}
+	for i := range count {
+		amount := float64(i + 1)
+		quarks := common.ToCoreMintQuarks(uint64(i + 1))
+
+		expected.intents[0].SendPublicMultiPaymentMetadata.Payments = append(expected.intents[0].SendPublicMultiPaymentMetadata.Payments, &intent.Payment{
+			DestinationOwnerAccount: receivers[i].PublicKey().ToBase58(),
+			DestinationTokenAccount: receiverVaults[i].PublicKey().ToBase58(),
+			Quantity:                quarks,
+			NativeAmount:            amount,
+			UsdMarketValue:          amount,
+		})
+		expected.actions = append(expected.actions, expectedTransferAction(intentRecord, uint32(i), senderVault, receiverVaults[i], quarks))
+		expected.fulfillments = append(expected.fulfillments, expectedTransferFulfillment(t, intentRecord, result, uint32(i), senderVault, receiverVaults[i]))
+		expected.balances = append(expected.balances, expectedBalance(receiverVaults[i], receivers[i], common.CoreMintAccount, quarks, usdCostBasis(amount), true))
+		expected.history = append(expected.history, expectedHistory(intentRecord, history.DirectlyReceived, receivers[i], sender, currency_lib.USD, amount, quarks))
+	}
+	env.requireChanges(t, before, expected)
+	env.requireReservedNonces(t, result)
+}
+
+// The number of payments in a multi payment, 2 to 10, is bounded by the
+// metadata's validation rules alone, which refuse a request before the intent
+// handler sees it
+func TestSubmitIntent_SendPublicMultiPayment_PaymentCountBounds(t *testing.T) {
+	env := setupTestEnv(t)
+
+	sender := env.newFundedUser(t, common.ToCoreMintQuarks(100))
+
+	payments := make([]testMultiPayment, 11)
+	for i := range payments {
+		payments[i] = testMultiPayment{destination: env.getVault(t, env.newUser(t), common.CoreMintAccount), quarks: common.ToCoreMintQuarks(1)}
+	}
+
+	for _, tc := range []struct {
+		count int
+		valid bool
+	}{
+		{count: 1, valid: false},
+		{count: 2, valid: true},
+		{count: 10, valid: true},
+		{count: 11, valid: false},
+	} {
+		t.Run(fmt.Sprintf("%d payments", tc.count), func(t *testing.T) {
+			req := env.multiPaymentRequest(t, sender, common.CoreMintAccount, payments[:tc.count]...)
+			err := req.metadata.Validate()
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
 func TestSubmitIntent_SendPublicMultiPayment_LaunchpadMint(t *testing.T) {
 	env := setupTestEnv(t)
 
@@ -5637,18 +5748,6 @@ func TestSubmitIntent_SendPublicMultiPayment_Validation(t *testing.T) {
 		expectedCode   transactionpb.SubmitIntentResponse_Error_Code
 		expectedReason string
 	}{
-		{
-			name: "more than two payments",
-			build: func(t *testing.T, f *fixture) *submitIntentRequest {
-				return newRequest(t, f,
-					testMultiPayment{destination: vault(t, f, f.receiver1), quarks: common.ToCoreMintQuarks(1)},
-					testMultiPayment{destination: vault(t, f, f.receiver2), quarks: common.ToCoreMintQuarks(1)},
-					testMultiPayment{destination: vault(t, f, f.env.newUser(t)), quarks: common.ToCoreMintQuarks(1)},
-				)
-			},
-			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
-			expectedReason: "must send exactly 2 payments",
-		},
 		{
 			name: "server exchange data",
 			build: func(t *testing.T, f *fixture) *submitIntentRequest {
