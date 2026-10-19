@@ -1604,10 +1604,6 @@ func (h *PublicDistributionIntentHandler) OnCommitToDB(ctx context.Context) erro
 	return nil
 }
 
-// multiPaymentCount is the exact number of payments a multi payment intent
-// must make
-const multiPaymentCount = 2
-
 type SendPublicMultiPaymentIntentHandler struct {
 	conf          *conf
 	log           *zap.Logger
@@ -1652,9 +1648,8 @@ func (h *SendPublicMultiPaymentIntentHandler) PopulateMetadata(ctx context.Conte
 		return errors.New("unexpected metadata proto message")
 	}
 
-	if len(typedProtoMetadata.Payments) != multiPaymentCount {
-		return NewIntentValidationErrorf("must send exactly %d payments", multiPaymentCount)
-	}
+	// The number of payments, 2 to 10, is bounded by the proto's validation
+	// rules alone.
 
 	mint, err := common.GetBackwardsCompatMint(typedProtoMetadata.Mint)
 	if err != nil {
