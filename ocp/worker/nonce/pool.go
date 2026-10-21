@@ -165,7 +165,7 @@ func (p *runtime) handleUnknown(ctx context.Context, record *nonce.Record) error
 	// We're going to the blockchain directly here (super slow btw)
 	// because we don't capture the transaction through history yet (it only
 	// grabs transfer style transactions for KIN accounts).
-	stx, err := p.data.GetBlockchainTransaction(ctx, record.Signature, solana.CommitmentFinalized)
+	stx, err := p.data.GetBlockchainTransaction(ctx, record.Signature)
 	if err == solana.ErrSignatureNotFound {
 		// Check the signature for a potential timeout (e.g. if the nonce account
 		// was never created because the blockchain never saw the init/create
@@ -180,7 +180,7 @@ func (p *runtime) handleUnknown(ctx context.Context, record *nonce.Record) error
 		return err
 	}
 
-	tx, err := transaction.FromConfirmedTransaction(stx)
+	tx, err := transaction.FromTransactionWithMeta(stx)
 	if err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func (p *runtime) handleReleased(ctx context.Context, record *nonce.Record) erro
 	// Nonces that exist but we don't yet know their stored blockhash.
 
 	// Fetch the Solana transaction where the nonce would be consumed
-	var txn *solana.ConfirmedTransaction
+	var txn *solana.TransactionWithMeta
 	var err error
 	switch record.Environment {
 	case nonce.EnvironmentSolana:

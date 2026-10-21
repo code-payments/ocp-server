@@ -570,7 +570,7 @@ func (a *TimelockAccounts) GetInitializeInstruction(vmAuthority, memory *Account
 
 // ValidateExternalTokenAccount validates an address is an external token account for the provided mint
 func ValidateExternalTokenAccount(ctx context.Context, data ocp_data.Provider, tokenAccount, mintAccount *Account) (bool, string, error) {
-	_, err := data.GetBlockchainTokenAccountInfo(ctx, tokenAccount.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	_, err := data.GetBlockchainTokenAccountInfo(ctx, tokenAccount.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58())
 	switch err {
 	case nil:
 		// Double check there were no race conditions between other SubmitIntent

@@ -93,7 +93,7 @@ func maybeInitiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provi
 		return errors.Wrap(err, "error getting vm deposit ata")
 	}
 
-	balance, _, err := data.GetBlockchainBalance(ctx, vmDepositAccounts.Ata.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	balance, _, err := data.GetBlockchainBalance(ctx, vmDepositAccounts.Ata.PublicKey().ToBase58())
 	if err == solana.ErrNoBalance {
 		return nil
 	} else if err != nil {
@@ -177,17 +177,17 @@ func initiateExternalDepositIntoVm(ctx context.Context, data ocp_data.Provider, 
 		return errors.Wrap(err, "error submitting transaction to the blockchain")
 	}
 
-	var confirmedTxn *solana.ConfirmedTransaction
+	var finalizedTxn *solana.TransactionWithMeta
 	_, err = retry.Retry(
 		func() error {
-			confirmedTxn, err = data.GetBlockchainTransaction(ctx, base58.Encode(signature[:]), solana.CommitmentConfirmed)
+			finalizedTxn, err = data.GetBlockchainTransaction(ctx, base58.Encode(signature[:]))
 			return err
 		},
-		waitForConfirmationRetryStrategies...,
+		waitForFinalizationRetryStrategies...,
 	)
 	if err != nil {
-		return errors.Wrap(err, "error getting confirmed transaction")
-	} else if confirmedTxn.Err != nil || confirmedTxn.Meta.Err != nil {
+		return errors.Wrap(err, "error getting finalized transaction")
+	} else if finalizedTxn.Err != nil || finalizedTxn.Meta.Err != nil {
 		return errors.New("transaction failed")
 	}
 	return nil
@@ -211,7 +211,6 @@ func findPotentialExternalDepositsIntoVm(ctx context.Context, data ocp_data.Prov
 		history, err := data.GetBlockchainHistory(
 			ctx,
 			vmDepositAta.PublicKey().ToBase58(),
-			solana.CommitmentConfirmed, // Get signatures faster, which is ok because we'll fetch finalized txn data
 			query.WithLimit(100),
 			query.WithCursor(cursor),
 		)
@@ -563,7 +562,7 @@ func isInitialCurrencyCreatorDeposit(ctx context.Context, data ocp_data.Provider
 
 	initialSwap := swapRecords[0]
 
-	swapTxn, err := data.GetBlockchainTransaction(ctx, initialSwap.TransactionSignature, solana.CommitmentFinalized)
+	swapTxn, err := data.GetBlockchainTransaction(ctx, initialSwap.TransactionSignature)
 	if err != nil {
 		return false, 0, errors.Wrap(err, "error getting swap transaction")
 	}

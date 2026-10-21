@@ -30,7 +30,7 @@ func SubmitAndWaitForFinalization(ctx context.Context, data ocp_data.BlockchainD
 
 	_, err = retry.Retry(
 		func() error {
-			finalizedTxn, err := data.GetBlockchainTransaction(ctx, sig, solana.CommitmentFinalized)
+			finalizedTxn, err := data.GetBlockchainTransaction(ctx, sig)
 			if err == solana.ErrSignatureNotFound {
 				return err
 			}

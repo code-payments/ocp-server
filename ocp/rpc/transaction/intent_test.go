@@ -217,7 +217,7 @@ func newTestDataProvider() *testDataProvider {
 	}
 }
 
-func (p *testDataProvider) GetBlockchainAccountInfo(ctx context.Context, account string, commitment solana.Commitment) (*solana.AccountInfo, uint64, error) {
+func (p *testDataProvider) GetBlockchainAccountInfo(ctx context.Context, account string) (*solana.AccountInfo, uint64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

@@ -69,12 +69,12 @@ func (p *runtime) getLatestBlockhash(ctx context.Context) (*solana.Blockhash, er
 	return &bh, nil
 }
 
-func (p *runtime) getTransaction(ctx context.Context, signature string) (*solana.ConfirmedTransaction, error) {
+func (p *runtime) getTransaction(ctx context.Context, signature string) (*solana.TransactionWithMeta, error) {
 	return p.getTransactionFromBlockchain(ctx, signature)
 }
 
-func (p *runtime) getTransactionFromBlockchain(ctx context.Context, signature string) (*solana.ConfirmedTransaction, error) {
-	txn, err := p.data.GetBlockchainTransaction(ctx, signature, solana.CommitmentFinalized)
+func (p *runtime) getTransactionFromBlockchain(ctx context.Context, signature string) (*solana.TransactionWithMeta, error) {
+	txn, err := p.data.GetBlockchainTransaction(ctx, signature)
 	if err == solana.ErrSignatureNotFound {
 		return nil, transaction.ErrNotFound
 	}

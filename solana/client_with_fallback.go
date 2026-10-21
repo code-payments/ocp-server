@@ -76,10 +76,10 @@ func withFallback2[T1, T2 any](primary, fallback func() (T1, T2, error)) (T1, T2
 	return fallback()
 }
 
-func (c *clientWithFallback) GetAccountInfo(account ed25519.PublicKey, commitment Commitment) (AccountInfo, uint64, error) {
+func (c *clientWithFallback) GetAccountInfo(account ed25519.PublicKey) (AccountInfo, uint64, error) {
 	return withFallback2(
-		func() (AccountInfo, uint64, error) { return c.primary.GetAccountInfo(account, commitment) },
-		func() (AccountInfo, uint64, error) { return c.fallback.GetAccountInfo(account, commitment) },
+		func() (AccountInfo, uint64, error) { return c.primary.GetAccountInfo(account) },
+		func() (AccountInfo, uint64, error) { return c.fallback.GetAccountInfo(account) },
 	)
 }
 
@@ -136,35 +136,35 @@ func (c *clientWithFallback) GetSignatureStatuses(sigs []Signature) ([]*Signatur
 	)
 }
 
-func (c *clientWithFallback) GetSignaturesForAddress(owner ed25519.PublicKey, commitment Commitment, limit uint64, before, until string) ([]*TransactionSignature, error) {
+func (c *clientWithFallback) GetSignaturesForAddress(owner ed25519.PublicKey, limit uint64, before, until string) ([]*TransactionSignature, error) {
 	return withFallback(
 		func() ([]*TransactionSignature, error) {
-			return c.primary.GetSignaturesForAddress(owner, commitment, limit, before, until)
+			return c.primary.GetSignaturesForAddress(owner, limit, before, until)
 		},
 		func() ([]*TransactionSignature, error) {
-			return c.fallback.GetSignaturesForAddress(owner, commitment, limit, before, until)
+			return c.fallback.GetSignaturesForAddress(owner, limit, before, until)
 		},
 	)
 }
 
-func (c *clientWithFallback) GetSlot(commitment Commitment) (uint64, error) {
+func (c *clientWithFallback) GetSlot() (uint64, error) {
 	return withFallback(
-		func() (uint64, error) { return c.primary.GetSlot(commitment) },
-		func() (uint64, error) { return c.fallback.GetSlot(commitment) },
+		func() (uint64, error) { return c.primary.GetSlot() },
+		func() (uint64, error) { return c.fallback.GetSlot() },
 	)
 }
 
-func (c *clientWithFallback) GetTokenAccountBalance(account ed25519.PublicKey, commitment Commitment) (uint64, uint64, error) {
+func (c *clientWithFallback) GetTokenAccountBalance(account ed25519.PublicKey) (uint64, uint64, error) {
 	return withFallback2(
-		func() (uint64, uint64, error) { return c.primary.GetTokenAccountBalance(account, commitment) },
-		func() (uint64, uint64, error) { return c.fallback.GetTokenAccountBalance(account, commitment) },
+		func() (uint64, uint64, error) { return c.primary.GetTokenAccountBalance(account) },
+		func() (uint64, uint64, error) { return c.fallback.GetTokenAccountBalance(account) },
 	)
 }
 
-func (c *clientWithFallback) GetTransaction(sig Signature, commitment Commitment) (ConfirmedTransaction, error) {
+func (c *clientWithFallback) GetTransaction(sig Signature) (TransactionWithMeta, error) {
 	return withFallback(
-		func() (ConfirmedTransaction, error) { return c.primary.GetTransaction(sig, commitment) },
-		func() (ConfirmedTransaction, error) { return c.fallback.GetTransaction(sig, commitment) },
+		func() (TransactionWithMeta, error) { return c.primary.GetTransaction(sig) },
+		func() (TransactionWithMeta, error) { return c.fallback.GetTransaction(sig) },
 	)
 }
 
@@ -175,9 +175,9 @@ func (c *clientWithFallback) GetTransactionTokenBalances(sig Signature) (Transac
 	)
 }
 
-func (c *clientWithFallback) SubmitTransaction(txn Transaction, commitment Commitment) (Signature, error) {
+func (c *clientWithFallback) SubmitTransaction(txn Transaction) (Signature, error) {
 	return withFallback(
-		func() (Signature, error) { return c.primary.SubmitTransaction(txn, commitment) },
-		func() (Signature, error) { return c.fallback.SubmitTransaction(txn, commitment) },
+		func() (Signature, error) { return c.primary.SubmitTransaction(txn) },
+		func() (Signature, error) { return c.fallback.SubmitTransaction(txn) },
 	)
 }

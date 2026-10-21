@@ -9,7 +9,6 @@ import (
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/nonce"
-	"github.com/code-payments/ocp-server/solana"
 )
 
 // todo: always assumes mainnet
@@ -112,7 +111,7 @@ func InjectTestSubsidizer(ctx context.Context, data ocp_data.Provider, testAccou
 
 // GetCurrentSubsidizerBalance returns the subsidizer's current balance in lamports.
 func GetCurrentSubsidizerBalance(ctx context.Context, data ocp_data.Provider) (uint64, error) {
-	accountInfo, _, err := data.GetBlockchainAccountInfo(ctx, GetSubsidizer().PublicKey().ToBase58(), solana.CommitmentProcessed)
+	accountInfo, _, err := data.GetBlockchainAccountInfo(ctx, GetSubsidizer().PublicKey().ToBase58())
 	if err != nil {
 		return 0, err
 	}

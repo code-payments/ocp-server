@@ -17,7 +17,6 @@ func TestSignatureStatus(t *testing.T) {
 
 	testCases := []struct {
 		s         SignatureStatus
-		confirmed bool
 		finalized bool
 	}{
 		{
@@ -41,7 +40,7 @@ func TestSignatureStatus(t *testing.T) {
 				Slot:               10,
 				ErrorResult:        nil,
 				Confirmations:      &zero,
-				ConfirmationStatus: confirmationStatusProcessed,
+				ConfirmationStatus: "processed",
 			},
 		},
 		{
@@ -51,16 +50,14 @@ func TestSignatureStatus(t *testing.T) {
 				Confirmations:      &one,
 				ConfirmationStatus: "",
 			},
-			confirmed: true,
 		},
 		{
 			s: SignatureStatus{
 				Slot:               10,
 				ErrorResult:        nil,
 				Confirmations:      &zero,
-				ConfirmationStatus: confirmationStatusConfirmed,
+				ConfirmationStatus: "confirmed",
 			},
-			confirmed: true,
 		},
 		{
 			s: SignatureStatus{
@@ -69,13 +66,11 @@ func TestSignatureStatus(t *testing.T) {
 				Confirmations:      &zero,
 				ConfirmationStatus: confirmationStatusFinalized,
 			},
-			confirmed: true,
 			finalized: true,
 		},
 	}
 
 	for _, tc := range testCases {
-		assert.Equal(t, tc.confirmed, tc.s.Confirmed())
 		assert.Equal(t, tc.finalized, tc.s.Finalized())
 	}
 }

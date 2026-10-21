@@ -7,7 +7,6 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/solana/token"
 )
@@ -25,7 +24,7 @@ func GetLaunchpadCurrencyCirculatingSupply(ctx context.Context, data ocp_data.Pr
 		return 0, 0, time.Time{}, err
 	}
 
-	ai, slot, err := data.GetBlockchainAccountInfo(ctx, accounts.VaultMint.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	ai, slot, err := data.GetBlockchainAccountInfo(ctx, accounts.VaultMint.PublicKey().ToBase58())
 	if err != nil {
 		return 0, 0, time.Time{}, err
 	}

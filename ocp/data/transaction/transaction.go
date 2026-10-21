@@ -87,7 +87,7 @@ func (r *Record) Unmarshal() (*solana.Transaction, error) {
 	return &tx, nil
 }
 
-func FromConfirmedTransaction(tx *solana.ConfirmedTransaction) (*Record, error) {
+func FromTransactionWithMeta(tx *solana.TransactionWithMeta) (*Record, error) {
 	if tx.Transaction.Message.Version != solana.MessageVersionLegacy {
 		return nil, errors.New("unsupported transaction version")
 	}

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/code-payments/ocp-server/metrics"
-	"github.com/code-payments/ocp-server/solana"
 )
 
 const (
@@ -43,7 +42,7 @@ func (p *runtime) metricsGaugeWorker(ctx context.Context) error {
 }
 
 func (p *runtime) recordSubscriptionStatusPollingEvent(ctx context.Context) {
-	currentFinalizedSlot, _ := p.data.GetBlockchainSlot(ctx, solana.CommitmentFinalized)
+	currentFinalizedSlot, _ := p.data.GetBlockchainSlot(ctx)
 
 	p.metricStatusLock.RLock()
 	defer p.metricStatusLock.RUnlock()

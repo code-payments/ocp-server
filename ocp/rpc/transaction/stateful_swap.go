@@ -934,7 +934,7 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
 	}
 
-	destinationOwnerAccountInfo, _, err := s.data.GetBlockchainAccountInfo(ctx, destinationOwner.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	destinationOwnerAccountInfo, _, err := s.data.GetBlockchainAccountInfo(ctx, destinationOwner.PublicKey().ToBase58())
 	switch err {
 	case nil:
 		if bytes.Equal(destinationOwnerAccountInfo.Owner, token.ProgramKey) {

@@ -146,7 +146,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 	case swap.FundingSourceExternalWallet:
 		// Wait for the external wallet funding transaction to be finalized before
 		// transitioning the swap to a funded state
-		finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.FundingId, solana.CommitmentFinalized)
+		finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.FundingId)
 		if err != nil && err != solana.ErrSignatureNotFound {
 			return errors.Wrap(err, "error getting finalized funding transaction")
 		}
@@ -177,7 +177,7 @@ func (p *runtime) handleStateFunding(ctx context.Context, record *swap.Record) e
 		switch order.Status {
 		case coinbase.OrderStatusProcessing, coinbase.OrderStatusCompleted:
 			if order.TxHash != "" {
-				finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, order.TxHash, solana.CommitmentFinalized)
+				finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, order.TxHash)
 				if err != nil && err != solana.ErrSignatureNotFound {
 					return errors.Wrap(err, "error getting finalized coinbase funding transaction")
 				}
@@ -270,7 +270,7 @@ func (p *runtime) handleStateSubmitting(ctx context.Context, record *swap.Record
 
 	// Monitor for a finalized swap transaction
 
-	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature, solana.CommitmentFinalized)
+	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature)
 	if err != nil && err != solana.ErrSignatureNotFound {
 		return errors.Wrap(err, "error getting finalized transaction")
 	}
@@ -317,7 +317,7 @@ func (p *runtime) handleStateCancelling(ctx context.Context, record *swap.Record
 		return err
 	}
 
-	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature, solana.CommitmentFinalized)
+	finalizedTxn, err := p.data.GetBlockchainTransaction(ctx, record.TransactionSignature)
 	if err != nil && err != solana.ErrSignatureNotFound {
 		return errors.Wrap(err, "error getting finalized cancel transaction")
 	}
