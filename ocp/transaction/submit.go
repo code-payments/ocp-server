@@ -45,8 +45,8 @@ func SubmitAndWaitForFinalization(ctx context.Context, data ocp_data.BlockchainD
 			return nil
 		},
 		retry.NonRetriableErrors(context.Canceled, ErrTransactionFailed),
-		retry.Backoff(backoff.Constant(time.Second), time.Second),
-		retry.Limit(60),
+		retry.Backoff(backoff.Constant(250*time.Millisecond), 250*time.Millisecond),
+		retry.Limit(30),
 	)
 	return err
 }

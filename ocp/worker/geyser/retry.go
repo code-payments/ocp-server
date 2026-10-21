@@ -11,5 +11,5 @@ import (
 var waitForFinalizationRetryStrategies = []retry.Strategy{
 	retry.NonRetriableErrors(context.Canceled),
 	retry.Limit(30),
-	retry.Backoff(backoff.Constant(3*time.Second), 3*time.Second),
+	retry.Backoff(backoff.Constant(250*time.Millisecond), 250*time.Millisecond),
 }
