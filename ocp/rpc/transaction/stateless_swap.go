@@ -234,7 +234,11 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		return handleStatelessSwapError(streamer, err)
 	}
 
-	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
+	coinbaseSwapVersion := selectCoinbaseSwapVersion(initiateStablecoinSwapReq.SwapVersion)
+	log = log.With(zap.String("coinbase_swap_version", coinbaseSwapVersion.String()))
+
+	coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
+		coinbaseSwapVersion,
 		coinbaseAccounts,
 		owner.PublicKey().ToBytes(),
 		fromMint.PublicKey().ToBytes(),
@@ -244,6 +248,10 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		initiateStablecoinSwapReq.SwapAmount,
 		initiateStablecoinSwapReq.SwapAmount,
 	)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure building coinbase swap instruction")
+		return handleStatelessSwapError(streamer, err)
+	}
 
 	alts := []solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}
 
