@@ -70,7 +70,7 @@ func GetCoinbaseSwapAccounts(ctx context.Context, data ocp_data.Provider, fromMi
 		return nil, errors.Wrap(err, "error getting whitelist address")
 	}
 
-	poolAccountInfo, _, err := data.GetBlockchainAccountInfo(ctx, base58.Encode(pool), solana.CommitmentProcessed)
+	poolAccountInfo, _, err := data.GetBlockchainAccountInfo(ctx, base58.Encode(pool))
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting coinbase liquidity pool account info")
 	}
@@ -125,7 +125,6 @@ func GetCoinbaseSwapDestinationLiquidity(ctx context.Context, data ocp_data.Prov
 		ctx,
 		base58.Encode(outVaultTokenAccount),
 		base58.Encode(toMint),
-		solana.CommitmentProcessed,
 	)
 	if err != nil {
 		return 0, errors.Wrap(err, "error getting out vault token account info")

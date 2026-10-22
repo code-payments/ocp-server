@@ -150,7 +150,7 @@ func (p *runtime) getTransaction(ctx context.Context, record *fulfillment.Record
 }
 
 func (p *runtime) getTransactionFromBlockchain(ctx context.Context, record *fulfillment.Record) (*transaction.Record, error) {
-	stx, err := p.data.GetBlockchainTransaction(ctx, *record.Signature, solana.CommitmentFinalized)
+	stx, err := p.data.GetBlockchainTransaction(ctx, *record.Signature)
 	if err == solana.ErrSignatureNotFound {
 		return nil, transaction.ErrNotFound
 	}
@@ -158,7 +158,7 @@ func (p *runtime) getTransactionFromBlockchain(ctx context.Context, record *fulf
 		return nil, err
 	}
 
-	tx, err := transaction.FromConfirmedTransaction(stx)
+	tx, err := transaction.FromTransactionWithMeta(stx)
 	if err != nil {
 		return nil, err
 	}

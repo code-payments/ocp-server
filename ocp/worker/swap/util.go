@@ -408,7 +408,7 @@ func (p *runtime) markSwapCancelling(
 	})
 }
 
-func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record, cancellationTxn *solana.ConfirmedTransaction) error {
+func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record, cancellationTxn *solana.TransactionWithMeta) error {
 	toMint, err := common.NewAccountFromPublicKeyString(swapRecord.ToMint)
 	if err != nil {
 		return err
@@ -502,7 +502,7 @@ func (p *runtime) markSwapCancelled(ctx context.Context, swapRecord *swap.Record
 	})
 }
 
-func (p *runtime) buildRefundRecordsForCancelledSwap(ctx context.Context, swapRecord *swap.Record, cancellationTxn *solana.ConfirmedTransaction) (*intent.Record, *deposit.Record, error) {
+func (p *runtime) buildRefundRecordsForCancelledSwap(ctx context.Context, swapRecord *swap.Record, cancellationTxn *solana.TransactionWithMeta) (*intent.Record, *deposit.Record, error) {
 	if cancellationTxn == nil {
 		return nil, nil, errors.New("cancellation transaction is required for refund records")
 	}

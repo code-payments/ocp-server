@@ -71,7 +71,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 	//
 
 	if !isOnCurve {
-		_, err = s.data.GetBlockchainTokenAccountInfo(ctx, accountToCheck.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+		_, err = s.data.GetBlockchainTokenAccountInfo(ctx, accountToCheck.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58())
 		switch err {
 		case nil:
 			return &transactionpb.CanWithdrawToAccountResponse{
@@ -144,7 +144,7 @@ func (s *transactionServer) CanWithdrawToAccount(ctx context.Context, req *trans
 		return nil, status.Error(codes.Internal, "")
 	}
 
-	_, err = s.data.GetBlockchainTokenAccountInfo(ctx, ata.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58(), solana.CommitmentFinalized)
+	_, err = s.data.GetBlockchainTokenAccountInfo(ctx, ata.PublicKey().ToBase58(), mintAccount.PublicKey().ToBase58())
 	switch err {
 	case nil:
 		return &transactionpb.CanWithdrawToAccountResponse{

@@ -29,21 +29,16 @@ const (
 	maxSupportedTransactionVersion = 1
 )
 
-type Commitment struct {
-	Commitment string `json:"commitment"`
-}
-
 const (
-	confirmationStatusProcessed = "processed"
-	confirmationStatusConfirmed = "confirmed"
 	confirmationStatusFinalized = "finalized"
 )
 
-var (
-	CommitmentProcessed = Commitment{Commitment: confirmationStatusProcessed}
-	CommitmentConfirmed = Commitment{Commitment: confirmationStatusConfirmed}
-	CommitmentFinalized = Commitment{Commitment: confirmationStatusFinalized}
-)
+// The client only ever reads finalized state
+var finalizedCommitment = struct {
+	Commitment string `json:"commitment"`
+}{
+	Commitment: confirmationStatusFinalized,
+}
 
 var (
 	ErrNoAccountInfo     = errors.New("no account info")
@@ -59,31 +54,6 @@ type AccountInfo struct {
 	Owner      ed25519.PublicKey
 	Lamports   uint64
 	Executable bool
-}
-
-type SignatureStatus struct {
-	Slot        uint64
-	ErrorResult *TransactionError
-
-	// Confirmations will be nil if the transaction has been rooted.
-	Confirmations      *int
-	ConfirmationStatus string
-}
-
-func (s SignatureStatus) Confirmed() bool {
-	if s.Finalized() {
-		return true
-	}
-
-	if s.ConfirmationStatus == confirmationStatusConfirmed {
-		return true
-	}
-
-	return *s.Confirmations >= 1
-}
-
-func (s SignatureStatus) Finalized() bool {
-	return s.Confirmations == nil || s.ConfirmationStatus == confirmationStatusFinalized
 }
 
 type Block struct {
@@ -136,7 +106,7 @@ type TransactionTokenBalances struct {
 	BlockTime         *time.Time
 }
 
-type ConfirmedTransaction struct {
+type TransactionWithMeta struct {
 	Slot        uint64
 	BlockTime   *time.Time
 	Transaction Transaction
@@ -161,20 +131,19 @@ type ProgramAccount struct {
 //
 // Reference: https://docs.solana.com/apps/jsonrpc-api
 type Client interface {
-	GetAccountInfo(ed25519.PublicKey, Commitment) (AccountInfo, uint64, error)
+	GetAccountInfo(ed25519.PublicKey) (AccountInfo, uint64, error)
 	GetAccountDataAfterBlock(ed25519.PublicKey, uint64) ([]byte, uint64, error)
 	GetBalance(ed25519.PublicKey) (uint64, error)
 	GetBlock(slot uint64) (*Block, error)
 	GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]ProgramAccount, uint64, error)
 	GetLatestBlockhash() (Blockhash, error)
 	GetMinimumBalanceForRentExemption(size uint64) (lamports uint64, err error)
-	GetSignatureStatuses([]Signature) ([]*SignatureStatus, error)
-	GetSignaturesForAddress(owner ed25519.PublicKey, commitment Commitment, limit uint64, before, until string) ([]*TransactionSignature, error)
-	GetSlot(Commitment) (uint64, error)
-	GetTokenAccountBalance(ed25519.PublicKey, Commitment) (uint64, uint64, error)
-	GetTransaction(Signature, Commitment) (ConfirmedTransaction, error)
+	GetSignaturesForAddress(owner ed25519.PublicKey, limit uint64, before, until string) ([]*TransactionSignature, error)
+	GetSlot() (uint64, error)
+	GetTokenAccountBalance(ed25519.PublicKey) (uint64, uint64, error)
+	GetTransaction(Signature) (TransactionWithMeta, error)
 	GetTransactionTokenBalances(Signature) (TransactionTokenBalances, error)
-	SubmitTransaction(Transaction, Commitment) (Signature, error)
+	SubmitTransaction(Transaction) (Signature, error)
 }
 
 var (
@@ -247,11 +216,11 @@ func (c *client) GetMinimumBalanceForRentExemption(dataSize uint64) (lamports ui
 	return lamports, nil
 }
 
-func (c *client) GetSlot(commitment Commitment) (slot uint64, err error) {
+func (c *client) GetSlot() (slot uint64, err error) {
 	// note: we have to wrap the commitment in an []interface{} otherwise the
 	//       solana RPC node complains. Technically this is a violation of the
 	//       JSON RPC v2.0 spec.
-	if err := c.call(&slot, "getSlot", []interface{}{commitment}); err != nil {
+	if err := c.call(&slot, "getSlot", []interface{}{finalizedCommitment}); err != nil {
 		return 0, errors.Wrapf(err, "getSlot() failed to send request")
 	}
 
@@ -266,7 +235,7 @@ func (c *client) GetLatestBlockhash() (hash Blockhash, err error) {
 	}
 
 	var resp response
-	if err := c.call(&resp, "getLatestBlockhash"); err != nil {
+	if err := c.call(&resp, "getLatestBlockhash", []interface{}{finalizedCommitment}); err != nil {
 		return hash, errors.Wrapf(err, "getLatestBlockhash() failed to send request")
 	}
 
@@ -296,9 +265,11 @@ func (c *client) GetBlock(slot uint64) (block *Block, err error) {
 	}
 
 	config := struct {
+		Commitment                     string `json:"commitment"`
 		Encoding                       string `json:"encoding"`
 		MaxSupportedTransactionVersion int    `json:"maxSupportedTransactionVersion"`
 	}{
+		Commitment:                     confirmationStatusFinalized,
 		Encoding:                       "base64",
 		MaxSupportedTransactionVersion: maxSupportedTransactionVersion,
 	}
@@ -359,7 +330,7 @@ func (c *client) GetBlock(slot uint64) (block *Block, err error) {
 	return block, nil
 }
 
-func (c *client) GetTransaction(sig Signature, commitment Commitment) (ConfirmedTransaction, error) {
+func (c *client) GetTransaction(sig Signature) (TransactionWithMeta, error) {
 	type rpcResponse struct {
 		Slot        uint64           `json:"slot"`
 		BlockTime   *int64           `json:"blockTime"`
@@ -372,21 +343,21 @@ func (c *client) GetTransaction(sig Signature, commitment Commitment) (Confirmed
 		Encoding                       string `json:"encoding"`
 		MaxSupportedTransactionVersion int    `json:"maxSupportedTransactionVersion"`
 	}{
-		Commitment:                     commitment.Commitment,
+		Commitment:                     confirmationStatusFinalized,
 		Encoding:                       "base64",
 		MaxSupportedTransactionVersion: maxSupportedTransactionVersion,
 	}
 
 	var resp *rpcResponse
 	if err := c.call(&resp, "getTransaction", base58.Encode(sig[:]), config); err != nil {
-		return ConfirmedTransaction{}, err
+		return TransactionWithMeta{}, err
 	}
 
 	if resp == nil {
-		return ConfirmedTransaction{}, ErrSignatureNotFound
+		return TransactionWithMeta{}, ErrSignatureNotFound
 	}
 
-	txn := ConfirmedTransaction{
+	txn := TransactionWithMeta{
 		Slot: resp.Slot,
 	}
 
@@ -420,9 +391,11 @@ func (c *client) GetTransaction(sig Signature, commitment Commitment) (Confirmed
 
 func (c *client) GetTransactionTokenBalances(sig Signature) (TransactionTokenBalances, error) {
 	config := struct {
+		Commitment                     string `json:"commitment"`
 		Encoding                       string `json:"encoding"`
 		MaxSupportedTransactionVersion int    `json:"maxSupportedTransactionVersion"`
 	}{
+		Commitment:                     confirmationStatusFinalized,
 		Encoding:                       "json", // Easier to use json in the event of ever-changing transaction versions
 		MaxSupportedTransactionVersion: maxSupportedTransactionVersion,
 	}
@@ -469,7 +442,7 @@ func (c *client) GetTransactionTokenBalances(sig Signature) (TransactionTokenBal
 
 func (c *client) GetBalance(account ed25519.PublicKey) (uint64, error) {
 	var resp rpcResponse
-	if err := c.call(&resp, "getBalance", base58.Encode(account[:]), CommitmentProcessed); err != nil {
+	if err := c.call(&resp, "getBalance", base58.Encode(account[:]), finalizedCommitment); err != nil {
 		jsonRPCErr, ok := err.(*jsonrpc.RPCError)
 		if !ok {
 			return 0, errors.Wrapf(err, "getBalance() failed to send request")
@@ -489,14 +462,14 @@ func (c *client) GetBalance(account ed25519.PublicKey) (uint64, error) {
 	return 0, errors.Errorf("invalid value in response")
 }
 
-func (c *client) GetTokenAccountBalance(account ed25519.PublicKey, commitment Commitment) (uint64, uint64, error) {
+func (c *client) GetTokenAccountBalance(account ed25519.PublicKey) (uint64, uint64, error) {
 	var resp struct {
 		Context struct {
 			Slot int64 `json:"slot"`
 		} `json:"context"`
 		Value TokenAmount `json:"value"`
 	}
-	if err := c.call(&resp, "getTokenAccountBalance", base58.Encode(account[:]), commitment); err != nil {
+	if err := c.call(&resp, "getTokenAccountBalance", base58.Encode(account[:]), finalizedCommitment); err != nil {
 		jsonRPCErr, ok := err.(*jsonrpc.RPCError)
 		if !ok {
 			return 0, 0, errors.Wrapf(err, "getTokenAccountBalance() failed to send request")
@@ -517,7 +490,7 @@ func (c *client) GetTokenAccountBalance(account ed25519.PublicKey, commitment Co
 	return quarks, uint64(resp.Context.Slot), nil
 }
 
-func (c *client) SubmitTransaction(txn Transaction, commitment Commitment) (Signature, error) {
+func (c *client) SubmitTransaction(txn Transaction) (Signature, error) {
 	sig := txn.Signatures[0]
 	txnBytes, err := txn.Marshal()
 	if err != nil {
@@ -533,7 +506,7 @@ func (c *client) SubmitTransaction(txn Transaction, commitment Commitment) (Sign
 	}{
 		Encoding:            "base64",
 		SkipPreflight:       true,
-		PreflightCommitment: commitment.Commitment,
+		PreflightCommitment: confirmationStatusFinalized,
 	}
 
 	var sigStr string
@@ -565,7 +538,7 @@ func (c *client) SubmitTransaction(txn Transaction, commitment Commitment) (Sign
 	return sig, err
 }
 
-func (c *client) GetAccountInfo(account ed25519.PublicKey, commitment Commitment) (accountInfo AccountInfo, slot uint64, err error) {
+func (c *client) GetAccountInfo(account ed25519.PublicKey) (accountInfo AccountInfo, slot uint64, err error) {
 	type rpcResponse struct {
 		Context struct {
 			Slot uint64 `json:"slot"`
@@ -579,10 +552,10 @@ func (c *client) GetAccountInfo(account ed25519.PublicKey, commitment Commitment
 	}
 
 	rpcConfig := struct {
-		Commitment Commitment `json:"commitment"`
-		Encoding   string     `json:"encoding"`
+		Commitment string `json:"commitment"`
+		Encoding   string `json:"encoding"`
 	}{
-		Commitment: commitment,
+		Commitment: confirmationStatusFinalized,
 		Encoding:   "base64",
 	}
 
@@ -623,7 +596,7 @@ func (c *client) GetAccountDataAfterBlock(account ed25519.PublicKey, slot uint64
 		Encoding       string `json:"encoding"`
 		MinContextSlot uint64 `json:"minContextSlot"`
 	}{
-		Commitment:     CommitmentFinalized.Commitment,
+		Commitment:     confirmationStatusFinalized,
 		Encoding:       "base64",
 		MinContextSlot: slot + 1,
 	}
@@ -659,14 +632,14 @@ func (c *client) GetAccountDataAfterBlock(account ed25519.PublicKey, slot uint64
 	return rawData, resp.Context.Slot, nil
 }
 
-func (c *client) GetSignaturesForAddress(account ed25519.PublicKey, commitment Commitment, limit uint64, before, until string) ([]*TransactionSignature, error) {
+func (c *client) GetSignaturesForAddress(account ed25519.PublicKey, limit uint64, before, until string) ([]*TransactionSignature, error) {
 	req := struct {
 		Commitment string  `json:"commitment"`
 		Limit      *uint64 `json:"limit"`
 		Before     *string `json:"before"`
 		Until      *string `json:"until"`
 	}{
-		Commitment: commitment.Commitment,
+		Commitment: confirmationStatusFinalized,
 	}
 
 	if limit > 0 {
@@ -731,65 +704,6 @@ func (c *client) GetSignaturesForAddress(account ed25519.PublicKey, commitment C
 	}
 
 	return result, nil
-}
-
-func (c *client) GetSignatureStatuses(sigs []Signature) ([]*SignatureStatus, error) {
-	b58Sigs := make([]string, len(sigs))
-	for i := range sigs {
-		b58Sigs[i] = base58.Encode(sigs[i][:])
-	}
-
-	req := struct {
-		SearchTransactionHistory bool `json:"searchTransactionHistory"`
-	}{
-		SearchTransactionHistory: true,
-	}
-
-	type signatureStatus struct {
-		Slot               uint64          `json:"slot"`
-		Confirmations      *int            `json:"confirmations"`
-		ConfirmationStatus string          `json:"confirmationStatus"`
-		Err                json.RawMessage `json:"err"`
-	}
-
-	type rpcResp struct {
-		Context struct {
-			Slot int `json:"slot"`
-		} `json:"context"`
-		Value []*signatureStatus `json:"value"`
-	}
-
-	var resp rpcResp
-	if err := c.call(&resp, "getSignatureStatuses", b58Sigs, req); err != nil {
-		return nil, err
-	}
-
-	statuses := make([]*SignatureStatus, len(sigs))
-	for i, v := range resp.Value {
-		if v == nil {
-			continue
-		}
-
-		statuses[i] = &SignatureStatus{}
-		statuses[i].Confirmations = v.Confirmations
-		statuses[i].ConfirmationStatus = v.ConfirmationStatus
-		statuses[i].Slot = v.Slot
-
-		if len(v.Err) > 0 {
-			var txError interface{}
-			err := json.NewDecoder(bytes.NewBuffer(v.Err)).Decode(&txError)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to parse transaction result")
-			}
-
-			statuses[i].ErrorResult, err = ParseTransactionError(txError)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to parse transaction result")
-			}
-		}
-	}
-
-	return statuses, nil
 }
 
 func (c *client) GetFilteredProgramAccounts(program ed25519.PublicKey, offset uint, filterValue []byte) ([]ProgramAccount, uint64, error) {

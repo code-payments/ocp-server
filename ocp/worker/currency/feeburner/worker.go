@@ -120,7 +120,7 @@ func (p *runtime) makeBurnTarget(record *currency.MetadataRecord) (*burnTarget, 
 }
 
 func (p *runtime) hasFeesToBurn(ctx context.Context, record *currency.MetadataRecord) (bool, error) {
-	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, record.LiquidityPool, solana.CommitmentFinalized)
+	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, record.LiquidityPool)
 	if err == solana.ErrNoAccountInfo {
 		return false, nil
 	} else if err != nil {

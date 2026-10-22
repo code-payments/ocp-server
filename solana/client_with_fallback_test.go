@@ -11,9 +11,9 @@ import (
 
 // mockClient implements Client for testing.
 type mockClient struct {
-	getSlotFunc            func(Commitment) (uint64, error)
-	getAccountInfoFunc     func(ed25519.PublicKey, Commitment) (AccountInfo, uint64, error)
-	submitTransactionFunc  func(Transaction, Commitment) (Signature, error)
+	getSlotFunc            func() (uint64, error)
+	getAccountInfoFunc     func(ed25519.PublicKey) (AccountInfo, uint64, error)
+	submitTransactionFunc  func(Transaction) (Signature, error)
 	getBalanceFunc         func(ed25519.PublicKey) (uint64, error)
 	getBlockFunc           func(uint64) (*Block, error)
 	getLatestBlockhashFunc func() (Blockhash, error)
@@ -21,26 +21,26 @@ type mockClient struct {
 	callCount int
 }
 
-func (m *mockClient) GetSlot(c Commitment) (uint64, error) {
+func (m *mockClient) GetSlot() (uint64, error) {
 	m.callCount++
 	if m.getSlotFunc != nil {
-		return m.getSlotFunc(c)
+		return m.getSlotFunc()
 	}
 	return 0, nil
 }
 
-func (m *mockClient) GetAccountInfo(pk ed25519.PublicKey, c Commitment) (AccountInfo, uint64, error) {
+func (m *mockClient) GetAccountInfo(pk ed25519.PublicKey) (AccountInfo, uint64, error) {
 	m.callCount++
 	if m.getAccountInfoFunc != nil {
-		return m.getAccountInfoFunc(pk, c)
+		return m.getAccountInfoFunc(pk)
 	}
 	return AccountInfo{}, 0, nil
 }
 
-func (m *mockClient) SubmitTransaction(tx Transaction, c Commitment) (Signature, error) {
+func (m *mockClient) SubmitTransaction(tx Transaction) (Signature, error) {
 	m.callCount++
 	if m.submitTransactionFunc != nil {
-		return m.submitTransactionFunc(tx, c)
+		return m.submitTransactionFunc(tx)
 	}
 	return Signature{}, nil
 }
@@ -82,21 +82,17 @@ func (m *mockClient) GetMinimumBalanceForRentExemption(uint64) (uint64, error) {
 	m.callCount++
 	return 0, nil
 }
-func (m *mockClient) GetSignatureStatuses([]Signature) ([]*SignatureStatus, error) {
+func (m *mockClient) GetSignaturesForAddress(ed25519.PublicKey, uint64, string, string) ([]*TransactionSignature, error) {
 	m.callCount++
 	return nil, nil
 }
-func (m *mockClient) GetSignaturesForAddress(ed25519.PublicKey, Commitment, uint64, string, string) ([]*TransactionSignature, error) {
-	m.callCount++
-	return nil, nil
-}
-func (m *mockClient) GetTokenAccountBalance(ed25519.PublicKey, Commitment) (uint64, uint64, error) {
+func (m *mockClient) GetTokenAccountBalance(ed25519.PublicKey) (uint64, uint64, error) {
 	m.callCount++
 	return 0, 0, nil
 }
-func (m *mockClient) GetTransaction(Signature, Commitment) (ConfirmedTransaction, error) {
+func (m *mockClient) GetTransaction(Signature) (TransactionWithMeta, error) {
 	m.callCount++
-	return ConfirmedTransaction{}, nil
+	return TransactionWithMeta{}, nil
 }
 func (m *mockClient) GetTransactionTokenBalances(Signature) (TransactionTokenBalances, error) {
 	m.callCount++
@@ -105,14 +101,14 @@ func (m *mockClient) GetTransactionTokenBalances(Signature) (TransactionTokenBal
 
 func TestClientWithFallback_PrimarySuccess(t *testing.T) {
 	primary := &mockClient{
-		getSlotFunc: func(c Commitment) (uint64, error) {
+		getSlotFunc: func() (uint64, error) {
 			return 42, nil
 		},
 	}
 	fallback := &mockClient{}
 
 	client := NewWithFallbackFromClients(primary, fallback)
-	slot, err := client.GetSlot(CommitmentFinalized)
+	slot, err := client.GetSlot()
 
 	require.NoError(t, err)
 	assert.Equal(t, uint64(42), slot)
@@ -122,18 +118,18 @@ func TestClientWithFallback_PrimarySuccess(t *testing.T) {
 
 func TestClientWithFallback_UnexpectedError_UsesFallback(t *testing.T) {
 	primary := &mockClient{
-		getSlotFunc: func(c Commitment) (uint64, error) {
+		getSlotFunc: func() (uint64, error) {
 			return 0, errors.New("connection refused")
 		},
 	}
 	fallback := &mockClient{
-		getSlotFunc: func(c Commitment) (uint64, error) {
+		getSlotFunc: func() (uint64, error) {
 			return 99, nil
 		},
 	}
 
 	client := NewWithFallbackFromClients(primary, fallback)
-	slot, err := client.GetSlot(CommitmentFinalized)
+	slot, err := client.GetSlot()
 
 	require.NoError(t, err)
 	assert.Equal(t, uint64(99), slot)
@@ -217,18 +213,18 @@ func TestClientWithFallback_BothFail_ReturnsFallbackError(t *testing.T) {
 	fallbackErr := errors.New("fallback down")
 
 	primary := &mockClient{
-		getSlotFunc: func(c Commitment) (uint64, error) {
+		getSlotFunc: func() (uint64, error) {
 			return 0, primaryErr
 		},
 	}
 	fallback := &mockClient{
-		getSlotFunc: func(c Commitment) (uint64, error) {
+		getSlotFunc: func() (uint64, error) {
 			return 0, fallbackErr
 		},
 	}
 
 	client := NewWithFallbackFromClients(primary, fallback)
-	_, err := client.GetSlot(CommitmentFinalized)
+	_, err := client.GetSlot()
 
 	assert.ErrorIs(t, err, fallbackErr)
 	assert.Equal(t, 1, primary.callCount)
@@ -237,18 +233,18 @@ func TestClientWithFallback_BothFail_ReturnsFallbackError(t *testing.T) {
 
 func TestClientWithFallback_MultiReturn_UsesFallback(t *testing.T) {
 	primary := &mockClient{
-		getAccountInfoFunc: func(pk ed25519.PublicKey, c Commitment) (AccountInfo, uint64, error) {
+		getAccountInfoFunc: func(pk ed25519.PublicKey) (AccountInfo, uint64, error) {
 			return AccountInfo{}, 0, errors.New("rpc error")
 		},
 	}
 	fallback := &mockClient{
-		getAccountInfoFunc: func(pk ed25519.PublicKey, c Commitment) (AccountInfo, uint64, error) {
+		getAccountInfoFunc: func(pk ed25519.PublicKey) (AccountInfo, uint64, error) {
 			return AccountInfo{Lamports: 1000}, 50, nil
 		},
 	}
 
 	client := NewWithFallbackFromClients(primary, fallback)
-	info, slot, err := client.GetAccountInfo(ed25519.PublicKey{}, CommitmentFinalized)
+	info, slot, err := client.GetAccountInfo(ed25519.PublicKey{})
 
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1000), info.Lamports)
@@ -259,20 +255,20 @@ func TestClientWithFallback_MultiReturn_UsesFallback(t *testing.T) {
 
 func TestClientWithFallback_SubmitTransaction_UsesFallback(t *testing.T) {
 	primary := &mockClient{
-		submitTransactionFunc: func(tx Transaction, c Commitment) (Signature, error) {
+		submitTransactionFunc: func(tx Transaction) (Signature, error) {
 			return Signature{}, errors.New("connection timeout")
 		},
 	}
 
 	expectedSig := Signature{1, 2, 3}
 	fallback := &mockClient{
-		submitTransactionFunc: func(tx Transaction, c Commitment) (Signature, error) {
+		submitTransactionFunc: func(tx Transaction) (Signature, error) {
 			return expectedSig, nil
 		},
 	}
 
 	client := NewWithFallbackFromClients(primary, fallback)
-	sig, err := client.SubmitTransaction(Transaction{}, CommitmentProcessed)
+	sig, err := client.SubmitTransaction(Transaction{})
 
 	require.NoError(t, err)
 	assert.Equal(t, expectedSig, sig)
