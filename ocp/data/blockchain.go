@@ -25,7 +25,6 @@ type BlockchainData interface {
 	GetBlockchainHistory(ctx context.Context, account string, opts ...query.Option) ([]*solana.TransactionSignature, error)
 	GetBlockchainMinimumBalanceForRentExemption(ctx context.Context, size uint64) (uint64, error)
 	GetBlockchainLatestBlockhash(ctx context.Context) (solana.Blockhash, error)
-	GetBlockchainSignatureStatuses(ctx context.Context, signatures []solana.Signature) ([]*solana.SignatureStatus, error)
 	GetBlockchainSlot(ctx context.Context) (uint64, error)
 	GetBlockchainTokenAccountInfo(ctx context.Context, account, mint string) (*token.Account, error)
 	GetBlockchainTransaction(ctx context.Context, sig string) (*solana.TransactionWithMeta, error)
@@ -196,18 +195,6 @@ func (dp *BlockchainProvider) GetBlockchainTransaction(ctx context.Context, sig 
 	}
 
 	return &res, nil
-}
-
-func (dp *BlockchainProvider) GetBlockchainSignatureStatuses(ctx context.Context, signatures []solana.Signature) ([]*solana.SignatureStatus, error) {
-	tracer := metrics.TraceMethodCall(ctx, blockchainProviderMetricsName, "GetBlockchainSignatureStatuses")
-	defer tracer.End()
-
-	res, err := dp.sc.GetSignatureStatuses(signatures)
-
-	if err != nil {
-		tracer.OnError(err)
-	}
-	return res, err
 }
 
 func (dp *BlockchainProvider) GetBlockchainLatestBlockhash(ctx context.Context) (solana.Blockhash, error) {

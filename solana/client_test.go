@@ -12,69 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSignatureStatus(t *testing.T) {
-	zero, one := 0, 1
-
-	testCases := []struct {
-		s         SignatureStatus
-		finalized bool
-	}{
-		{
-			s: SignatureStatus{
-				Slot:               10,
-				ErrorResult:        nil,
-				Confirmations:      &zero,
-				ConfirmationStatus: "",
-			},
-		},
-		{
-			s: SignatureStatus{
-				Slot:               10,
-				ErrorResult:        nil,
-				Confirmations:      &zero,
-				ConfirmationStatus: "random",
-			},
-		},
-		{
-			s: SignatureStatus{
-				Slot:               10,
-				ErrorResult:        nil,
-				Confirmations:      &zero,
-				ConfirmationStatus: "processed",
-			},
-		},
-		{
-			s: SignatureStatus{
-				Slot:               10,
-				ErrorResult:        nil,
-				Confirmations:      &one,
-				ConfirmationStatus: "",
-			},
-		},
-		{
-			s: SignatureStatus{
-				Slot:               10,
-				ErrorResult:        nil,
-				Confirmations:      &zero,
-				ConfirmationStatus: "confirmed",
-			},
-		},
-		{
-			s: SignatureStatus{
-				Slot:               10,
-				ErrorResult:        nil,
-				Confirmations:      &zero,
-				ConfirmationStatus: confirmationStatusFinalized,
-			},
-			finalized: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		assert.Equal(t, tc.finalized, tc.s.Finalized())
-	}
-}
-
 func TestGetAccountDataAfterBlock(t *testing.T) {
 	account := make(ed25519.PublicKey, ed25519.PublicKeySize)
 	data := []byte{1, 2, 3}

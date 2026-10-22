@@ -129,13 +129,6 @@ func (c *clientWithFallback) GetMinimumBalanceForRentExemption(size uint64) (uin
 	)
 }
 
-func (c *clientWithFallback) GetSignatureStatuses(sigs []Signature) ([]*SignatureStatus, error) {
-	return withFallback(
-		func() ([]*SignatureStatus, error) { return c.primary.GetSignatureStatuses(sigs) },
-		func() ([]*SignatureStatus, error) { return c.fallback.GetSignatureStatuses(sigs) },
-	)
-}
-
 func (c *clientWithFallback) GetSignaturesForAddress(owner ed25519.PublicKey, limit uint64, before, until string) ([]*TransactionSignature, error) {
 	return withFallback(
 		func() ([]*TransactionSignature, error) {

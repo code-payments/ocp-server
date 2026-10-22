@@ -82,10 +82,6 @@ func (m *mockClient) GetMinimumBalanceForRentExemption(uint64) (uint64, error) {
 	m.callCount++
 	return 0, nil
 }
-func (m *mockClient) GetSignatureStatuses([]Signature) ([]*SignatureStatus, error) {
-	m.callCount++
-	return nil, nil
-}
 func (m *mockClient) GetSignaturesForAddress(ed25519.PublicKey, uint64, string, string) ([]*TransactionSignature, error) {
 	m.callCount++
 	return nil, nil
