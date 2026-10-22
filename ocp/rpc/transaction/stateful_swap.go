@@ -1003,6 +1003,9 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		selectedNonce.ReleaseIfNotReserved(ctx)
 	}()
 
+	coinbaseSwapVersion := selectCoinbaseSwapVersion(initiateStablecoinSwapReq.SwapVersion)
+	log = log.With(zap.String("coinbase_swap_version", coinbaseSwapVersion.String()))
+
 	swapHandler := NewCoinbaseStableSwapperSwapHandler(
 		s.data,
 		owner,
@@ -1013,6 +1016,7 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		initiateStablecoinSwapReq.SwapAmount,
 		initiateStablecoinSwapReq.FeeAmount,
 		selectedNonce,
+		coinbaseSwapVersion,
 	)
 
 	alts, err := swapHandler.GetAlts(ctx)

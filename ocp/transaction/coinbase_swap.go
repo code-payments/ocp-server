@@ -13,9 +13,31 @@ import (
 	"github.com/code-payments/ocp-server/solana/token"
 )
 
+// CoinbaseSwapVersion selects the CoinbaseStableSwapper swap instruction.
+// Clients build and sign swap transactions locally, so the server must build
+// the same version as the client.
+type CoinbaseSwapVersion uint8
+
+const (
+	CoinbaseSwapV1 CoinbaseSwapVersion = iota + 1 // swap, with the deprecated whitelist account
+	CoinbaseSwapV2                                // swap_v2
+)
+
+func (v CoinbaseSwapVersion) String() string {
+	switch v {
+	case CoinbaseSwapV1:
+		return "v1"
+	case CoinbaseSwapV2:
+		return "v2"
+	default:
+		return "unknown"
+	}
+}
+
 // CoinbaseSwapAccounts captures all derived PDAs and on-chain values needed
-// to build a CoinbaseStableSwapper::Swap instruction for a (fromMint, toMint)
+// to build a CoinbaseStableSwapper swap instruction for a (fromMint, toMint)
 // pair. FeeRecipient is sourced from the on-chain LiquidityPool account.
+// Whitelist is only used by CoinbaseSwapV1.
 type CoinbaseSwapAccounts struct {
 	Pool                     ed25519.PublicKey
 	InVault                  ed25519.PublicKey
@@ -133,33 +155,61 @@ func GetCoinbaseSwapDestinationLiquidity(ctx context.Context, data ocp_data.Prov
 	return info.Amount, nil
 }
 
-// MakeCoinbaseSwapInstruction builds a CoinbaseStableSwapper::Swap instruction.
+// MakeCoinbaseSwapInstruction builds a CoinbaseStableSwapper swap instruction
+// for the provided version.
 func MakeCoinbaseSwapInstruction(
+	version CoinbaseSwapVersion,
 	accounts *CoinbaseSwapAccounts,
 	user ed25519.PublicKey,
 	fromMint, toMint ed25519.PublicKey,
 	userFromTokenAccount, userToTokenAccount ed25519.PublicKey,
 	amountIn, minAmountOut uint64,
-) solana.Instruction {
-	return coinbase_stable_swapper.NewSwapInstruction(
-		&coinbase_stable_swapper.SwapInstructionAccounts{
-			Pool:                     accounts.Pool,
-			InVault:                  accounts.InVault,
-			OutVault:                 accounts.OutVault,
-			InVaultTokenAccount:      accounts.InVaultTokenAccount,
-			OutVaultTokenAccount:     accounts.OutVaultTokenAccount,
-			UserFromTokenAccount:     userFromTokenAccount,
-			ToTokenAccount:           userToTokenAccount,
-			FeeRecipientTokenAccount: accounts.FeeRecipientTokenAccount,
-			FeeRecipient:             accounts.FeeRecipient,
-			FromMint:                 fromMint,
-			ToMint:                   toMint,
-			User:                     user,
-			Whitelist:                accounts.Whitelist,
-		},
-		&coinbase_stable_swapper.SwapInstructionArgs{
-			AmountIn:     amountIn,
-			MinAmountOut: minAmountOut,
-		},
-	)
+) (solana.Instruction, error) {
+	switch version {
+	case CoinbaseSwapV1:
+		return coinbase_stable_swapper.NewSwapInstruction(
+			&coinbase_stable_swapper.SwapInstructionAccounts{
+				Pool:                     accounts.Pool,
+				InVault:                  accounts.InVault,
+				OutVault:                 accounts.OutVault,
+				InVaultTokenAccount:      accounts.InVaultTokenAccount,
+				OutVaultTokenAccount:     accounts.OutVaultTokenAccount,
+				UserFromTokenAccount:     userFromTokenAccount,
+				ToTokenAccount:           userToTokenAccount,
+				FeeRecipientTokenAccount: accounts.FeeRecipientTokenAccount,
+				FeeRecipient:             accounts.FeeRecipient,
+				FromMint:                 fromMint,
+				ToMint:                   toMint,
+				User:                     user,
+				Whitelist:                accounts.Whitelist,
+			},
+			&coinbase_stable_swapper.SwapInstructionArgs{
+				AmountIn:     amountIn,
+				MinAmountOut: minAmountOut,
+			},
+		), nil
+	case CoinbaseSwapV2:
+		return coinbase_stable_swapper.NewSwapV2Instruction(
+			&coinbase_stable_swapper.SwapV2InstructionAccounts{
+				Pool:                     accounts.Pool,
+				InVault:                  accounts.InVault,
+				OutVault:                 accounts.OutVault,
+				InVaultTokenAccount:      accounts.InVaultTokenAccount,
+				OutVaultTokenAccount:     accounts.OutVaultTokenAccount,
+				UserFromTokenAccount:     userFromTokenAccount,
+				ToTokenAccount:           userToTokenAccount,
+				FeeRecipientTokenAccount: accounts.FeeRecipientTokenAccount,
+				FeeRecipient:             accounts.FeeRecipient,
+				FromMint:                 fromMint,
+				ToMint:                   toMint,
+				User:                     user,
+			},
+			&coinbase_stable_swapper.SwapV2InstructionArgs{
+				AmountIn:     amountIn,
+				MinAmountOut: minAmountOut,
+			},
+		), nil
+	default:
+		return solana.Instruction{}, errors.Errorf("unsupported coinbase swap version: %d", version)
+	}
 }

@@ -1193,6 +1193,17 @@ func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) MakeInstructions(ctx cont
 	}, nil
 }
 
+// selectCoinbaseSwapVersion picks the CoinbaseStableSwapper swap instruction
+// version from the client's requested swap_version. Clients rebuild and sign
+// the transaction locally, so the server must match what the client builds.
+// Only an explicit 2 selects v2. Older clients leave it unset and build v1.
+func selectCoinbaseSwapVersion(requested uint32) transaction_util.CoinbaseSwapVersion {
+	if requested == 2 {
+		return transaction_util.CoinbaseSwapV2
+	}
+	return transaction_util.CoinbaseSwapV1
+}
+
 type CoinbaseStableSwapperSwapHandler struct {
 	data ocp_data.Provider
 
@@ -1210,8 +1221,9 @@ type CoinbaseStableSwapperSwapHandler struct {
 	computeUnitPrice uint64
 	memoValue        string
 
-	feeDestination   *common.Account
-	coinbaseAccounts *transaction_util.CoinbaseSwapAccounts
+	feeDestination      *common.Account
+	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion
+	coinbaseAccounts    *transaction_util.CoinbaseSwapAccounts
 }
 
 func NewCoinbaseStableSwapperSwapHandler(
@@ -1224,6 +1236,7 @@ func NewCoinbaseStableSwapperSwapHandler(
 	swapAmount uint64,
 	feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
+	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion,
 ) SwapHandler {
 	return &CoinbaseStableSwapperSwapHandler{
 		data: data,
@@ -1240,7 +1253,9 @@ func NewCoinbaseStableSwapperSwapHandler(
 		computeUnitLimit: 200_000,
 		computeUnitPrice: 10_000,
 		memoValue:        "coinbase_stable_swapper_v0",
-		feeDestination:   common.CoreMintFeesAccount,
+
+		feeDestination:      common.CoreMintFeesAccount,
+		coinbaseSwapVersion: coinbaseSwapVersion,
 	}
 }
 
@@ -1325,7 +1340,8 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 		},
 	)
 
-	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
+	coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
+		h.coinbaseSwapVersion,
 		coinbaseAccounts,
 		h.swapAuthority.PublicKey().ToBytes(),
 		h.fromMint.PublicKey().ToBytes(),
@@ -1335,6 +1351,9 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 		h.swapAmount,
 		h.swapAmount,
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	closeSwapAuthorityFromMintAtaIxn := token.CloseAccount(
 		swapAuthorityFromMintAta,
