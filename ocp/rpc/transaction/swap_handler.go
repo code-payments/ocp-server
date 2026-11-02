@@ -1373,3 +1373,13 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 		closeSwapAuthorityFromMintAtaIxn,
 	}, nil
 }
+
+// selectSwapTransactionVersion picks the Solana transaction version for a swap
+// from the client's requested transaction_version. Older clients leave it
+// unset and build v0.
+func selectSwapTransactionVersion(requested uint32) solana.MessageVersion {
+	if requested == 1 {
+		return solana.MessageVersion1
+	}
+	return solana.MessageVersion0
+}

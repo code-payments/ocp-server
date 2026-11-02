@@ -77,6 +77,12 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
+	// v1 transactions aren't supported yet
+	log = log.With(zap.Uint32("transaction_version", initiateReq.TransactionVersion))
+	if initiateReq.TransactionVersion != 0 {
+		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("transaction version %d is not supported", initiateReq.TransactionVersion))
+	}
+
 	// todo: Refactor needed for duplication of code, but this isolates fundamentally different swap flows
 	switch initiateReq.GetKind().(type) {
 	case *transactionpb.StatefulSwapRequest_Initiate_Reserve:

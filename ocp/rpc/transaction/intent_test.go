@@ -119,6 +119,16 @@ func setupTestEnv(t *testing.T, overrides ...func(*testOverrides)) *testEnv {
 		State:      vault.StateAvailable,
 	}))
 
+	configOverrides := &testOverrides{
+		disableSwaps:               true,
+		clientReceiveTimeout:       defaultTestReceiveTimeout,
+		feeCollectorOwnerPublicKey: env.feeCollector.PublicKey().ToBase58(),
+		swapTreasuryOwnerPublicKey: env.swapTreasury.PublicKey().ToBase58(),
+	}
+	for _, override := range overrides {
+		override(configOverrides)
+	}
+
 	env.saveNonces(t, common.CoreMintVmAccount, testNoncesPerVm)
 	noncePool, err := transaction.NewLocalNoncePool(
 		log,
@@ -130,15 +140,20 @@ func setupTestEnv(t *testing.T, overrides ...func(*testOverrides)) *testEnv {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { noncePool.Close() })
+	noncePools := []*transaction.LocalNoncePool{noncePool}
 
-	configOverrides := &testOverrides{
-		disableSwaps:               true,
-		clientReceiveTimeout:       defaultTestReceiveTimeout,
-		feeCollectorOwnerPublicKey: env.feeCollector.PublicKey().ToBase58(),
-		swapTreasuryOwnerPublicKey: env.swapTreasury.PublicKey().ToBase58(),
-	}
-	for _, override := range overrides {
-		override(configOverrides)
+	if !configOverrides.disableSwaps {
+		swapNoncePool, err := transaction.NewLocalNoncePool(
+			log,
+			env.data,
+			noop_metrics.NewProvider(),
+			nonce.EnvironmentSolana,
+			nonce.EnvironmentInstanceSolanaMainnet,
+			nonce.PurposeClientSwap,
+		)
+		require.NoError(t, err)
+		t.Cleanup(func() { swapNoncePool.Close() })
+		noncePools = append(noncePools, swapNoncePool)
 	}
 
 	env.submitIntentIntegration = &testSubmitIntentIntegration{}
@@ -156,7 +171,7 @@ func setupTestEnv(t *testing.T, overrides ...func(*testOverrides)) *testEnv {
 		aml.NewGuard(log, env.data),
 		nil,
 		testNodeId,
-		[]*transaction.LocalNoncePool{noncePool},
+		noncePools,
 		withManualTestOverrides(configOverrides),
 	)
 	require.NoError(t, err)
@@ -184,6 +199,12 @@ func withAntispamChecks() func(*testOverrides) {
 func withAmlChecks() func(*testOverrides) {
 	return func(o *testOverrides) {
 		o.enableAmlChecks = true
+	}
+}
+
+func withSwapsEnabled() func(*testOverrides) {
+	return func(o *testOverrides) {
+		o.disableSwaps = false
 	}
 }
 

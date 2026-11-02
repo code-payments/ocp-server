@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 
 	"github.com/mr-tron/base58/base58"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,9 +32,14 @@ import (
 // todo: Generalize this more when we have more than one swap kind similar to StatefulSwap
 
 const (
-	statelessSwapComputeUnitLimit = 200_000
+	// Simulated on mainnet at 49k-54k CU when the transaction creates the
+	// deposit ATA, which is the most expensive path. Coinbase swap v1 costs
+	// about 5k more than v2. The only per-user cost is the deposit ATA
+	// derivation, at 1,500 CU per bump below 255.
+	statelessSwapComputeUnitLimit = 100_000
 	statelessSwapComputeUnitPrice = 10_000
-	statelessSwapMemoValue        = "coinbase_stable_swapper_v0"
+	statelessSwapMemoValueV0      = "coinbase_stable_swapper_v0"
+	statelessSwapMemoValueV1      = "coinbase_stable_swapper_v1"
 )
 
 func (s *transactionServer) StatelessSwap(streamer transactionpb.Transaction_StatelessSwapServer) error {
@@ -70,6 +76,8 @@ func (s *transactionServer) StatelessSwap(streamer transactionpb.Transaction_Sta
 	if err := s.auth.Authenticate(ctx, owner, initiateReq, reqSignature); err != nil {
 		return handleStatelessSwapError(streamer, err)
 	}
+
+	log = log.With(zap.Uint32("transaction_version", initiateReq.TransactionVersion))
 
 	switch initiateReq.GetKind().(type) {
 	case *transactionpb.StatelessSwapRequest_Initiate_Stablecoin:
@@ -253,34 +261,32 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		return handleStatelessSwapError(streamer, err)
 	}
 
-	alts := []solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}
-
-	ixns := []solana.Instruction{
-		compute_budget.SetComputeUnitLimit(statelessSwapComputeUnitLimit),
-		compute_budget.SetComputeUnitPrice(statelessSwapComputeUnitPrice),
-		memo.Instruction(statelessSwapMemoValue),
-		createDepositAtaIxn,
-		coinbaseSwapIxn,
-	}
-
 	feeRecipient, err := common.NewAccountFromPublicKeyBytes(coinbaseAccounts.FeeRecipient)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("invalid coinbase pool fee recipient")
 		return handleStatelessSwapError(streamer, err)
 	}
 
-	txn := solana.NewV0Transaction(
-		common.GetSubsidizer().PublicKey().ToBytes(),
-		alts,
-		ixns,
-	)
-
 	blockhash, err := s.data.GetBlockchainLatestBlockhash(ctx)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failure getting latest blockhash")
 		return handleStatelessSwapError(streamer, err)
 	}
-	txn.SetBlockhash(blockhash)
+
+	transactionVersion := selectSwapTransactionVersion(initiateReq.TransactionVersion)
+	log = log.With(zap.String("selected_transaction_version", transactionVersion.String()))
+
+	txn, serverParameters, err := makeStatelessSwapTransaction(
+		transactionVersion,
+		blockhash,
+		feeRecipient,
+		createDepositAtaIxn,
+		coinbaseSwapIxn,
+	)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("failure making transaction")
+		return handleStatelessSwapError(streamer, err)
+	}
 
 	marshalledTxnMessage, err := txn.Message.Marshal()
 	if err != nil {
@@ -296,15 +302,7 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		Response: &transactionpb.StatelessSwapResponse_ServerParameters_{
 			ServerParameters: &transactionpb.StatelessSwapResponse_ServerParameters{
 				Kind: &transactionpb.StatelessSwapResponse_ServerParameters_Stablecoin{
-					Stablecoin: &transactionpb.StatelessSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter{
-						Payer:            common.GetSubsidizer().ToProto(),
-						Blockhash:        &commonpb.Blockhash{Value: blockhash[:]},
-						Alts:             transaction_util.ToProtoAlts(alts),
-						ComputeUnitLimit: statelessSwapComputeUnitLimit,
-						ComputeUnitPrice: statelessSwapComputeUnitPrice,
-						MemoValue:        statelessSwapMemoValue,
-						PoolFeeRecipient: feeRecipient.ToProto(),
-					},
+					Stablecoin: serverParameters,
 				},
 			},
 		},
@@ -406,4 +404,72 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 			},
 		},
 	}))
+}
+
+// makeStatelessSwapTransaction builds the unsigned stateless swap transaction
+// and the server parameters clients need to build the same one. A v1
+// transaction has no ALTs or ComputeBudget instructions, and carries the
+// compute budget in its transaction config instead.
+func makeStatelessSwapTransaction(
+	version solana.MessageVersion,
+	blockhash solana.Blockhash,
+	poolFeeRecipient *common.Account,
+	createDepositAtaIxn solana.Instruction,
+	coinbaseSwapIxn solana.Instruction,
+) (solana.Transaction, *transactionpb.StatelessSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter, error) {
+	serverParameters := &transactionpb.StatelessSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter{
+		Payer:            common.GetSubsidizer().ToProto(),
+		Blockhash:        &commonpb.Blockhash{Value: blockhash[:]},
+		PoolFeeRecipient: poolFeeRecipient.ToProto(),
+	}
+
+	var txn solana.Transaction
+	switch version {
+	case solana.MessageVersion0:
+		alts := []solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}
+
+		txn = solana.NewV0Transaction(
+			common.GetSubsidizer().PublicKey().ToBytes(),
+			alts,
+			[]solana.Instruction{
+				compute_budget.SetComputeUnitLimit(statelessSwapComputeUnitLimit),
+				compute_budget.SetComputeUnitPrice(statelessSwapComputeUnitPrice),
+				memo.Instruction(statelessSwapMemoValueV0),
+				createDepositAtaIxn,
+				coinbaseSwapIxn,
+			},
+		)
+
+		serverParameters.MemoValue = statelessSwapMemoValueV0
+		serverParameters.Alts = transaction_util.ToProtoAlts(alts)
+		serverParameters.ComputeUnitLimit = statelessSwapComputeUnitLimit
+		serverParameters.ComputeUnitPrice = statelessSwapComputeUnitPrice
+	case solana.MessageVersion1:
+		config := transaction_util.NewV1TransactionConfig(
+			statelessSwapComputeUnitLimit,
+			statelessSwapComputeUnitPrice,
+			transaction_util.CoinbaseSwapLoadedAccountsDataSizeLimit,
+		)
+
+		var err error
+		txn, err = solana.NewV1Transaction(
+			common.GetSubsidizer().PublicKey().ToBytes(),
+			config,
+			memo.Instruction(statelessSwapMemoValueV1),
+			createDepositAtaIxn,
+			coinbaseSwapIxn,
+		)
+		if err != nil {
+			return solana.Transaction{}, nil, err
+		}
+
+		serverParameters.MemoValue = statelessSwapMemoValueV1
+		serverParameters.TransactionConfig = transaction_util.ToProtoTransactionConfig(config)
+	default:
+		return solana.Transaction{}, nil, errors.Errorf("unsupported transaction version: %s", version)
+	}
+
+	txn.SetBlockhash(blockhash)
+
+	return txn, serverParameters, nil
 }
