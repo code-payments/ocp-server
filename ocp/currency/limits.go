@@ -8,11 +8,25 @@ type SendLimit struct {
 
 const (
 	MaxDailyUsdLimit = 5_000.00
+
+	SendLimitMultiplier = 20
 )
+
+var SendLimits = applySendLimitMultiplier(baseSendLimits, SendLimitMultiplier)
+
+func applySendLimitMultiplier(limits map[currency_lib.Code]SendLimit, multiplier float64) map[currency_lib.Code]SendLimit {
+	res := make(map[currency_lib.Code]SendLimit, len(limits))
+	for code, limit := range limits {
+		res[code] = SendLimit{
+			PerTransaction: limit.PerTransaction * multiplier,
+		}
+	}
+	return res
+}
 
 // todo: Better way of managing all of this
 var (
-	SendLimits = map[currency_lib.Code]SendLimit{
+	baseSendLimits = map[currency_lib.Code]SendLimit{
 		"aed": {PerTransaction: 1_000.00},
 		"afn": {PerTransaction: 20_000.00},
 		"all": {PerTransaction: 25_000.00},
