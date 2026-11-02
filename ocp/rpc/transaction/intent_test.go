@@ -4756,7 +4756,7 @@ func TestSubmitIntent_SendPublicPayment_Aml(t *testing.T) {
 		receiverVault := env.getVault(t, receiver, common.CoreMintAccount)
 
 		// Payments and gift cards count towards the limit
-		for range 4 {
+		for range 24 {
 			req := env.directPaymentRequest(t, sender, receiverVault, common.CoreMintAccount, common.ToCoreMintQuarks(240))
 			env.submitIntent(t, req).requireSuccess(t)
 		}
@@ -5002,8 +5002,8 @@ func TestSubmitIntent_ReceivePaymentsPublicly_AmlDoesNotApply(t *testing.T) {
 	receiver := env.newUser(t)
 
 	// Max out the receiver's daily limit
-	env.credit(t, env.getVault(t, receiver, common.CoreMintAccount), common.ToCoreMintQuarks(1_200))
-	for range 5 {
+	env.credit(t, env.getVault(t, receiver, common.CoreMintAccount), common.ToCoreMintQuarks(6_000))
+	for range 25 {
 		req := env.directPaymentRequest(t, receiver, env.getVault(t, sender, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(240))
 		env.submitIntent(t, req).requireSuccess(t)
 	}
@@ -5691,14 +5691,14 @@ func TestSubmitIntent_SendPublicMultiPayment_Aml(t *testing.T) {
 	env.requireNoChanges(t, before)
 
 	// Multi payments count towards the daily limit
-	for range 4 {
+	for range 23 {
 		req = env.multiPaymentRequest(t, sender, common.CoreMintAccount,
 			testMultiPayment{destination: receiver1Vault, quarks: common.ToCoreMintQuarks(200)},
 			testMultiPayment{destination: receiver2Vault, quarks: common.ToCoreMintQuarks(50)},
 		)
 		env.submitIntent(t, req).requireSuccess(t)
 	}
-	req = env.directPaymentRequest(t, sender, receiver1Vault, common.CoreMintAccount, common.ToCoreMintQuarks(200))
+	req = env.directPaymentRequest(t, sender, receiver1Vault, common.CoreMintAccount, common.ToCoreMintQuarks(250))
 	env.submitIntent(t, req).requireSuccess(t)
 
 	req = env.multiPaymentRequest(t, sender, common.CoreMintAccount,

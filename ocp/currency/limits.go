@@ -7,7 +7,7 @@ type SendLimit struct {
 }
 
 const (
-	MaxDailyUsdLimit = 1_000.00
+	MaxDailyUsdLimit = 5_000.00
 )
 
 // todo: Better way of managing all of this
