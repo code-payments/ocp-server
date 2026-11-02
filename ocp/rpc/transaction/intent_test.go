@@ -4711,24 +4711,24 @@ func TestSubmitIntent_SendPublicPayment_Antispam(t *testing.T) {
 func TestSubmitIntent_SendPublicPayment_Aml(t *testing.T) {
 	t.Run("per transaction limit", func(t *testing.T) {
 		env := setupTestEnv(t, withAmlChecks())
-		sender := env.newFundedUser(t, common.ToCoreMintQuarks(1_000))
+		sender := env.newFundedUser(t, common.ToCoreMintQuarks(20_000))
 		receiver := env.newUser(t)
 
-		req := env.directPaymentRequest(t, sender, env.getVault(t, receiver, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(251))
+		req := env.directPaymentRequest(t, sender, env.getVault(t, receiver, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(5_001))
 		before := env.snapshot(t, sender, receiver)
 		env.submitIntent(t, req).requireDenied(t, ErrTransactionLimitExceeded.Error())
 		env.requireNoChanges(t, before)
 
-		req = env.giftCardRequest(t, sender, env.newAccount(t), common.CoreMintAccount, common.ToCoreMintQuarks(251))
+		req = env.giftCardRequest(t, sender, env.newAccount(t), common.CoreMintAccount, common.ToCoreMintQuarks(5_001))
 		env.submitIntent(t, req).requireDenied(t, ErrTransactionLimitExceeded.Error())
 
 		// Limits are per currency
 		exchangeRate := env.signedExchangeRate(t, currency_lib.CAD, 2.0, time.Now())
-		req = env.directPaymentRequest(t, sender, env.getVault(t, receiver, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(126))
-		req.metadata.GetSendPublicPayment().ExchangeData = clientExchangeData(env.coreMintExchangeData(t, common.ToCoreMintQuarks(126), exchangeRate))
+		req = env.directPaymentRequest(t, sender, env.getVault(t, receiver, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(2_501))
+		req.metadata.GetSendPublicPayment().ExchangeData = clientExchangeData(env.coreMintExchangeData(t, common.ToCoreMintQuarks(2_501), exchangeRate))
 		env.submitIntent(t, req).requireDenied(t, ErrTransactionLimitExceeded.Error())
 
-		req = env.directPaymentRequest(t, sender, env.getVault(t, receiver, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(250))
+		req = env.directPaymentRequest(t, sender, env.getVault(t, receiver, common.CoreMintAccount), common.CoreMintAccount, common.ToCoreMintQuarks(5_000))
 		env.submitIntent(t, req).requireSuccess(t)
 
 		// Withdrawals are always allowed
@@ -5683,8 +5683,8 @@ func TestSubmitIntent_SendPublicMultiPayment_Aml(t *testing.T) {
 
 	// Each payment is within the per transaction limit, but the total isn't
 	req := env.multiPaymentRequest(t, sender, common.CoreMintAccount,
-		testMultiPayment{destination: receiver1Vault, quarks: common.ToCoreMintQuarks(200)},
-		testMultiPayment{destination: receiver2Vault, quarks: common.ToCoreMintQuarks(51)},
+		testMultiPayment{destination: receiver1Vault, quarks: common.ToCoreMintQuarks(4_000)},
+		testMultiPayment{destination: receiver2Vault, quarks: common.ToCoreMintQuarks(1_001)},
 	)
 	before := env.snapshot(t, sender)
 	env.submitIntent(t, req).requireDenied(t, ErrTransactionLimitExceeded.Error())
