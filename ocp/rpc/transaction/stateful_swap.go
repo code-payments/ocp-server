@@ -77,11 +77,7 @@ func (s *transactionServer) StatefulSwap(streamer transactionpb.Transaction_Stat
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	// v1 transactions aren't supported yet
 	log = log.With(zap.Uint32("transaction_version", initiateReq.TransactionVersion))
-	if initiateReq.TransactionVersion != 0 {
-		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("transaction version %d is not supported", initiateReq.TransactionVersion))
-	}
 
 	// todo: Refactor needed for duplication of code, but this isolates fundamentally different swap flows
 	switch initiateReq.GetKind().(type) {
@@ -106,6 +102,11 @@ func (s *transactionServer) handleReserveStatefulSwap(
 	initiateReserveSwapReq := initiateReq.GetReserve()
 	if initiateReserveSwapReq == nil {
 		return handleStatefulSwapError(streamer, status.Error(codes.InvalidArgument, "StatefulSwapRequest.Initiate.Reserve is nil"))
+	}
+
+	// v1 transactions aren't supported for reserve swaps yet
+	if initiateReq.TransactionVersion != 0 {
+		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("transaction version %d is not supported", initiateReq.TransactionVersion))
 	}
 
 	swapId := base58.Encode(initiateReserveSwapReq.Id.Value)
@@ -1012,6 +1013,9 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 	coinbaseSwapVersion := selectCoinbaseSwapVersion(initiateStablecoinSwapReq.SwapVersion)
 	log = log.With(zap.String("coinbase_swap_version", coinbaseSwapVersion.String()))
 
+	transactionVersion := selectSwapTransactionVersion(initiateReq.TransactionVersion)
+	log = log.With(zap.String("selected_transaction_version", transactionVersion.String()))
+
 	swapHandler := NewCoinbaseStableSwapperSwapHandler(
 		s.data,
 		owner,
@@ -1022,26 +1026,15 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		initiateStablecoinSwapReq.SwapAmount,
 		initiateStablecoinSwapReq.FeeAmount,
 		selectedNonce,
+		transactionVersion,
 		coinbaseSwapVersion,
 	)
 
-	alts, err := swapHandler.GetAlts(ctx)
+	txn, err := makeStatefulSwapTransaction(ctx, swapHandler)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting alt")
+		log.With(zap.Error(err)).Warn("failure making transaction")
 		return handleStatefulSwapError(streamer, err)
 	}
-
-	ixns, err := swapHandler.MakeInstructions(ctx)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure making instructions")
-		return handleStatefulSwapError(streamer, err)
-	}
-
-	txn := solana.NewV0Transaction(
-		common.GetSubsidizer().PublicKey().ToBytes(),
-		alts,
-		ixns,
-	)
 
 	txn.SetBlockhash(selectedNonce.Blockhash)
 

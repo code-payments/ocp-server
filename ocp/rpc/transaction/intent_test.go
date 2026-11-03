@@ -227,14 +227,16 @@ type testDataProvider struct {
 
 	mu                       sync.Mutex
 	blockchainAccounts       map[string]struct{}
+	blockchainAccountData    map[string][]byte
 	applyBalanceDeltasErr    error
 	applyBalanceDeltasCalled int
 }
 
 func newTestDataProvider() *testDataProvider {
 	return &testDataProvider{
-		Provider:           ocp_data.NewTestDataProvider(),
-		blockchainAccounts: make(map[string]struct{}),
+		Provider:              ocp_data.NewTestDataProvider(),
+		blockchainAccounts:    make(map[string]struct{}),
+		blockchainAccountData: make(map[string][]byte),
 	}
 }
 
@@ -242,6 +244,9 @@ func (p *testDataProvider) GetBlockchainAccountInfo(ctx context.Context, account
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if data, ok := p.blockchainAccountData[account]; ok {
+		return &solana.AccountInfo{Data: data}, 1, nil
+	}
 	if _, ok := p.blockchainAccounts[account]; ok {
 		return &solana.AccountInfo{}, 1, nil
 	}
@@ -264,6 +269,12 @@ func (p *testDataProvider) setBlockchainAccountExists(account *common.Account) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.blockchainAccounts[account.PublicKey().ToBase58()] = struct{}{}
+}
+
+func (p *testDataProvider) setBlockchainAccountData(account []byte, data []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.blockchainAccountData[base58.Encode(account)] = data
 }
 
 func (p *testDataProvider) setApplyBalanceDeltasErr(err error) {

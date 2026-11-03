@@ -35,6 +35,36 @@ type SwapHandler interface {
 	MakeInstructions(ctx context.Context) ([]solana.Instruction, error)
 }
 
+// V1SwapHandler is a SwapHandler that can also build v1 transactions
+type V1SwapHandler interface {
+	SwapHandler
+
+	// GetTransactionConfig returns the v1 transaction config, or nil when the
+	// handler builds a v0 transaction. It's only valid after MakeInstructions.
+	GetTransactionConfig() *solana.TransactionConfig
+}
+
+// makeStatefulSwapTransaction builds the unsigned swap transaction in the
+// handler's transaction version. The caller sets the blockhash.
+func makeStatefulSwapTransaction(ctx context.Context, h V1SwapHandler) (solana.Transaction, error) {
+	ixns, err := h.MakeInstructions(ctx)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+
+	payer := common.GetSubsidizer().PublicKey().ToBytes()
+
+	if config := h.GetTransactionConfig(); config != nil {
+		return solana.NewV1Transaction(payer, *config, ixns...)
+	}
+
+	alts, err := h.GetAlts(ctx)
+	if err != nil {
+		return solana.Transaction{}, err
+	}
+	return solana.NewV0Transaction(payer, alts, ixns), nil
+}
+
 type ReserveBuySwapHandler struct {
 	data ocp_data.Provider
 
@@ -1204,6 +1234,15 @@ func selectCoinbaseSwapVersion(requested uint32) transaction_util.CoinbaseSwapVe
 	return transaction_util.CoinbaseSwapV1
 }
 
+const (
+	// Measured on mainnet at 62k CU with an existing destination ATA. Creating
+	// the destination ATA adds about 9k, and the swap authority ATA, destination
+	// ATA and VM swap PDA derivations each cost 1,500 CU per bump below 255, for
+	// a worst case of roughly 85k.
+	coinbaseStatefulSwapComputeUnitLimit = 125_000
+	coinbaseStatefulSwapComputeUnitPrice = 10_000
+)
+
 type CoinbaseStableSwapperSwapHandler struct {
 	data ocp_data.Provider
 
@@ -1215,11 +1254,12 @@ type CoinbaseStableSwapperSwapHandler struct {
 	swapAmount       uint64
 	feeAmount        uint64
 
-	alts             []solana.AddressLookupTable
-	selectedNonce    *transaction_util.Nonce
-	computeUnitLimit uint32
-	computeUnitPrice uint64
-	memoValue        string
+	alts               []solana.AddressLookupTable
+	selectedNonce      *transaction_util.Nonce
+	transactionVersion solana.MessageVersion
+	computeUnitLimit   uint32
+	computeUnitPrice   uint64
+	memoValue          string
 
 	feeDestination      *common.Account
 	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion
@@ -1236,8 +1276,14 @@ func NewCoinbaseStableSwapperSwapHandler(
 	swapAmount uint64,
 	feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
+	transactionVersion solana.MessageVersion,
 	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion,
-) SwapHandler {
+) *CoinbaseStableSwapperSwapHandler {
+	memoValue := "coinbase_stable_swapper_v0"
+	if transactionVersion == solana.MessageVersion1 {
+		memoValue = "coinbase_stable_swapper_v1"
+	}
+
 	return &CoinbaseStableSwapperSwapHandler{
 		data: data,
 
@@ -1249,10 +1295,11 @@ func NewCoinbaseStableSwapperSwapHandler(
 		swapAmount:       swapAmount,
 		feeAmount:        feeAmount,
 
-		selectedNonce:    selectedNonce,
-		computeUnitLimit: 200_000,
-		computeUnitPrice: 10_000,
-		memoValue:        "coinbase_stable_swapper_v0",
+		selectedNonce:      selectedNonce,
+		transactionVersion: transactionVersion,
+		computeUnitLimit:   coinbaseStatefulSwapComputeUnitLimit,
+		computeUnitPrice:   coinbaseStatefulSwapComputeUnitPrice,
+		memoValue:          memoValue,
 
 		feeDestination:      common.CoreMintFeesAccount,
 		coinbaseSwapVersion: coinbaseSwapVersion,
@@ -1260,25 +1307,50 @@ func NewCoinbaseStableSwapperSwapHandler(
 }
 
 func (h *CoinbaseStableSwapperSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	if h.transactionVersion == solana.MessageVersion1 {
+		return nil, nil
+	}
+
 	h.alts = []solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}
 	return h.alts, nil
 }
 
+func (h *CoinbaseStableSwapperSwapHandler) GetTransactionConfig() *solana.TransactionConfig {
+	if h.transactionVersion != solana.MessageVersion1 {
+		return nil
+	}
+
+	config := transaction_util.NewV1TransactionConfig(
+		h.computeUnitLimit,
+		h.computeUnitPrice,
+		transaction_util.CoinbaseSwapLoadedAccountsDataSizeLimit,
+	)
+	return &config
+}
+
 func (h *CoinbaseStableSwapperSwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
 	feeRecipient, _ := common.NewAccountFromPublicKeyBytes(h.coinbaseAccounts.FeeRecipient)
+
+	serverParameters := &transactionpb.StatefulSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter{
+		Payer:            common.GetSubsidizer().ToProto(),
+		Nonce:            h.selectedNonce.Account.ToProto(),
+		Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
+		MemoValue:        h.memoValue,
+		FeeDestination:   h.feeDestination.ToProto(),
+		PoolFeeRecipient: feeRecipient.ToProto(),
+	}
+
+	if config := h.GetTransactionConfig(); config != nil {
+		serverParameters.TransactionConfig = transaction_util.ToProtoTransactionConfig(*config)
+	} else {
+		serverParameters.Alts = transaction_util.ToProtoAlts(h.alts)
+		serverParameters.ComputeUnitLimit = h.computeUnitLimit
+		serverParameters.ComputeUnitPrice = h.computeUnitPrice
+	}
+
 	return &transactionpb.StatefulSwapResponse_ServerParameters{
 		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_Stablecoin{
-			Stablecoin: &transactionpb.StatefulSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter{
-				Payer:            common.GetSubsidizer().ToProto(),
-				Nonce:            h.selectedNonce.Account.ToProto(),
-				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
-				Alts:             transaction_util.ToProtoAlts(h.alts),
-				ComputeUnitLimit: h.computeUnitLimit,
-				ComputeUnitPrice: h.computeUnitPrice,
-				MemoValue:        h.memoValue,
-				FeeDestination:   h.feeDestination.ToProto(),
-				PoolFeeRecipient: feeRecipient.ToProto(),
-			},
+			Stablecoin: serverParameters,
 		},
 	}
 }
@@ -1361,17 +1433,25 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 		h.swapAuthority.PublicKey().ToBytes(),
 	)
 
-	return []solana.Instruction{
+	ixns := []solana.Instruction{
 		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
-		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+	}
+	if h.transactionVersion != solana.MessageVersion1 {
+		ixns = append(
+			ixns,
+			compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
+			compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+		)
+	}
+	return append(
+		ixns,
 		memo.Instruction(h.memoValue),
 		createSwapAuthorityFromMintAtaIxn,
 		createDestinationOwnerToMintAtaIxn,
 		transferForSwapWithFeeIxn,
 		coinbaseSwapIxn,
 		closeSwapAuthorityFromMintAtaIxn,
-	}, nil
+	), nil
 }
 
 // selectSwapTransactionVersion picks the Solana transaction version for a swap
