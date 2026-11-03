@@ -16,6 +16,13 @@ const (
 	// The worst case loads about 1.23 MiB, dominated by program data.
 	CoinbaseSwapLoadedAccountsDataSizeLimit = 4 * 1024 * 1024 // 4 MiB
 
+	// ReserveSwapLoadedAccountsDataSizeLimit is the loaded accounts data size
+	// limit for v1 reserve swap transactions on existing currencies. Program
+	// data loads about 7.4 MiB, dominated by the 7.0 MB currency creator. A VM
+	// memory account adds up to 4.9 MiB at the 65,535 timelock accounts the
+	// server can index, for a worst case of about 12.2 MiB.
+	ReserveSwapLoadedAccountsDataSizeLimit = 16 * 1024 * 1024 // 16 MiB
+
 	microLamportsPerLamport = 1_000_000
 )
 

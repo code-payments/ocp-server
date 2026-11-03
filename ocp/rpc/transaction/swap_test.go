@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,6 +15,8 @@ import (
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
 
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/vm/ram"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana"
@@ -32,7 +36,7 @@ func usdcMint(t *testing.T) *commonpb.SolanaAccountId {
 	return mint.ToProto()
 }
 
-func TestStatefulSwap_TransactionVersionV1(t *testing.T) {
+func TestStatefulSwap_Coinbase_TransactionVersionV1(t *testing.T) {
 	env := setupTestEnv(t, withSwapsEnabled())
 	owner := env.newUser(t)
 	swapAuthority := env.newAccount(t)
@@ -42,26 +46,6 @@ func TestStatefulSwap_TransactionVersionV1(t *testing.T) {
 		initiate *transactionpb.StatefulSwapRequest_Initiate
 		assert   func(t *testing.T, respErr *transactionpb.StatefulSwapResponse_Error)
 	}{
-		{
-			name: "reserve swaps deny v1",
-			initiate: &transactionpb.StatefulSwapRequest_Initiate{
-				Kind: &transactionpb.StatefulSwapRequest_Initiate_Reserve{
-					Reserve: &transactionpb.StatefulSwapRequest_Initiate_ReserveSwapClientParameters{
-						Id:            &commonpb.SwapId{Value: testutil.NewRandomAccount(t).PublicKey().ToBytes()},
-						FromMint:      common.CoreMintAccount.ToProto(),
-						ToMint:        env.newLaunchpadMint(t).ToProto(),
-						SwapAmount:    common.CoreMintQuarksPerUnit,
-						FundingSource: transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT,
-						FundingId:     testutil.NewRandomAccount(t).PublicKey().ToBase58(),
-					},
-				},
-			},
-			assert: func(t *testing.T, respErr *transactionpb.StatefulSwapResponse_Error) {
-				require.Equal(t, transactionpb.StatefulSwapResponse_Error_DENIED, respErr.Code)
-				require.Len(t, respErr.ErrorDetails, 1)
-				require.Equal(t, "transaction version 1 is not supported", respErr.ErrorDetails[0].GetDenied().Reason)
-			},
-		},
 		{
 			// A v1 request passes the version check and reaches verification
 			// of the proof signature, which signs the wrong message here
@@ -366,4 +350,285 @@ func requireCoinbaseStatefulClientRebuildMatches(
 	actual, err := clientTxn.Message.Marshal()
 	require.NoError(t, err)
 	require.Equal(t, expected, actual)
+}
+
+// reserveTimelockMemory reserves VM memory for the owner's virtual timelock
+// account on the mint, which reserve swaps deposit into
+func (e *testEnv) reserveTimelockMemory(t *testing.T, owner, mint *common.Account) {
+	vmConfig, err := common.GetVmConfigForMint(e.ctx, e.data, mint)
+	require.NoError(t, err)
+
+	vmAddress := vmConfig.Vm.PublicKey().ToBase58()
+	err = e.data.InitializeVmMemory(e.ctx, &ram.Record{
+		Vm:                vmAddress,
+		Address:           testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+		Capacity:          1000,
+		NumSectors:        1,
+		NumPages:          1000,
+		PageSize:          uint8(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock)),
+		StoredAccountType: vm.VirtualAccountTypeTimelock,
+		CreatedAt:         time.Now(),
+	})
+	require.NoError(t, err)
+
+	_, _, err = e.data.ReserveVmMemory(e.ctx, vmAddress, vm.VirtualAccountTypeTimelock, e.getVault(t, owner, mint).PublicKey().ToBase58())
+	require.NoError(t, err)
+}
+
+// initiateReserveSwap sends a signed reserve StatefulSwap Initiate request and
+// returns the first response
+func (e *testEnv) initiateReserveSwap(
+	t *testing.T,
+	owner, swapAuthority *common.Account,
+	clientParameters *transactionpb.StatefulSwapRequest_Initiate_ReserveSwapClientParameters,
+	transactionVersion uint32,
+) *transactionpb.StatefulSwapResponse {
+	ctx, cancel := context.WithTimeout(e.ctx, defaultTestStreamTimeout)
+	defer cancel()
+
+	stream, err := e.client.StatefulSwap(ctx)
+	require.NoError(t, err)
+
+	initiate := &transactionpb.StatefulSwapRequest_Initiate{
+		Kind: &transactionpb.StatefulSwapRequest_Initiate_Reserve{
+			Reserve: clientParameters,
+		},
+		Owner:         owner.ToProto(),
+		SwapAuthority: swapAuthority.ToProto(),
+		ProofSignature: e.signProto(t, owner, &transactionpb.VerifiedSwapMetadata{
+			Kind: &transactionpb.VerifiedSwapMetadata_Reserve{
+				Reserve: &transactionpb.VerifiedReserveSwapMetadata{
+					ClientParameters: clientParameters,
+				},
+			},
+		}),
+		TransactionVersion: transactionVersion,
+	}
+	initiate.Signature = e.signProto(t, owner, initiate)
+
+	require.NoError(t, stream.Send(&transactionpb.StatefulSwapRequest{
+		Request: &transactionpb.StatefulSwapRequest_Initiate_{Initiate: initiate},
+	}))
+
+	resp, err := stream.Recv()
+	require.NoError(t, err)
+	return resp
+}
+
+func TestStatefulSwap_ReserveExistingCurrency_TransactionVersions(t *testing.T) {
+	env := setupTestEnv(t, withSwapsEnabled())
+
+	mint := env.newLaunchpadMint(t)
+	owner := env.newFundedUser(t, common.ToCoreMintQuarks(100), mint)
+	env.reserveTimelockMemory(t, owner, mint)
+
+	for _, transactionVersion := range []uint32{0, 1} {
+		t.Run(fmt.Sprintf("v%d", transactionVersion), func(t *testing.T) {
+			resp := env.initiateReserveSwap(t, owner, env.newAccount(t), &transactionpb.StatefulSwapRequest_Initiate_ReserveSwapClientParameters{
+				Id:            &commonpb.SwapId{Value: testutil.NewRandomAccount(t).PublicKey().ToBytes()},
+				FromMint:      common.CoreMintAccount.ToProto(),
+				ToMint:        mint.ToProto(),
+				SwapAmount:    common.CoreMintQuarksPerUnit,
+				FundingSource: transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT,
+				FundingId:     testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+			}, transactionVersion)
+			require.Nil(t, resp.GetError())
+
+			serverParameters := resp.GetServerParameters().GetReserveExistingCurrency()
+			require.NotNil(t, serverParameters)
+			if transactionVersion == 1 {
+				require.NotNil(t, serverParameters.TransactionConfig)
+				assert.NotZero(t, serverParameters.TransactionConfig.ComputeUnitLimit)
+				assert.Empty(t, serverParameters.Alts)
+				assert.Equal(t, "buy_v1", serverParameters.MemoValue)
+			} else {
+				assert.Nil(t, serverParameters.TransactionConfig)
+				assert.NotEmpty(t, serverParameters.Alts)
+				assert.Equal(t, "buy_v0", serverParameters.MemoValue)
+			}
+		})
+	}
+}
+
+func TestStatefulSwap_ReserveNewCurrency_TransactionVersionV1Denied(t *testing.T) {
+	env := setupTestEnv(t, withSwapsEnabled())
+
+	owner := env.newFundedUser(t, common.ToCoreMintQuarks(100))
+
+	mint := env.newLaunchpadMint(t)
+	metadataRecord, err := env.data.GetCurrencyMetadata(env.ctx, mint.PublicKey().ToBase58())
+	require.NoError(t, err)
+	metadataRecord.State = currency.MetadataStateWaitingForInitialPurchase
+	metadataRecord.CreatedBy = owner.PublicKey().ToBase58()
+	require.NoError(t, env.data.SaveCurrencyMetadata(env.ctx, metadataRecord))
+
+	resp := env.initiateReserveSwap(t, owner, owner, &transactionpb.StatefulSwapRequest_Initiate_ReserveSwapClientParameters{
+		Id:            &commonpb.SwapId{Value: testutil.NewRandomAccount(t).PublicKey().ToBytes()},
+		FromMint:      common.CoreMintAccount.ToProto(),
+		ToMint:        mint.ToProto(),
+		SwapAmount:    defaultNewCurrencyPurchaseQuarks,
+		FeeAmount:     defaultNewCurrencyFeeQuarks,
+		FundingSource: transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT,
+		FundingId:     testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+	}, 1)
+
+	require.NotNil(t, resp.GetError())
+	require.Equal(t, transactionpb.StatefulSwapResponse_Error_DENIED, resp.GetError().Code)
+	require.Len(t, resp.GetError().ErrorDetails, 1)
+	require.Equal(t, "transaction version 1 is not supported for currency creation", resp.GetError().ErrorDetails[0].GetDenied().Reason)
+}
+
+func TestReserveSwapHandlers_TransactionVersions(t *testing.T) {
+	env := setupTestEnv(t)
+
+	launchpadMint1 := env.newLaunchpadMint(t)
+	launchpadMint2 := env.newLaunchpadMint(t)
+	swapper := env.newFundedUser(t, common.ToCoreMintQuarks(100), launchpadMint1, launchpadMint2)
+	for _, mint := range []*common.Account{common.CoreMintAccount, launchpadMint1, launchpadMint2} {
+		env.reserveTimelockMemory(t, swapper, mint)
+	}
+
+	launchpadAlt1, err := transaction_util.GetAltForMint(env.ctx, env.data, launchpadMint1)
+	require.NoError(t, err)
+	launchpadAlt2, err := transaction_util.GetAltForMint(env.ctx, env.data, launchpadMint2)
+	require.NoError(t, err)
+
+	var blockhash solana.Blockhash
+	copy(blockhash[:], testutil.NewRandomAccount(t).PublicKey().ToBytes())
+	selectedNonce := &transaction_util.Nonce{
+		Account:   testutil.NewRandomAccount(t),
+		Blockhash: blockhash,
+	}
+
+	const swapAmount = 1_000_000
+
+	for _, tc := range []struct {
+		flow           string
+		newHandler     func(temporaryHolder *common.Account, transactionVersion solana.MessageVersion) SwapHandler
+		expectedV0Alts []solana.AddressLookupTable
+		feeDestination *common.Account
+	}{
+		{
+			flow: "buy",
+			newHandler: func(temporaryHolder *common.Account, transactionVersion solana.MessageVersion) SwapHandler {
+				return NewReserveBuySwapHandler(env.data, swapper, temporaryHolder, launchpadMint1, swapAmount, 0, selectedNonce, transactionVersion)
+			},
+			expectedV0Alts: []solana.AddressLookupTable{launchpadAlt1},
+		},
+		{
+			flow: "buy",
+			newHandler: func(temporaryHolder *common.Account, transactionVersion solana.MessageVersion) SwapHandler {
+				return NewReserveBuySwapHandler(env.data, swapper, temporaryHolder, launchpadMint1, swapAmount, 10_000, selectedNonce, transactionVersion)
+			},
+			expectedV0Alts: []solana.AddressLookupTable{launchpadAlt1, transaction_util.GetAltForCoreMint()},
+			feeDestination: common.CoreMintFeesAccount,
+		},
+		{
+			flow: "sell",
+			newHandler: func(temporaryHolder *common.Account, transactionVersion solana.MessageVersion) SwapHandler {
+				return NewReserveSellSwapHandler(env.data, swapper, temporaryHolder, launchpadMint1, swapAmount, selectedNonce, transactionVersion)
+			},
+			expectedV0Alts: []solana.AddressLookupTable{launchpadAlt1},
+		},
+		{
+			flow: "buy_sell",
+			newHandler: func(temporaryHolder *common.Account, transactionVersion solana.MessageVersion) SwapHandler {
+				return NewReserveBuySellSwapHandler(env.data, swapper, temporaryHolder, launchpadMint1, launchpadMint2, swapAmount, selectedNonce, transactionVersion)
+			},
+			expectedV0Alts: []solana.AddressLookupTable{launchpadAlt1, launchpadAlt2},
+		},
+	} {
+		name := tc.flow
+		if tc.feeDestination != nil {
+			name += " with fee"
+		}
+		t.Run(name, func(t *testing.T) {
+			temporaryHolder := testutil.NewRandomAccount(t)
+
+			//
+			// v0 is the existing format clients already build
+			//
+
+			v0Handler := tc.newHandler(temporaryHolder, solana.MessageVersion0)
+			v0Ixns, err := v0Handler.MakeInstructions(env.ctx)
+			require.NoError(t, err)
+			v0Txn, err := makeStatefulSwapTransaction(env.ctx, v0Handler)
+			require.NoError(t, err)
+			assert.Equal(t, solana.MessageVersion0, v0Txn.Message.Version)
+			assert.Nil(t, v0Handler.GetTransactionConfig())
+
+			v0Parameters := v0Handler.GetServerParameters().GetReserveExistingCurrency()
+			require.NotNil(t, v0Parameters)
+			assert.Equal(t, tc.flow+"_v0", v0Parameters.MemoValue)
+			assert.Equal(t, transaction_util.ToProtoAlts(tc.expectedV0Alts), v0Parameters.Alts)
+			assert.NotZero(t, v0Parameters.ComputeUnitLimit)
+			assert.EqualValues(t, 10_000, v0Parameters.ComputeUnitPrice)
+			assert.Nil(t, v0Parameters.TransactionConfig)
+
+			//
+			// v1
+			//
+
+			v1Handler := tc.newHandler(temporaryHolder, solana.MessageVersion1)
+			v1Ixns, err := v1Handler.MakeInstructions(env.ctx)
+			require.NoError(t, err)
+			v1Txn, err := makeStatefulSwapTransaction(env.ctx, v1Handler)
+			require.NoError(t, err)
+			v1Txn.SetBlockhash(selectedNonce.Blockhash)
+			assert.Equal(t, solana.MessageVersion1, v1Txn.Message.Version)
+
+			alts, err := v1Handler.GetAlts(env.ctx)
+			require.NoError(t, err)
+			assert.Nil(t, alts)
+
+			v1Parameters := v1Handler.GetServerParameters().GetReserveExistingCurrency()
+			require.NotNil(t, v1Parameters)
+			assert.Equal(t, common.GetSubsidizer().PublicKey().ToBytes(), v1Parameters.Payer.Value)
+			assert.Equal(t, selectedNonce.Account.PublicKey().ToBytes(), v1Parameters.Nonce.Value)
+			assert.Equal(t, blockhash[:], v1Parameters.Blockhash.Value)
+			assert.Equal(t, tc.flow+"_v1", v1Parameters.MemoValue)
+			assert.Equal(t, v0Parameters.MemoryAccount, v1Parameters.MemoryAccount)
+			assert.Equal(t, v0Parameters.MemoryIndex, v1Parameters.MemoryIndex)
+			assert.Equal(t, v0Parameters.FeeDestination, v1Parameters.FeeDestination)
+			if tc.feeDestination != nil {
+				assert.Equal(t, tc.feeDestination.PublicKey().ToBytes(), v1Parameters.FeeDestination.Value)
+			}
+			assert.Empty(t, v1Parameters.Alts)
+			assert.Zero(t, v1Parameters.ComputeUnitLimit)
+			assert.Zero(t, v1Parameters.ComputeUnitPrice)
+
+			// The v1 config carries the same compute budget the v0 transaction
+			// sets with ComputeBudget instructions
+			require.NotNil(t, v1Parameters.TransactionConfig)
+			assert.Equal(t, v0Parameters.ComputeUnitLimit, v1Parameters.TransactionConfig.ComputeUnitLimit)
+			assert.EqualValues(t, transaction_util.ReserveSwapLoadedAccountsDataSizeLimit, v1Parameters.TransactionConfig.LoadedAccountsDataSizeLimit)
+			assert.Equal(t, transaction_util.PriorityFeeLamports(v0Parameters.ComputeUnitLimit, 10_000), v1Parameters.TransactionConfig.PriorityFeeLamports)
+			assert.Zero(t, v1Parameters.TransactionConfig.HeapSize)
+
+			// Per the proto, the v1 instructions are the v0 instructions without
+			// ComputeBudget, with the v1 memo
+			var expectedV1Ixns []solana.Instruction
+			for _, ixn := range v0Ixns {
+				switch {
+				case bytes.Equal(ixn.Program, compute_budget.ProgramKey):
+					continue
+				case bytes.Equal(ixn.Program, memo.ProgramKey):
+					expectedV1Ixns = append(expectedV1Ixns, memo.Instruction(tc.flow+"_v1"))
+				default:
+					expectedV1Ixns = append(expectedV1Ixns, ixn)
+				}
+			}
+			assert.Equal(t, expectedV1Ixns, v1Ixns)
+			assert.Len(t, v1Ixns, len(v0Ixns)-2)
+
+			assert.Empty(t, v1Txn.Message.AddressTableLookups)
+			for _, account := range v1Txn.Message.Accounts {
+				assert.NotEqual(t, compute_budget.ProgramKey, account)
+			}
+			assert.LessOrEqual(t, len(v1Txn.Message.Accounts), 64)
+			marshalled, err := v1Txn.Marshal()
+			require.NoError(t, err)
+			assert.LessOrEqual(t, len(marshalled), solana.MaxV1TransactionSize)
+		})
+	}
 }

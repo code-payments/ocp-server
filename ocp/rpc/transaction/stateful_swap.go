@@ -104,11 +104,6 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		return handleStatefulSwapError(streamer, status.Error(codes.InvalidArgument, "StatefulSwapRequest.Initiate.Reserve is nil"))
 	}
 
-	// v1 transactions aren't supported for reserve swaps yet
-	if initiateReq.TransactionVersion != 0 {
-		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("transaction version %d is not supported", initiateReq.TransactionVersion))
-	}
-
 	swapId := base58.Encode(initiateReserveSwapReq.Id.Value)
 	log = log.With(zap.String("swap_id", swapId))
 
@@ -311,6 +306,13 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("mint is being initialized"))
 		}
 	}
+
+	// v1 transactions aren't supported for currency creation yet
+	transactionVersion := selectSwapTransactionVersion(initiateReq.TransactionVersion)
+	if initializesMint && transactionVersion != solana.MessageVersion0 {
+		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("transaction version %d is not supported for currency creation", initiateReq.TransactionVersion))
+	}
+	log = log.With(zap.String("selected_transaction_version", transactionVersion.String()))
 
 	if isSell {
 		sourceCurrencyMetadataRecord, err := s.data.GetCurrencyMetadata(ctx, fromMint.PublicKey().ToBase58())
@@ -554,6 +556,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			toMint,
 			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
+			transactionVersion,
 		)
 	} else if isBuy {
 		swapHandler = NewReserveBuySwapHandler(
@@ -564,6 +567,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			initiateReserveSwapReq.SwapAmount,
 			initiateReserveSwapReq.FeeAmount,
 			selectedNonce,
+			transactionVersion,
 		)
 	} else {
 		swapHandler = NewReserveSellSwapHandler(
@@ -573,6 +577,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			fromMint,
 			initiateReserveSwapReq.SwapAmount,
 			selectedNonce,
+			transactionVersion,
 		)
 	}
 	if err != nil {
@@ -580,23 +585,11 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		return handleStatefulSwapError(streamer, err)
 	}
 
-	alts, err := swapHandler.GetAlts(ctx)
+	txn, err := makeStatefulSwapTransaction(ctx, swapHandler)
 	if err != nil {
-		log.With(zap.Error(err)).Warn("failure getting alt")
+		log.With(zap.Error(err)).Warn("failure making transaction")
 		return handleStatefulSwapError(streamer, err)
 	}
-
-	ixns, err := swapHandler.MakeInstructions(ctx)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure making instructions")
-		return handleStatefulSwapError(streamer, err)
-	}
-
-	txn := solana.NewV0Transaction(
-		common.GetSubsidizer().PublicKey().ToBytes(),
-		alts,
-		ixns,
-	)
 
 	txn.SetBlockhash(selectedNonce.Blockhash)
 

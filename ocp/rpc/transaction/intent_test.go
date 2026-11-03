@@ -143,6 +143,8 @@ func setupTestEnv(t *testing.T, overrides ...func(*testOverrides)) *testEnv {
 	noncePools := []*transaction.LocalNoncePool{noncePool}
 
 	if !configOverrides.disableSwaps {
+		env.saveSwapNonces(t, testNoncesPerVm)
+
 		swapNoncePool, err := transaction.NewLocalNoncePool(
 			log,
 			env.data,
@@ -438,6 +440,25 @@ func (e *testEnv) saveNonces(t *testing.T, vmAccount *common.Account, count int)
 			Environment:         nonce.EnvironmentVm,
 			EnvironmentInstance: vmAccount.PublicKey().ToBase58(),
 			Purpose:             nonce.PurposeClientIntent,
+			State:               nonce.StateAvailable,
+		}))
+	}
+}
+
+// saveSwapNonces saves available Solana nonces for the swap nonce pool
+func (e *testEnv) saveSwapNonces(t *testing.T, count int) {
+	for range count {
+		var bh solana.Blockhash
+		_, err := rand.Read(bh[:])
+		require.NoError(t, err)
+
+		require.NoError(t, e.data.SaveNonce(e.ctx, &nonce.Record{
+			Address:             testutil.NewRandomAccount(t).PublicKey().ToBase58(),
+			Authority:           common.GetSubsidizer().PublicKey().ToBase58(),
+			Blockhash:           base58.Encode(bh[:]),
+			Environment:         nonce.EnvironmentSolana,
+			EnvironmentInstance: nonce.EnvironmentInstanceSolanaMainnet,
+			Purpose:             nonce.PurposeClientSwap,
 			State:               nonce.StateAvailable,
 		}))
 	}

@@ -25,8 +25,13 @@ import (
 // todo: Move transaction-related stuff to the transaction utility package
 
 type SwapHandler interface {
-	// GetAlts returns the set of ALTs that should be used for versioned transaction construction
+	// GetAlts returns the set of ALTs that should be used for v0 transaction
+	// construction. It returns nil for v1 transactions.
 	GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error)
+
+	// GetTransactionConfig returns the v1 transaction config, or nil when the
+	// handler builds a v0 transaction. It's only valid after MakeInstructions.
+	GetTransactionConfig() *solana.TransactionConfig
 
 	// GetServerParameter gets the server parameters to return to client for the swap
 	GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters
@@ -35,18 +40,9 @@ type SwapHandler interface {
 	MakeInstructions(ctx context.Context) ([]solana.Instruction, error)
 }
 
-// V1SwapHandler is a SwapHandler that can also build v1 transactions
-type V1SwapHandler interface {
-	SwapHandler
-
-	// GetTransactionConfig returns the v1 transaction config, or nil when the
-	// handler builds a v0 transaction. It's only valid after MakeInstructions.
-	GetTransactionConfig() *solana.TransactionConfig
-}
-
 // makeStatefulSwapTransaction builds the unsigned swap transaction in the
 // handler's transaction version. The caller sets the blockhash.
-func makeStatefulSwapTransaction(ctx context.Context, h V1SwapHandler) (solana.Transaction, error) {
+func makeStatefulSwapTransaction(ctx context.Context, h SwapHandler) (solana.Transaction, error) {
 	ixns, err := h.MakeInstructions(ctx)
 	if err != nil {
 		return solana.Transaction{}, err
@@ -65,6 +61,85 @@ func makeStatefulSwapTransaction(ctx context.Context, h V1SwapHandler) (solana.T
 	return solana.NewV0Transaction(payer, alts, ixns), nil
 }
 
+// swapMemoValue returns the memo for a swap flow, suffixed with the
+// transaction version
+func swapMemoValue(flow string, transactionVersion solana.MessageVersion) string {
+	if transactionVersion == solana.MessageVersion1 {
+		return flow + "_v1"
+	}
+	return flow + "_v0"
+}
+
+// swapComputeBudgetInstructions returns the ComputeBudget instructions for a
+// v0 swap transaction. v1 transactions carry the compute unit limit and
+// priority fee in the transaction config instead.
+func swapComputeBudgetInstructions(transactionVersion solana.MessageVersion, computeUnitLimit uint32, computeUnitPrice uint64) []solana.Instruction {
+	if transactionVersion == solana.MessageVersion1 {
+		return nil
+	}
+	return []solana.Instruction{
+		compute_budget.SetComputeUnitLimit(computeUnitLimit),
+		compute_budget.SetComputeUnitPrice(computeUnitPrice),
+	}
+}
+
+// reserveSwapTransactionConfig returns the v1 transaction config for a reserve
+// swap on an existing currency, or nil for v0
+func reserveSwapTransactionConfig(transactionVersion solana.MessageVersion, computeUnitLimit uint32, computeUnitPrice uint64) *solana.TransactionConfig {
+	if transactionVersion != solana.MessageVersion1 {
+		return nil
+	}
+
+	config := transaction_util.NewV1TransactionConfig(
+		computeUnitLimit,
+		computeUnitPrice,
+		transaction_util.ReserveSwapLoadedAccountsDataSizeLimit,
+	)
+	return &config
+}
+
+// newReserveExistingCurrencyServerParameters builds the server parameters for
+// a reserve swap on an existing currency. v1 sets the transaction config, and
+// v0 sets the ALTs and compute budget.
+func newReserveExistingCurrencyServerParameters(
+	selectedNonce *transaction_util.Nonce,
+	config *solana.TransactionConfig,
+	alts []solana.AddressLookupTable,
+	computeUnitLimit uint32,
+	computeUnitPrice uint64,
+	memoValue string,
+	memoryAccount *common.Account,
+	memoryIndex uint16,
+	feeDestination *common.Account,
+) *transactionpb.StatefulSwapResponse_ServerParameters {
+	serverParameters := &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
+		Payer:         common.GetSubsidizer().ToProto(),
+		Nonce:         selectedNonce.Account.ToProto(),
+		Blockhash:     &commonpb.Blockhash{Value: selectedNonce.Blockhash[:]},
+		MemoValue:     memoValue,
+		MemoryAccount: memoryAccount.ToProto(),
+		MemoryIndex:   uint32(memoryIndex),
+	}
+
+	if config != nil {
+		serverParameters.TransactionConfig = transaction_util.ToProtoTransactionConfig(*config)
+	} else {
+		serverParameters.Alts = transaction_util.ToProtoAlts(alts)
+		serverParameters.ComputeUnitLimit = computeUnitLimit
+		serverParameters.ComputeUnitPrice = computeUnitPrice
+	}
+
+	if feeDestination != nil {
+		serverParameters.FeeDestination = feeDestination.ToProto()
+	}
+
+	return &transactionpb.StatefulSwapResponse_ServerParameters{
+		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
+			ReserveExistingCurrency: serverParameters,
+		},
+	}
+}
+
 type ReserveBuySwapHandler struct {
 	data ocp_data.Provider
 
@@ -74,11 +149,12 @@ type ReserveBuySwapHandler struct {
 	swapAmount      uint64
 	feeAmount       uint64
 
-	alts             []solana.AddressLookupTable
-	selectedNonce    *transaction_util.Nonce
-	computeUnitLimit uint32
-	computeUnitPrice uint64
-	memoValue        string
+	alts               []solana.AddressLookupTable
+	selectedNonce      *transaction_util.Nonce
+	transactionVersion solana.MessageVersion
+	computeUnitLimit   uint32
+	computeUnitPrice   uint64
+	memoValue          string
 
 	feeDestination *common.Account
 	memoryAccount  *common.Account
@@ -92,6 +168,7 @@ func NewReserveBuySwapHandler(
 	mint *common.Account,
 	swapAmount, feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
+	transactionVersion solana.MessageVersion,
 ) SwapHandler {
 	h := &ReserveBuySwapHandler{
 		data: data,
@@ -102,9 +179,10 @@ func NewReserveBuySwapHandler(
 		swapAmount:      swapAmount,
 		feeAmount:       feeAmount,
 
-		selectedNonce:    selectedNonce,
-		computeUnitPrice: 10_000,
-		memoValue:        "buy_v0",
+		selectedNonce:      selectedNonce,
+		transactionVersion: transactionVersion,
+		computeUnitPrice:   10_000,
+		memoValue:          swapMemoValue("buy", transactionVersion),
 	}
 
 	if feeAmount > 0 {
@@ -115,6 +193,10 @@ func NewReserveBuySwapHandler(
 }
 
 func (h *ReserveBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	if h.transactionVersion == solana.MessageVersion1 {
+		return nil, nil
+	}
+
 	alt, err := transaction_util.GetAltForMint(ctx, h.data, h.mint)
 	if err != nil {
 		return nil, err
@@ -130,28 +212,22 @@ func (h *ReserveBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLo
 	return h.alts, nil
 }
 
+func (h *ReserveBuySwapHandler) GetTransactionConfig() *solana.TransactionConfig {
+	return reserveSwapTransactionConfig(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)
+}
+
 func (h *ReserveBuySwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
-	serverParameters := &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
-		Payer:            common.GetSubsidizer().ToProto(),
-		Nonce:            h.selectedNonce.Account.ToProto(),
-		Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
-		Alts:             transaction_util.ToProtoAlts(h.alts),
-		ComputeUnitLimit: h.computeUnitLimit,
-		ComputeUnitPrice: h.computeUnitPrice,
-		MemoValue:        h.memoValue,
-		MemoryAccount:    h.memoryAccount.ToProto(),
-		MemoryIndex:      uint32(h.memoryIndex),
-	}
-
-	if h.feeDestination != nil {
-		serverParameters.FeeDestination = h.feeDestination.ToProto()
-	}
-
-	return &transactionpb.StatefulSwapResponse_ServerParameters{
-		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
-			ReserveExistingCurrency: serverParameters,
-		},
-	}
+	return newReserveExistingCurrencyServerParameters(
+		h.selectedNonce,
+		h.GetTransactionConfig(),
+		h.alts,
+		h.computeUnitLimit,
+		h.computeUnitPrice,
+		h.memoValue,
+		h.memoryAccount,
+		h.memoryIndex,
+		h.feeDestination,
+	)
 }
 
 func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
@@ -293,17 +369,19 @@ func (h *ReserveBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.
 		},
 	)
 
-	return []solana.Instruction{
+	ixns := []solana.Instruction{
 		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
-		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+	}
+	ixns = append(ixns, swapComputeBudgetInstructions(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)...)
+	return append(
+		ixns,
 		memo.Instruction(h.memoValue),
 		createTemporaryCoreMintAtaIxn,
 		transferFromSourceVmSwapAtaIxn,
 		buyAndDepositIntoDestinationVmIxn,
 		closeTemporaryCoreMintAtaIxn,
 		closeSourceVmSwapAccountIfEmptyIxn,
-	}, nil
+	), nil
 }
 
 type ReserveSellSwapHandler struct {
@@ -314,11 +392,12 @@ type ReserveSellSwapHandler struct {
 	mint            *common.Account
 	amount          uint64
 
-	alts             []solana.AddressLookupTable
-	selectedNonce    *transaction_util.Nonce
-	computeUnitLimit uint32
-	computeUnitPrice uint64
-	memoValue        string
+	alts               []solana.AddressLookupTable
+	selectedNonce      *transaction_util.Nonce
+	transactionVersion solana.MessageVersion
+	computeUnitLimit   uint32
+	computeUnitPrice   uint64
+	memoValue          string
 
 	memoryAccount *common.Account
 	memoryIndex   uint16
@@ -331,6 +410,7 @@ func NewReserveSellSwapHandler(
 	mint *common.Account,
 	amount uint64,
 	selectedNonce *transaction_util.Nonce,
+	transactionVersion solana.MessageVersion,
 ) SwapHandler {
 	return &ReserveSellSwapHandler{
 		data: data,
@@ -340,13 +420,18 @@ func NewReserveSellSwapHandler(
 		mint:            mint,
 		amount:          amount,
 
-		selectedNonce:    selectedNonce,
-		computeUnitPrice: 10_000,
-		memoValue:        "sell_v0",
+		selectedNonce:      selectedNonce,
+		transactionVersion: transactionVersion,
+		computeUnitPrice:   10_000,
+		memoValue:          swapMemoValue("sell", transactionVersion),
 	}
 }
 
 func (h *ReserveSellSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	if h.transactionVersion == solana.MessageVersion1 {
+		return nil, nil
+	}
+
 	alt, err := transaction_util.GetAltForMint(ctx, h.data, h.mint)
 	if err != nil {
 		return nil, err
@@ -355,22 +440,22 @@ func (h *ReserveSellSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressL
 	return h.alts, nil
 }
 
+func (h *ReserveSellSwapHandler) GetTransactionConfig() *solana.TransactionConfig {
+	return reserveSwapTransactionConfig(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)
+}
+
 func (h *ReserveSellSwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
-	return &transactionpb.StatefulSwapResponse_ServerParameters{
-		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
-			ReserveExistingCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
-				Payer:            common.GetSubsidizer().ToProto(),
-				Nonce:            h.selectedNonce.Account.ToProto(),
-				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
-				Alts:             transaction_util.ToProtoAlts(h.alts),
-				ComputeUnitLimit: h.computeUnitLimit,
-				ComputeUnitPrice: h.computeUnitPrice,
-				MemoValue:        h.memoValue,
-				MemoryAccount:    h.memoryAccount.ToProto(),
-				MemoryIndex:      uint32(h.memoryIndex),
-			},
-		},
-	}
+	return newReserveExistingCurrencyServerParameters(
+		h.selectedNonce,
+		h.GetTransactionConfig(),
+		h.alts,
+		h.computeUnitLimit,
+		h.computeUnitPrice,
+		h.memoValue,
+		h.memoryAccount,
+		h.memoryIndex,
+		nil,
+	)
 }
 
 func (h *ReserveSellSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
@@ -489,17 +574,19 @@ func (h *ReserveSellSwapHandler) MakeInstructions(ctx context.Context) ([]solana
 		},
 	)
 
-	return []solana.Instruction{
+	ixns := []solana.Instruction{
 		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
-		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+	}
+	ixns = append(ixns, swapComputeBudgetInstructions(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)...)
+	return append(
+		ixns,
 		memo.Instruction(h.memoValue),
 		createTemporarySourceCurrencyAtaIxn,
 		transferFromSourceVmSwapAtaIxn,
 		sellAndDepositIntoDestinationVmIxn,
 		closeTemporarySourceCurrencyAtaIxn,
 		closeSourceVmSwapAccountIfEmptyIxn,
-	}, nil
+	), nil
 }
 
 type ReserveBuySellSwapHandler struct {
@@ -511,11 +598,12 @@ type ReserveBuySellSwapHandler struct {
 	toMint          *common.Account
 	amount          uint64
 
-	alts             []solana.AddressLookupTable
-	selectedNonce    *transaction_util.Nonce
-	computeUnitLimit uint32
-	computeUnitPrice uint64
-	memoValue        string
+	alts               []solana.AddressLookupTable
+	selectedNonce      *transaction_util.Nonce
+	transactionVersion solana.MessageVersion
+	computeUnitLimit   uint32
+	computeUnitPrice   uint64
+	memoValue          string
 
 	memoryAccount *common.Account
 	memoryIndex   uint16
@@ -529,6 +617,7 @@ func NewReserveBuySellSwapHandler(
 	toMint *common.Account,
 	amount uint64,
 	selectedNonce *transaction_util.Nonce,
+	transactionVersion solana.MessageVersion,
 ) SwapHandler {
 	return &ReserveBuySellSwapHandler{
 		data: data,
@@ -539,13 +628,18 @@ func NewReserveBuySellSwapHandler(
 		toMint:          toMint,
 		amount:          amount,
 
-		selectedNonce:    selectedNonce,
-		computeUnitPrice: 10_000,
-		memoValue:        "buy_sell_v0",
+		selectedNonce:      selectedNonce,
+		transactionVersion: transactionVersion,
+		computeUnitPrice:   10_000,
+		memoValue:          swapMemoValue("buy_sell", transactionVersion),
 	}
 }
 
 func (h *ReserveBuySellSwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
+	if h.transactionVersion == solana.MessageVersion1 {
+		return nil, nil
+	}
+
 	alt1, err := transaction_util.GetAltForMint(ctx, h.data, h.fromMint)
 	if err != nil {
 		return nil, err
@@ -558,22 +652,22 @@ func (h *ReserveBuySellSwapHandler) GetAlts(ctx context.Context) ([]solana.Addre
 	return h.alts, nil
 }
 
+func (h *ReserveBuySellSwapHandler) GetTransactionConfig() *solana.TransactionConfig {
+	return reserveSwapTransactionConfig(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)
+}
+
 func (h *ReserveBuySellSwapHandler) GetServerParameters() *transactionpb.StatefulSwapResponse_ServerParameters {
-	return &transactionpb.StatefulSwapResponse_ServerParameters{
-		Kind: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrency{
-			ReserveExistingCurrency: &transactionpb.StatefulSwapResponse_ServerParameters_ReserveExistingCurrencyServerParameters{
-				Payer:            common.GetSubsidizer().ToProto(),
-				Nonce:            h.selectedNonce.Account.ToProto(),
-				Blockhash:        &commonpb.Blockhash{Value: h.selectedNonce.Blockhash[:]},
-				Alts:             transaction_util.ToProtoAlts(h.alts),
-				ComputeUnitLimit: h.computeUnitLimit,
-				ComputeUnitPrice: h.computeUnitPrice,
-				MemoValue:        h.memoValue,
-				MemoryAccount:    h.memoryAccount.ToProto(),
-				MemoryIndex:      uint32(h.memoryIndex),
-			},
-		},
-	}
+	return newReserveExistingCurrencyServerParameters(
+		h.selectedNonce,
+		h.GetTransactionConfig(),
+		h.alts,
+		h.computeUnitLimit,
+		h.computeUnitPrice,
+		h.memoValue,
+		h.memoryAccount,
+		h.memoryIndex,
+		nil,
+	)
 }
 
 func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
@@ -745,10 +839,12 @@ func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]sol
 		},
 	)
 
-	return []solana.Instruction{
+	ixns := []solana.Instruction{
 		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
-		compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
-		compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
+	}
+	ixns = append(ixns, swapComputeBudgetInstructions(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)...)
+	return append(
+		ixns,
 		memo.Instruction(h.memoValue),
 		createTemporaryCoreMintAtaIxn,
 		createTemporarySourceCurrencyAtaIxn,
@@ -758,7 +854,7 @@ func (h *ReserveBuySellSwapHandler) MakeInstructions(ctx context.Context) ([]sol
 		closeTemporaryCoreMintAtaIxn,
 		closeTemporarySourceCurrencyAtaIxn,
 		closeSourceVmSwapAccountIfEmptyIxn,
-	}, nil
+	), nil
 }
 
 type ReserveCreateAndBuySwapHandler struct {
@@ -838,6 +934,11 @@ func NewReserveCreateAndBuySwapHandler(
 	}
 
 	return h, nil
+}
+
+// GetTransactionConfig returns nil because currency creation only supports v0
+func (h *ReserveCreateAndBuySwapHandler) GetTransactionConfig() *solana.TransactionConfig {
+	return nil
 }
 
 func (h *ReserveCreateAndBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
@@ -1097,6 +1198,11 @@ func NewReserveTreasuryFundedCreateAndBuySwapHandler(
 	return h, nil
 }
 
+// GetTransactionConfig returns nil because currency creation only supports v0
+func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) GetTransactionConfig() *solana.TransactionConfig {
+	return nil
+}
+
 func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) GetAlts(ctx context.Context) ([]solana.AddressLookupTable, error) {
 	alt, err := transaction_util.GetAltForMint(ctx, h.data, h.fromMint)
 	if err != nil {
@@ -1279,11 +1385,6 @@ func NewCoinbaseStableSwapperSwapHandler(
 	transactionVersion solana.MessageVersion,
 	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion,
 ) *CoinbaseStableSwapperSwapHandler {
-	memoValue := "coinbase_stable_swapper_v0"
-	if transactionVersion == solana.MessageVersion1 {
-		memoValue = "coinbase_stable_swapper_v1"
-	}
-
 	return &CoinbaseStableSwapperSwapHandler{
 		data: data,
 
@@ -1299,7 +1400,7 @@ func NewCoinbaseStableSwapperSwapHandler(
 		transactionVersion: transactionVersion,
 		computeUnitLimit:   coinbaseStatefulSwapComputeUnitLimit,
 		computeUnitPrice:   coinbaseStatefulSwapComputeUnitPrice,
-		memoValue:          memoValue,
+		memoValue:          swapMemoValue("coinbase_stable_swapper", transactionVersion),
 
 		feeDestination:      common.CoreMintFeesAccount,
 		coinbaseSwapVersion: coinbaseSwapVersion,
@@ -1436,13 +1537,7 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 	ixns := []solana.Instruction{
 		system.AdvanceNonce(h.selectedNonce.Account.PublicKey().ToBytes(), common.GetSubsidizer().PublicKey().ToBytes()),
 	}
-	if h.transactionVersion != solana.MessageVersion1 {
-		ixns = append(
-			ixns,
-			compute_budget.SetComputeUnitLimit(h.computeUnitLimit),
-			compute_budget.SetComputeUnitPrice(h.computeUnitPrice),
-		)
-	}
+	ixns = append(ixns, swapComputeBudgetInstructions(h.transactionVersion, h.computeUnitLimit, h.computeUnitPrice)...)
 	return append(
 		ixns,
 		memo.Instruction(h.memoValue),
