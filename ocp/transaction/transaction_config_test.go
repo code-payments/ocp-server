@@ -9,6 +9,7 @@ import (
 
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana"
+	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 func TestPriorityFeeLamports(t *testing.T) {
@@ -47,4 +48,37 @@ func TestNewV1TransactionConfig(t *testing.T) {
 
 	proto = ToProtoTransactionConfig(solana.TransactionConfig{HeapSize: pointer.Uint32(64 * 1024)})
 	assert.EqualValues(t, 64*1024, proto.HeapSize)
+}
+
+func TestValidateInitNonceMemoryAccounts(t *testing.T) {
+	assert.NoError(t, ValidateInitNonceMemoryAccounts(250))
+	assert.NoError(t, ValidateInitNonceMemoryAccounts(MaxInitNonceMemoryAccounts))
+	assert.Error(t, ValidateInitNonceMemoryAccounts(MaxInitNonceMemoryAccounts+1))
+}
+
+func TestInitNonceLoadedAccountsDataSizeLimit_CoversMaxNonceMemory(t *testing.T) {
+	const (
+		accountOverhead = 64 // charged per loaded account
+
+		// VM program data on mainnet as of 2026-11. A program upgrade that grows
+		// it needs this updated.
+		vmProgramDataSize  = 488_621
+		programAccountSize = 36
+
+		// Authority, VM, nonce memory, VM program and 50 nonce owners, plus the
+		// program data account the VM program points to
+		maxLoadedAccounts = 4 + 50 + 1
+	)
+
+	nonceMemorySize := vm.MemoryAccountSize + vm.GetSliceAllocatorSize(
+		MaxInitNonceMemoryAccounts,
+		int(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce)),
+	)
+
+	loaded := maxLoadedAccounts*accountOverhead +
+		vmProgramDataSize +
+		programAccountSize +
+		vm.CodeVmAccountSize +
+		nonceMemorySize
+	assert.LessOrEqual(t, loaded, InitNonceLoadedAccountsDataSizeLimit)
 }

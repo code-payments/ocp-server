@@ -42,6 +42,19 @@ const (
 	// todo: optimize
 	baseAtaCreateComputeUnits = 20_000
 
+	// init_nonce costs 5,218 CUs on mainnet before finding the virtual
+	// nonce PDA, measured across 540 transactions from 12 launches after the
+	// July 2026 VM program upgrade
+	baseInitNonceComputeUnits = 5_300
+
+	// init_nonce derives the virtual nonce PDA from the VM's PoH value at
+	// execution time, so its bump is unknowable when the transaction is built.
+	// Finding it takes 2 iterations on average with a variance of 2. A batch
+	// budgets 2 iterations per nonce plus this slack, which doubles the
+	// expected iterations for a batch of 50 nonces. A batch of 50 exceeds that
+	// in about 1 in 10^13 attempts, before the compute unit margin.
+	initNonceFindIterationsSlack = 100
+
 	cuPerPdaDerivation = 1_500
 
 	computeUnitMarginPercent = 15
@@ -123,6 +136,14 @@ func ReserveBuySellSwapComputeUnitLimit(temporaryCoreAtaBump, temporarySourceAta
 			findPdaComputeUnits(temporaryCoreAtaBump) +
 			findPdaComputeUnits(temporarySourceAtaBump),
 	)
+}
+
+// InitNonceBatchComputeUnitLimit computes the compute unit limit for a
+// transaction initializing a batch of virtual durable nonces in a VM's nonce
+// memory account.
+func InitNonceBatchComputeUnitLimit(numNonces int) uint32 {
+	findIterations := 2*uint32(numNonces) + initNonceFindIterationsSlack
+	return WithComputeUnitMargin(uint32(numNonces)*baseInitNonceComputeUnits + findIterations*cuPerPdaDerivation)
 }
 
 // ExternalDepositComputeUnitLimit computes the compute unit limit for a

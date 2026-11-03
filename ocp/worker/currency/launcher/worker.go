@@ -20,8 +20,9 @@ import (
 const (
 	initialAuthorityFundingLamports = 1_300_000_000 // 1.3 SOL
 
-	initialNoncePoolSize          = 1_000
+	initialNoncePoolSize          = 250
 	initialNonceMemoryAccountName = "nonce-0"
+	initNoncesPerTxn              = 50
 
 	initialTimelockAccounts          = 1_000
 	initialTimelockMemoryAccountName = "timelock-0"

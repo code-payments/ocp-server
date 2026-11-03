@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/big"
 
+	"github.com/pkg/errors"
+
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
 	"github.com/code-payments/ocp-server/pointer"
@@ -23,6 +25,17 @@ const (
 	// server can index, for a worst case of about 12.2 MiB.
 	ReserveSwapLoadedAccountsDataSizeLimit = 16 * 1024 * 1024 // 16 MiB
 
+	// InitNonceLoadedAccountsDataSizeLimit is the loaded accounts data size
+	// limit for v1 transactions initializing virtual durable nonces. The VM
+	// program data loads 488,621 bytes, and a nonce memory account holding
+	// MaxInitNonceMemoryAccounts nonces adds 66,080 bytes.
+	InitNonceLoadedAccountsDataSizeLimit = 1024 * 1024 // 1 MiB
+
+	// MaxInitNonceMemoryAccounts is the largest nonce memory account, in
+	// virtual durable nonces, that InitNonceLoadedAccountsDataSizeLimit is
+	// sized for. Raise both together.
+	MaxInitNonceMemoryAccounts = 1_000
+
 	microLamportsPerLamport = 1_000_000
 )
 
@@ -37,6 +50,20 @@ func NewV1TransactionConfig(computeUnitLimit uint32, computeUnitPrice uint64, lo
 		LoadedAccountsDataSizeLimit: pointer.Uint32(loadedAccountsDataSizeLimit),
 		PriorityFeeLamports:         pointer.Uint64(PriorityFeeLamports(computeUnitLimit, computeUnitPrice)),
 	}
+}
+
+// ValidateInitNonceMemoryAccounts errors when a nonce memory account holds
+// more nonces than InitNonceLoadedAccountsDataSizeLimit is sized for, so a
+// larger nonce pool can't ship without revisiting the limit.
+func ValidateInitNonceMemoryAccounts(numAccounts uint32) error {
+	if numAccounts > MaxInitNonceMemoryAccounts {
+		return errors.Errorf(
+			"nonce memory account holds %d nonces, but InitNonceLoadedAccountsDataSizeLimit only covers %d",
+			numAccounts,
+			MaxInitNonceMemoryAccounts,
+		)
+	}
+	return nil
 }
 
 // PriorityFeeLamports returns the total priority fee for a compute unit limit

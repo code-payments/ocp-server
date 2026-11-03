@@ -601,6 +601,11 @@ func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyM
 		&currencycreator.InitializeMetadataInstructionArgs{},
 	)
 
+	err := transaction_util.ValidateInitNonceMemoryAccounts(initialNoncePoolSize)
+	if err != nil {
+		return err
+	}
+
 	initNonceMemoryIxn := vm.NewInitMemoryInstruction(
 		&vm.InitMemoryInstructionAccounts{
 			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
@@ -791,67 +796,30 @@ func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrency
 		return err
 	}
 
-	initVdnIxnsPerTxn := 22
-	initVdnBatchTxns := int(state.NumAccounts) / initVdnIxnsPerTxn
-	if int(state.NumAccounts)%initVdnIxnsPerTxn != 0 {
-		initVdnBatchTxns += 1
+	err = transaction_util.ValidateInitNonceMemoryAccounts(state.NumAccounts)
+	if err != nil {
+		return err
 	}
+
+	batches := initNonceBatches(int(state.NumAccounts), state.Data.IsAllocated, initNoncesPerTxn)
 
 	var mu sync.Mutex
 	var anyError error
 	var wg sync.WaitGroup
-	wg.Add(initVdnBatchTxns)
-	for batch := range initVdnBatchTxns {
-		go func(batch int) {
+	wg.Add(len(batches))
+	for _, memoryIndexes := range batches {
+		go func(memoryIndexes []int) {
 			defer wg.Done()
 
 			err := func() error {
-				ixns := []solana.Instruction{
-					compute_budget.SetComputeUnitLimit(400_000),
-					compute_budget.SetComputeUnitPrice(10_000),
-				}
-				for i := range initVdnIxnsPerTxn {
-					randomOwner, err := common.NewRandomAccount()
-					if err != nil {
-						return errors.Wrap(err, "error generating random nonce owner")
-					}
-
-					memoryIndex := batch*initVdnIxnsPerTxn + i
-
-					if state.Data.IsAllocated(memoryIndex) {
-						continue
-					}
-					if memoryIndex >= int(state.NumAccounts) {
-						break
-					}
-
-					ixns = append(ixns, vm.NewInitNonceInstruction(
-						&vm.InitNonceInstructionAccounts{
-							VmAuthority:         accounts.Authority.PublicKey().ToBytes(),
-							Vm:                  accounts.Vm.PublicKey().ToBytes(),
-							VmMemory:            accounts.NonceMemoryAccount.PublicKey().ToBytes(),
-							VirtualAccountOwner: randomOwner.PublicKey().ToBytes(),
-						},
-						&vm.InitNonceInstructionArgs{
-							AccountIndex: uint16(memoryIndex),
-						},
-					))
-				}
-
-				txn := solana.NewLegacyTransaction(
-					accounts.Authority.PublicKey().ToBytes(),
-					ixns...,
-				)
-
 				bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
 				if err != nil {
 					return errors.Wrap(err, "error getting latest blockhash")
 				}
-				txn.SetBlockhash(bh)
 
-				err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+				txn, err := makeInitNonceTransaction(accounts, memoryIndexes, bh)
 				if err != nil {
-					return errors.Wrap(err, "error signing transaction")
+					return err
 				}
 
 				return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
@@ -862,11 +830,70 @@ func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrency
 				anyError = err
 				mu.Unlock()
 			}
-		}(batch)
+		}(memoryIndexes)
 	}
 	wg.Wait()
 
 	return anyError
+}
+
+// initNonceBatches groups the unallocated indexes of a nonce memory account
+// into batches of at most perTxn indexes, one batch per transaction.
+func initNonceBatches(numAccounts int, isAllocated func(index int) bool, perTxn int) [][]int {
+	var batches [][]int
+	for start := 0; start < numAccounts; start += perTxn {
+		var batch []int
+		for memoryIndex := start; memoryIndex < min(start+perTxn, numAccounts); memoryIndex++ {
+			if !isAllocated(memoryIndex) {
+				batch = append(batch, memoryIndex)
+			}
+		}
+		if len(batch) > 0 {
+			batches = append(batches, batch)
+		}
+	}
+	return batches
+}
+
+// makeInitNonceTransaction builds a signed v1 transaction initializing a
+// virtual durable nonce with a random owner at each memory index.
+func makeInitNonceTransaction(accounts *newCurrencyAccounts, memoryIndexes []int, blockhash solana.Blockhash) (solana.Transaction, error) {
+	ixns := make([]solana.Instruction, 0, len(memoryIndexes))
+	for _, memoryIndex := range memoryIndexes {
+		randomOwner, err := common.NewRandomAccount()
+		if err != nil {
+			return solana.Transaction{}, errors.Wrap(err, "error generating random nonce owner")
+		}
+
+		ixns = append(ixns, vm.NewInitNonceInstruction(
+			&vm.InitNonceInstructionAccounts{
+				VmAuthority:         accounts.Authority.PublicKey().ToBytes(),
+				Vm:                  accounts.Vm.PublicKey().ToBytes(),
+				VmMemory:            accounts.NonceMemoryAccount.PublicKey().ToBytes(),
+				VirtualAccountOwner: randomOwner.PublicKey().ToBytes(),
+			},
+			&vm.InitNonceInstructionArgs{
+				AccountIndex: uint16(memoryIndex),
+			},
+		))
+	}
+
+	config := transaction_util.NewV1TransactionConfig(
+		transaction_util.InitNonceBatchComputeUnitLimit(len(memoryIndexes)),
+		10_000,
+		transaction_util.InitNonceLoadedAccountsDataSizeLimit,
+	)
+	txn, err := solana.NewV1Transaction(accounts.Authority.PublicKey().ToBytes(), config, ixns...)
+	if err != nil {
+		return solana.Transaction{}, errors.Wrap(err, "error creating transaction")
+	}
+	txn.SetBlockhash(blockhash)
+
+	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+	if err != nil {
+		return solana.Transaction{}, errors.Wrap(err, "error signing transaction")
+	}
+	return txn, nil
 }
 
 func (p *runtime) initializeNoncePool(ctx context.Context, accounts *newCurrencyAccounts) error {
