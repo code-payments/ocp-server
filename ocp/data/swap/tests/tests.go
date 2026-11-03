@@ -19,6 +19,7 @@ func RunTests(t *testing.T, s swap.Store, teardown func()) {
 		testStablecoinRoundTrip,
 		testUpdateHappyPath,
 		testUpdateStaleRecord,
+		testDuplicateFundingId,
 		testGetAllByOwnerAndState,
 		testGetAllByOwnerMintAndState,
 		testGetAllByState,
@@ -285,6 +286,63 @@ func testUpdateStaleRecord(t *testing.T, s swap.Store) {
 		assert.NotEmpty(t, actual.TransactionBlob)
 		assert.EqualValues(t, 1, actual.Id)
 		assert.EqualValues(t, 1, actual.Version)
+	})
+}
+
+func testDuplicateFundingId(t *testing.T, s swap.Store) {
+	t.Run("testDuplicateFundingId", func(t *testing.T) {
+		ctx := context.Background()
+
+		newRecord := func(swapId, transactionSignature string) *swap.Record {
+			return &swap.Record{
+				SwapId: swapId,
+
+				Kind: swap.KindReserve,
+
+				Owner: "test_owner",
+
+				FromMint:   "test_from_mint",
+				ToMint:     "test_to_mint",
+				SwapAmount: 12345,
+
+				FundingId:     "test_funding_id",
+				FundingSource: swap.FundingSourceSubmitIntent,
+
+				Nonce:     "test_nonce",
+				Blockhash: "test_blockhash",
+
+				ProofSignature: "test_proof_signature",
+
+				TransactionSignature: transactionSignature,
+				TransactionBlob:      []byte("test_transaction_blob"),
+
+				State: swap.StateCreated,
+
+				CreatedAt: time.Now(),
+			}
+		}
+
+		original := newRecord("test_swap_id1", "test_transaction_signature1")
+		require.NoError(t, s.Save(ctx, original))
+		expected := original.Clone()
+
+		duplicate := newRecord("test_swap_id2", "test_transaction_signature2")
+		assert.Equal(t, swap.ErrExists, s.Save(ctx, duplicate))
+		assert.EqualValues(t, 0, duplicate.Version)
+
+		_, err := s.GetById(ctx, "test_swap_id2")
+		assert.Equal(t, swap.ErrNotFound, err)
+
+		actual, err := s.GetByFundingId(ctx, "test_funding_id")
+		require.NoError(t, err)
+		assertEquivalentRecords(t, &expected, actual)
+
+		// The swap holding the funding ID can still be updated
+		original.State = swap.StateFunded
+		require.NoError(t, s.Save(ctx, original))
+		actual, err = s.GetById(ctx, "test_swap_id1")
+		require.NoError(t, err)
+		assert.Equal(t, swap.StateFunded, actual.State)
 	})
 }
 

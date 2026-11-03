@@ -49,6 +49,10 @@ func (s *store) Save(_ context.Context, data *swap.Record) error {
 		item.State = data.State
 		item.Version = data.Version
 	} else {
+		if s.findByFundingId(data.FundingId) != nil {
+			return swap.ErrExists
+		}
+
 		if data.Id == 0 {
 			data.Id = s.last
 		}

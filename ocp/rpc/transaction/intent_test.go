@@ -42,7 +42,9 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/action"
 	"github.com/code-payments/ocp-server/ocp/data/balance"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	exchange_memory "github.com/code-payments/ocp-server/ocp/data/currency/exchange/memory"
 	holder_memory "github.com/code-payments/ocp-server/ocp/data/currency/holder/memory"
+	"github.com/code-payments/ocp-server/ocp/data/currency/reserve"
 	reserve_memory "github.com/code-payments/ocp-server/ocp/data/currency/reserve/memory"
 	"github.com/code-payments/ocp-server/ocp/data/fulfillment"
 	"github.com/code-payments/ocp-server/ocp/data/history"
@@ -88,7 +90,12 @@ type testEnv struct {
 
 	submitIntentIntegration *testSubmitIntentIntegration
 	antispamIntegration     *testAntispamIntegration
+	swapIntegration         *testSwapIntegration
 	taskExecutor            *testTaskExecutor
+
+	reserveStore     reserve.Store
+	mintDataProvider *currency_util.MintDataProvider
+	coinbase         *testCoinbaseOnramp
 
 	keysMu sync.Mutex
 	keys   map[string]*common.Account
@@ -160,18 +167,27 @@ func setupTestEnv(t *testing.T, overrides ...func(*testOverrides)) *testEnv {
 
 	env.submitIntentIntegration = &testSubmitIntentIntegration{}
 	env.antispamIntegration = &testAntispamIntegration{allow: true}
+	env.swapIntegration = &testSwapIntegration{}
 	env.taskExecutor = &testTaskExecutor{executed: make(chan *task.Record, 100)}
+
+	// Live reserve state backs the sell fee check for reserve swaps
+	env.reserveStore = reserve_memory.New()
+	env.mintDataProvider = currency_util.NewMintDataProvider(log, env.data, exchange_memory.New(), env.reserveStore, holder_memory.New(), 0, time.Second, 100*time.Millisecond)
+	require.NoError(t, env.mintDataProvider.Start(env.ctx))
+	t.Cleanup(env.mintDataProvider.Stop)
+
+	env.coinbase = newTestCoinbaseOnramp(t)
 
 	s, err := NewTransactionServer(
 		log,
 		env.data,
-		nil,
+		env.mintDataProvider,
 		env.submitIntentIntegration,
-		nil,
+		env.swapIntegration,
 		ocp_task.NewScheduler(log, env.data, env.taskExecutor),
 		antispam.NewGuard(env.antispamIntegration),
 		aml.NewGuard(log, env.data),
-		nil,
+		env.coinbase.client,
 		testNodeId,
 		noncePools,
 		withManualTestOverrides(configOverrides),
@@ -230,15 +246,31 @@ type testDataProvider struct {
 	mu                       sync.Mutex
 	blockchainAccounts       map[string]struct{}
 	blockchainAccountData    map[string][]byte
+	blockchainAccountOwners  map[string][]byte
 	applyBalanceDeltasErr    error
 	applyBalanceDeltasCalled int
+
+	// Token balances and transaction submission, so swaps never reach a live
+	// blockchain
+	tokenBalances         map[string]uint64
+	latestBlockhash       solana.Blockhash
+	submittedTransactions []solana.Transaction
+	submitErr             error
+	failSubmitted         bool
+	unfinalizedLookups    int
+
+	// Errors injected into swap RPC dependencies, by method name
+	injectedErrs map[string]error
 }
 
 func newTestDataProvider() *testDataProvider {
 	return &testDataProvider{
-		Provider:              ocp_data.NewTestDataProvider(),
-		blockchainAccounts:    make(map[string]struct{}),
-		blockchainAccountData: make(map[string][]byte),
+		Provider:                ocp_data.NewTestDataProvider(),
+		blockchainAccounts:      make(map[string]struct{}),
+		blockchainAccountData:   make(map[string][]byte),
+		blockchainAccountOwners: make(map[string][]byte),
+		tokenBalances:           make(map[string]uint64),
+		injectedErrs:            make(map[string]error),
 	}
 }
 
@@ -246,11 +278,15 @@ func (p *testDataProvider) GetBlockchainAccountInfo(ctx context.Context, account
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if err := p.injectedErrs["GetBlockchainAccountInfo:"+account]; err != nil {
+		return nil, 0, err
+	}
+
 	if data, ok := p.blockchainAccountData[account]; ok {
-		return &solana.AccountInfo{Data: data}, 1, nil
+		return &solana.AccountInfo{Data: data, Owner: p.blockchainAccountOwners[account]}, 1, nil
 	}
 	if _, ok := p.blockchainAccounts[account]; ok {
-		return &solana.AccountInfo{}, 1, nil
+		return &solana.AccountInfo{Owner: p.blockchainAccountOwners[account]}, 1, nil
 	}
 	return nil, 0, solana.ErrNoAccountInfo
 }
@@ -341,6 +377,7 @@ func (i *testSubmitIntentIntegration) getSuccesses() []string {
 type testAntispamIntegration struct {
 	mu    sync.Mutex
 	allow bool
+	err   error
 	calls []string
 }
 
@@ -348,6 +385,9 @@ func (i *testAntispamIntegration) record(call string) (bool, string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.calls = append(i.calls, call)
+	if i.err != nil {
+		return false, "", i.err
+	}
 	if !i.allow {
 		return false, "denied by test", nil
 	}
@@ -358,6 +398,12 @@ func (i *testAntispamIntegration) setAllow(allow bool) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.allow = allow
+}
+
+func (i *testAntispamIntegration) setErr(err error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.err = err
 }
 
 func (i *testAntispamIntegration) getCalls() []string {
@@ -383,7 +429,16 @@ func (i *testAntispamIntegration) AllowDistribution(ctx context.Context, owner *
 }
 
 func (i *testAntispamIntegration) AllowSwap(ctx context.Context, kind swap.Kind, fundingSource swap.FundingSource, owner, fromMint, toMint *common.Account, swapAmount, feeAmount uint64, initializesMint bool) (bool, string, error) {
-	return i.record("swap")
+	return i.record(fmt.Sprintf(
+		"swap:%s:%d:%s:%s:%d:%d:%t",
+		kind,
+		fundingSource,
+		fromMint.PublicKey().ToBase58(),
+		toMint.PublicKey().ToBase58(),
+		swapAmount,
+		feeAmount,
+		initializesMint,
+	))
 }
 
 func (i *testAntispamIntegration) AllowCurrencyLaunch(ctx context.Context, owner *common.Account, name, symbol string) (bool, string, error) {
@@ -466,7 +521,7 @@ func (e *testEnv) saveSwapNonces(t *testing.T, count int) {
 
 // newLaunchpadMint sets up an available launchpad currency with nonces for its VM
 func (e *testEnv) newLaunchpadMint(t *testing.T) *common.Account {
-	mint := testutil.SetupLaunchpadCurrency(t, e.data, reserve_memory.New(), holder_memory.New())
+	mint := testutil.SetupLaunchpadCurrency(t, e.data, e.reserveStore, holder_memory.New())
 
 	vmConfig, err := common.GetVmConfigForMint(e.ctx, e.data, mint)
 	require.NoError(t, err)
