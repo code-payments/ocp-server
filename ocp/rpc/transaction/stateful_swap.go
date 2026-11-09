@@ -393,7 +393,16 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, err)
 		}
 	} else {
-		if owner.PublicKey().ToBase58() != swapAuthority.PublicKey().ToBase58() {
+		// A v1 launch funded with the core mint buys through a temporary core
+		// mint ATA. A distinct, per-swap swap authority holds it, because the
+		// owner's ATA is predictable and anyone could pre-fund it so that
+		// closing it fails. Other launches only need the owner to sign.
+		isOwnerSwapAuthority := owner.PublicKey().ToBase58() == swapAuthority.PublicKey().ToBase58()
+		if common.IsCoreMint(fromMint) && transactionVersion == solana.MessageVersion1 {
+			if isOwnerSwapAuthority {
+				return handleStatefulSwapError(streamer, NewSwapValidationError("owner cannot be swap authority"))
+			}
+		} else if !isOwnerSwapAuthority {
 			return handleStatefulSwapError(streamer, NewSwapValidationError("owner must be swap authority"))
 		}
 
@@ -531,19 +540,28 @@ func (s *transactionServer) handleReserveStatefulSwap(
 
 	var swapHandler SwapHandler
 	if initializesMint && common.IsCoreMint(fromMint) {
-		newHandler := NewReserveCreateAndBuySwapHandler
-		if transactionVersion != solana.MessageVersion1 {
-			newHandler = NewReserveCreateAndBuyLegacySwapHandler
+		if transactionVersion == solana.MessageVersion1 {
+			swapHandler, err = NewReserveCreateAndBuySwapHandler(
+				ctx,
+				s.data,
+				owner,
+				swapAuthority,
+				toMint,
+				initiateReserveSwapReq.SwapAmount,
+				initiateReserveSwapReq.FeeAmount,
+				selectedNonce,
+			)
+		} else {
+			swapHandler, err = NewReserveCreateAndBuyLegacySwapHandler(
+				ctx,
+				s.data,
+				owner,
+				toMint,
+				initiateReserveSwapReq.SwapAmount,
+				initiateReserveSwapReq.FeeAmount,
+				selectedNonce,
+			)
 		}
-		swapHandler, err = newHandler(
-			ctx,
-			s.data,
-			owner,
-			toMint,
-			initiateReserveSwapReq.SwapAmount,
-			initiateReserveSwapReq.FeeAmount,
-			selectedNonce,
-		)
 	} else if initializesMint {
 		newHandler := NewReserveTreasuryFundedCreateAndBuySwapHandler
 		if transactionVersion != solana.MessageVersion1 {

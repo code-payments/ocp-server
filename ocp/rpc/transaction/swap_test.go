@@ -586,7 +586,7 @@ func (e *testEnv) expectedStatefulSwapTransaction(t *testing.T, req *statefulSwa
 
 		switch {
 		case initializesMint && !isSell && transactionVersion == solana.MessageVersion1:
-			h, err = NewReserveCreateAndBuySwapHandler(e.ctx, e.data, req.owner, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
+			h, err = NewReserveCreateAndBuySwapHandler(e.ctx, e.data, req.owner, req.swapAuthority, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
 		case initializesMint && !isSell:
 			h, err = NewReserveCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
 		case initializesMint && transactionVersion == solana.MessageVersion1:
@@ -744,6 +744,16 @@ func (e *testEnv) setCurrencyState(t *testing.T, mint *common.Account, state cur
 	require.NoError(t, err)
 	metadataRecord.State = state
 	require.NoError(t, e.data.SaveCurrencyMetadata(e.ctx, metadataRecord))
+}
+
+// newCurrencySwapAuthority returns the swap authority a launch requires. A v1
+// launch funded with the core mint needs a distinct, per-swap key to hold its
+// temporary core mint ATA. Every other launch is signed by the owner alone.
+func newCurrencySwapAuthority(t *testing.T, e *testEnv, owner, fromMint *common.Account, transactionVersion uint32) *common.Account {
+	if common.IsCoreMint(fromMint) && selectSwapTransactionVersion(transactionVersion) == solana.MessageVersion1 {
+		return e.newAccount(t)
+	}
+	return owner
 }
 
 // newCurrencyLaunchQuarks returns the default core mint quarks a launch
@@ -1469,11 +1479,19 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 	if params.Treasury == nil {
 		require.True(t, common.IsCoreMint(fromMint))
 
-		createOwnerCoreAtaIxn, ownerCoreAta, err := token.CreateAssociatedTokenAccountIdempotent(authority, owner.PublicKey().ToBytes(), coreMint)
+		// v1 buys through the swap authority's temporary core mint ATA, which
+		// nobody can pre-fund to make closing it fail. v0 uses the owner's.
+		temporaryHolder := owner
+		if isV1 {
+			require.NotEqual(t, owner.PublicKey().ToBase58(), req.swapAuthority.PublicKey().ToBase58())
+			temporaryHolder = req.swapAuthority
+		}
+
+		createTemporaryCoreAtaIxn, temporaryCoreAta, err := token.CreateAssociatedTokenAccountIdempotent(authority, temporaryHolder.PublicKey().ToBytes(), coreMint)
 		require.NoError(t, err)
 
 		swapIxns = append(initIxns,
-			createOwnerCoreAtaIxn,
+			createTemporaryCoreAtaIxn,
 			createVmDepositAtaIxn,
 			vm.NewTransferForSwapWithFeeInstruction(
 				&vm.TransferForSwapWithFeeInstructionAccounts{
@@ -1482,7 +1500,7 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 					Swapper:         owner.PublicKey().ToBytes(),
 					SwapPda:         ownerVmSwapAccounts.Pda.PublicKey().ToBytes(),
 					SwapAta:         ownerVmSwapAccounts.Ata.PublicKey().ToBytes(),
-					SwapDestination: ownerCoreAta,
+					SwapDestination: temporaryCoreAta,
 					FeeDestination:  params.FeeDestination.Value,
 				},
 				&vm.TransferForSwapWithFeeInstructionArgs{
@@ -1493,21 +1511,21 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 			),
 			currencycreator.NewBuyTokensInstruction(
 				&currencycreator.BuyTokensInstructionAccounts{
-					Buyer:       owner.PublicKey().ToBytes(),
+					Buyer:       temporaryHolder.PublicKey().ToBytes(),
 					Pool:        newCurrency.liquidityPool,
 					TargetMint:  newCurrency.mint,
 					BaseMint:    coreMint,
 					VaultTarget: newCurrency.vaultMint,
 					VaultBase:   newCurrency.vaultCore,
 					BuyerTarget: ownerVmDepositAccounts.Ata.PublicKey().ToBytes(),
-					BuyerBase:   ownerCoreAta,
+					BuyerBase:   temporaryCoreAta,
 				},
 				&currencycreator.BuyTokensInstructionArgs{
 					InAmount:     p.SwapAmount,
 					MinAmountOut: 0,
 				},
 			),
-			token.CloseAccount(ownerCoreAta, authority, owner.PublicKey().ToBytes()),
+			token.CloseAccount(temporaryCoreAta, authority, temporaryHolder.PublicKey().ToBytes()),
 		)
 	} else {
 		require.False(t, common.IsCoreMint(fromMint))
@@ -2661,7 +2679,7 @@ func TestStatefulSwap_ReserveNewCurrency_HappyPath(t *testing.T) {
 
 					purchaseQuarks, feeQuarks := newCurrencyLaunchQuarks(transactionVersion)
 					req := f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, purchaseQuarks, feeQuarks)
-					req.swapAuthority = f.owner
+					req.swapAuthority = newCurrencySwapAuthority(t, f.env, f.owner, common.CoreMintAccount, transactionVersion)
 					req.transactionVersion = transactionVersion
 					req.reserve.FundingSource = tc.fundingSource
 					switch tc.fundingSource {
@@ -2677,10 +2695,14 @@ func TestStatefulSwap_ReserveNewCurrency_HappyPath(t *testing.T) {
 						mint.PublicKey().ToBase58(): currency.MetadataStatePrePurchaseSetup,
 					})
 
-					require.Len(t, result.signatures, 1)
+					expectedSigners := []*common.Account{common.GetSubsidizer(), f.owner}
+					if transactionVersion == 1 {
+						expectedSigners = append(expectedSigners, req.swapAuthority)
+					}
+					require.Len(t, result.signatures, len(expectedSigners)-1)
 					assert.Equal(t, selectSwapTransactionVersion(transactionVersion), result.expectedTxn.Message.Version)
 					f.env.requireNewCurrencyServerParameters(t, result, common.CoreMintAccount, mint, false)
-					requireNewCurrencyServerSigners(t, result, f.env, mint, common.GetSubsidizer(), f.owner)
+					requireNewCurrencyServerSigners(t, result, f.env, mint, expectedSigners...)
 
 					assert.Equal(t, []string{
 						expectedAntispamSwapCall(swap.KindReserve, req.reserve.FundingSource, req.reserve.FromMint, req.reserve.ToMint, req.reserve.SwapAmount, req.reserve.FeeAmount, true),
@@ -2872,11 +2894,34 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		treasuryFunded bool
+		versions       []uint32 // Both versions when empty
 		setup          func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest)
 		verify         func(t *testing.T, result *statefulSwapResult, transactionVersion uint32)
 	}{
 		{
-			name: "owner isn't the swap authority",
+			name:     "core mint owner isn't the swap authority",
+			versions: []uint32{0},
+			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
+				req.swapAuthority = f.env.newAccount(t)
+			},
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				result.requireInvalidSwap(t, "owner must be swap authority")
+			},
+		},
+		{
+			// The owner's core mint ATA could be pre-funded so closing it fails
+			name:     "core mint owner is the swap authority",
+			versions: []uint32{1},
+			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
+				req.swapAuthority = req.owner
+			},
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				result.requireInvalidSwap(t, "owner cannot be swap authority")
+			},
+		},
+		{
+			name:           "treasury funded owner isn't the swap authority",
+			treasuryFunded: true,
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				req.swapAuthority = f.env.newAccount(t)
 			},
@@ -2918,7 +2963,10 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				owner := f.env.newFundedUser(t, req.reserve.SwapAmount+req.reserve.FeeAmount-1)
 				req.reserve.ToMint = f.env.newCurrencyAwaitingPurchase(t, owner).ToProto()
-				req.owner, req.swapAuthority = owner, owner
+				if req.swapAuthority == req.owner {
+					req.swapAuthority = owner
+				}
+				req.owner = owner
 			},
 			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "insufficient balance")
@@ -3023,7 +3071,11 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			},
 		},
 	} {
-		for _, transactionVersion := range []uint32{0, 1} {
+		versions := tc.versions
+		if len(versions) == 0 {
+			versions = []uint32{0, 1}
+		}
+		for _, transactionVersion := range versions {
 			t.Run(fmt.Sprintf("v%d/%s", transactionVersion, tc.name), func(t *testing.T) {
 				f := newReserveSwapFixture(t)
 				mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
@@ -3040,7 +3092,11 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 					purchaseQuarks, feeQuarks := newCurrencyLaunchQuarks(transactionVersion)
 					req = f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, purchaseQuarks, feeQuarks)
 				}
-				req.swapAuthority = f.owner
+				fromMint := common.CoreMintAccount
+				if tc.treasuryFunded {
+					fromMint = f.launchpad1
+				}
+				req.swapAuthority = newCurrencySwapAuthority(t, f.env, f.owner, fromMint, transactionVersion)
 				req.transactionVersion = transactionVersion
 				tc.setup(t, f, req)
 

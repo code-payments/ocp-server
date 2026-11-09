@@ -1,7 +1,10 @@
 package transaction
 
 import (
+	"bytes"
 	"context"
+
+	"github.com/pkg/errors"
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 	transactionpb "github.com/code-payments/ocp-protobuf-api/generated/go/transaction/v1"
@@ -919,9 +922,15 @@ func newReserveNewCurrencyV1ServerParameters(
 // core mint and VM deposit ATAs' creation, VM::TransferForSwapWithFee,
 // Reserve::BuyTokens, then closing the temporary core mint ATA. The currency
 // authority pays for the ATAs. It returns the ATAs' bumps.
+//
+// The temporary holder owns the temporary core mint ATA and signs the buy and
+// the close. Closing fails if anyone pre-funds the ATA, so the holder must be
+// a key whose ATA can't be known ahead of the transaction, like a per-swap
+// swap authority.
 func makeCoreMintFundedPurchaseInstructions(
 	launch *transaction_util.CurrencyLaunch,
 	buyer *common.Account,
+	temporaryHolder *common.Account,
 	sourceVmConfig *common.VmConfig,
 	swapAmount, feeAmount uint64,
 ) ([]solana.Instruction, []uint8, error) {
@@ -937,7 +946,7 @@ func makeCoreMintFundedPurchaseInstructions(
 		return nil, nil, err
 	}
 
-	createTemporaryCoreMintAtaIxn, temporaryCoreMintAta, temporaryCoreMintAtaBump, err := launch.MakeCreateAtaInstruction(buyer, common.CoreMintAccount)
+	createTemporaryCoreMintAtaIxn, temporaryCoreMintAta, temporaryCoreMintAtaBump, err := launch.MakeCreateAtaInstruction(temporaryHolder, common.CoreMintAccount)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -966,7 +975,7 @@ func makeCoreMintFundedPurchaseInstructions(
 
 	buyIxn := currencycreator.NewBuyTokensInstruction(
 		&currencycreator.BuyTokensInstructionAccounts{
-			Buyer:       buyer.PublicKey().ToBytes(),
+			Buyer:       temporaryHolder.PublicKey().ToBytes(),
 			Pool:        accounts.LiquidityPool.PublicKey().ToBytes(),
 			TargetMint:  accounts.Mint.PublicKey().ToBytes(),
 			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
@@ -984,7 +993,7 @@ func makeCoreMintFundedPurchaseInstructions(
 	closeTemporaryCoreMintAta := token.CloseAccount(
 		temporaryCoreMintAta,
 		accounts.Authority.PublicKey().ToBytes(),
-		buyer.PublicKey().ToBytes(),
+		temporaryHolder.PublicKey().ToBytes(),
 	)
 
 	ixns := []solana.Instruction{
@@ -1168,11 +1177,13 @@ func (p *treasuryFundedPurchase) makeInstructions(ataPayer *common.Account) ([]s
 
 // ReserveCreateAndBuySwapHandler launches a new currency within a v1 initial
 // purchase funded by the buyer's core mint. The transaction initializes every
-// currency account, so the launch is atomic.
+// currency account, so the launch is atomic. The swap authority holds the
+// temporary core mint ATA, so it must not be the buyer.
 type ReserveCreateAndBuySwapHandler struct {
-	buyer      *common.Account
-	swapAmount uint64
-	feeAmount  uint64
+	buyer         *common.Account
+	swapAuthority *common.Account
+	swapAmount    uint64
+	feeAmount     uint64
 
 	selectedNonce    *transaction_util.Nonce
 	computeUnitLimit uint32
@@ -1186,16 +1197,22 @@ func NewReserveCreateAndBuySwapHandler(
 	ctx context.Context,
 	data ocp_data.Provider,
 	buyer *common.Account,
+	swapAuthority *common.Account,
 	mint *common.Account,
 	swapAmount, feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
 ) (SwapHandler, error) {
 	var err error
 
+	if bytes.Equal(buyer.PublicKey().ToBytes(), swapAuthority.PublicKey().ToBytes()) {
+		return nil, errors.New("buyer cannot be the swap authority")
+	}
+
 	h := &ReserveCreateAndBuySwapHandler{
-		buyer:      buyer,
-		swapAmount: swapAmount,
-		feeAmount:  feeAmount,
+		buyer:         buyer,
+		swapAuthority: swapAuthority,
+		swapAmount:    swapAmount,
+		feeAmount:     feeAmount,
 
 		selectedNonce:    selectedNonce,
 		computeUnitPrice: 10_000,
@@ -1232,7 +1249,7 @@ func (h *ReserveCreateAndBuySwapHandler) GetServerParameters() *transactionpb.St
 }
 
 func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
-	purchaseIxns, purchaseAtaBumps, err := makeCoreMintFundedPurchaseInstructions(h.launch, h.buyer, h.sourceVmConfig, h.swapAmount, h.feeAmount)
+	purchaseIxns, purchaseAtaBumps, err := makeCoreMintFundedPurchaseInstructions(h.launch, h.buyer, h.swapAuthority, h.sourceVmConfig, h.swapAmount, h.feeAmount)
 	if err != nil {
 		return nil, err
 	}

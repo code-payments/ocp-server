@@ -105,7 +105,9 @@ func (h *ReserveCreateAndBuyLegacySwapHandler) GetServerParameters() *transactio
 }
 
 func (h *ReserveCreateAndBuyLegacySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
-	purchaseIxns, _, err := makeCoreMintFundedPurchaseInstructions(h.launch, h.buyer, h.sourceVmConfig, h.swapAmount, h.feeAmount)
+	// Legacy clients sign only as the buyer, who holds the temporary core mint
+	// ATA
+	purchaseIxns, _, err := makeCoreMintFundedPurchaseInstructions(h.launch, h.buyer, h.buyer, h.sourceVmConfig, h.swapAmount, h.feeAmount)
 	if err != nil {
 		return nil, err
 	}
