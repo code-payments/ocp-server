@@ -401,8 +401,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			return handleStatefulSwapError(streamer, NewSwapDeniedError("only the currency creator can buy initial tokens"))
 		}
 
-		expectedPurchaseQuarks := s.conf.newCurrencyPurchaseQuarks.Get(ctx)
-		expectedFeeQuarks := s.conf.newCurrencyFeeQuarks.Get(ctx)
+		expectedPurchaseQuarks, expectedFeeQuarks := s.conf.getNewCurrencyLaunchQuarks(ctx, transactionVersion)
 		purchaseCoreQuarks = expectedPurchaseQuarks
 
 		if common.IsCoreMint(fromMint) {
@@ -446,7 +445,13 @@ func (s *transactionServer) handleReserveStatefulSwap(
 				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("full amount must be valued at %.2f usd", expectedFullUsdValue))
 			}
 
-			if ok, _ := currency_util.ValidateClientUsdFeeValue(
+			// A free launch has no fee to value, and exchange data can't value
+			// zero quarks
+			if expectedFeeQuarks == 0 {
+				if initiateReserveSwapReq.FeeAmount != 0 {
+					return handleStatefulSwapError(streamer, NewSwapDeniedError("fee amount must be 0 quarks"))
+				}
+			} else if ok, _ := currency_util.ValidateClientUsdFeeValue(
 				fromMint,
 				initiateReserveSwapReq.FeeAmount,
 				expectedFeeUsdValue,

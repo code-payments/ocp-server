@@ -68,16 +68,9 @@ func (p *runtime) markSwapSubmitting(ctx context.Context, record *swap.Record) e
 	if err != nil {
 		return err
 	}
-	isCurrencyLaunch, err := p.isCurrencyLaunch(ctx, record)
+	launchTerms, err := p.getCurrencyLaunchTerms(ctx, record)
 	if err != nil {
 		return err
-	}
-	var launchTerms *history_util.CurrencyLaunchTerms
-	if isCurrencyLaunch {
-		launchTerms = &history_util.CurrencyLaunchTerms{
-			PurchaseQuarks: p.conf.newCurrencyPurchaseQuarks.Get(ctx),
-			FeeQuarks:      p.conf.newCurrencyFeeQuarks.Get(ctx),
-		}
 	}
 	historyRecord, err := history_util.BuildRecordForFundedSwap(record, exchangeCurrency, nativeAmount, fiatExchangeRate, launchTerms)
 	if err != nil {
@@ -120,6 +113,32 @@ func (p *runtime) isCurrencyLaunch(ctx context.Context, swapRecord *swap.Record)
 		return false, err
 	}
 	return destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable, nil
+}
+
+// getCurrencyLaunchTerms returns what a currency launch is charged when the
+// swap is a currency's initial purchase, and nil otherwise. The terms depend on
+// the initial purchase transaction's version.
+func (p *runtime) getCurrencyLaunchTerms(ctx context.Context, swapRecord *swap.Record) (*history_util.CurrencyLaunchTerms, error) {
+	isCurrencyLaunch, err := p.isCurrencyLaunch(ctx, swapRecord)
+	if err != nil || !isCurrencyLaunch {
+		return nil, err
+	}
+
+	transactionVersion, err := transaction_util.GetInitialPurchaseTransactionVersion(swapRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	if transactionVersion == solana.MessageVersion1 {
+		return &history_util.CurrencyLaunchTerms{
+			PurchaseQuarks: p.conf.newCurrencyV1PurchaseQuarks.Get(ctx),
+			FeeQuarks:      p.conf.newCurrencyV1FeeQuarks.Get(ctx),
+		}, nil
+	}
+	return &history_util.CurrencyLaunchTerms{
+		PurchaseQuarks: p.conf.newCurrencyPurchaseQuarks.Get(ctx),
+		FeeQuarks:      p.conf.newCurrencyFeeQuarks.Get(ctx),
+	}, nil
 }
 
 // getFundedSwapValue derives the value funding a swap, along with the client's

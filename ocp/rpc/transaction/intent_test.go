@@ -59,6 +59,7 @@ import (
 	"github.com/code-payments/ocp-server/pointer"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/memo"
 	timelock_token_v1 "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/vm"
 	"github.com/code-payments/ocp-server/testutil"
@@ -69,13 +70,12 @@ import (
 //
 
 const (
-	testNodeId                 = "test-node"
-	testNoncesPerVm            = 100
-	defaultLaunchpadSupply     = 1_000_000 // in whole tokens
-	defaultTestStreamTimeout   = 30 * time.Second
-	defaultTestReceiveTimeout  = 5 * time.Second
-	withdrawalFeeQuarks        = 500_000 // $0.50, matching defaultCreateOnSendWithdrawalFeeQuarks
-	newCurrencyPurchaseAndFees = 20.0    // USD, matching defaults for the new currency purchase and fee
+	testNodeId                = "test-node"
+	testNoncesPerVm           = 100
+	defaultLaunchpadSupply    = 1_000_000 // in whole tokens
+	defaultTestStreamTimeout  = 30 * time.Second
+	defaultTestReceiveTimeout = 5 * time.Second
+	withdrawalFeeQuarks       = 500_000 // $0.50, matching defaultCreateOnSendWithdrawalFeeQuarks
 )
 
 type testEnv struct {
@@ -705,6 +705,10 @@ func launchpadSellValue(supplyFromBonding, quarks uint64) float64 {
 // launchpadQuarksForUsdValue finds the quark amount of a launchpad currency
 // whose sell value is closest to the target USD value
 func launchpadQuarksForUsdValue(supplyFromBonding uint64, usdValue float64) uint64 {
+	if usdValue <= 0 {
+		return 0
+	}
+
 	low, high := uint64(1), supplyFromBonding
 	for low < high {
 		mid := low + (high-low)/2
@@ -1819,6 +1823,28 @@ func (e *testEnv) newSwapRecord(t *testing.T, owner, fromMint, toMint, fundingId
 	}
 	require.NoError(t, e.data.SaveSwap(e.ctx, swapRecord))
 	return swapRecord
+}
+
+// setSwapTransactionVersion gives a swap a server-built transaction of the
+// requested version, which selects a currency launch's terms
+func (e *testEnv) setSwapTransactionVersion(t *testing.T, swapRecord *swap.Record, transactionVersion uint32) {
+	payer := common.GetSubsidizer().PublicKey().ToBytes()
+	ixn := memo.Instruction("swap")
+
+	txn := solana.NewV0Transaction(payer, nil, []solana.Instruction{ixn})
+	if selectSwapTransactionVersion(transactionVersion) == solana.MessageVersion1 {
+		var err error
+		txn, err = solana.NewV1Transaction(payer, solana.TransactionConfig{
+			ComputeUnitLimit:            pointer.Uint32(1_000),
+			LoadedAccountsDataSizeLimit: pointer.Uint32(1_000),
+		}, ixn)
+		require.NoError(t, err)
+	}
+
+	var err error
+	swapRecord.TransactionBlob, err = txn.Marshal()
+	require.NoError(t, err)
+	require.NoError(t, e.data.SaveSwap(e.ctx, swapRecord))
 }
 
 // getVmSwapPda gets the owner's VM swap PDA for the mint, which is the
@@ -3862,88 +3888,97 @@ func TestSubmitIntent_SendPublicPayment_SwapFunding_NewCurrencyInitialization(t 
 
 	supply := currencycreator.ToQuarks(defaultLaunchpadSupply)
 
-	t.Run("valued at the new currency purchase and fee in usd", func(t *testing.T) {
-		env, owner, fromMint, toMint := newEnv(t)
-		ownerVault := env.getVault(t, owner, fromMint)
+	for _, transactionVersion := range []uint32{0, 1} {
+		fullUsdValue, _ := newCurrencyLaunchUsdValues(transactionVersion)
 
-		quarks := launchpadQuarksForUsdValue(supply, newCurrencyPurchaseAndFees)
-		swapPda := env.getVmSwapPda(t, owner, fromMint)
-		destination := toAta(t, swapPda, fromMint)
-		req := env.withdrawalRequest(t, owner, destination, swapPda, fromMint, quarks, 0)
-		req.metadata.GetSendPublicPayment().GetClientExchangeData().NativeAmount = newCurrencyPurchaseAndFees
-		swapRecord := env.newSwapRecord(t, owner, fromMint, toMint, req.intentId, quarks, swap.StateCreated)
+		t.Run(fmt.Sprintf("v%d", transactionVersion), func(t *testing.T) {
+			t.Run("valued at the new currency purchase and fee in usd", func(t *testing.T) {
+				env, owner, fromMint, toMint := newEnv(t)
+				ownerVault := env.getVault(t, owner, fromMint)
 
-		before := env.snapshot(t, owner, swapPda)
-		result := env.submitIntent(t, req)
-		result.requireSuccess(t)
+				quarks := launchpadQuarksForUsdValue(supply, fullUsdValue)
+				swapPda := env.getVmSwapPda(t, owner, fromMint)
+				destination := toAta(t, swapPda, fromMint)
+				req := env.withdrawalRequest(t, owner, destination, swapPda, fromMint, quarks, 0)
+				req.metadata.GetSendPublicPayment().GetClientExchangeData().NativeAmount = fullUsdValue
+				swapRecord := env.newSwapRecord(t, owner, fromMint, toMint, req.intentId, quarks, swap.StateCreated)
+				env.setSwapTransactionVersion(t, swapRecord, transactionVersion)
 
-		intentRecord := env.requireIntent(t, req.intentId)
-		env.requireChanges(t, before, &dbChanges{
-			intents: []*intent.Record{{
-				IntentId:              req.intentId.PublicKey().ToBase58(),
-				IntentType:            intent.SendPublicPayment,
-				MintAccount:           fromMint.PublicKey().ToBase58(),
-				InitiatorOwnerAccount: owner.PublicKey().ToBase58(),
-				SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{
-					DestinationOwnerAccount: swapPda.PublicKey().ToBase58(),
-					DestinationTokenAccount: destination.PublicKey().ToBase58(),
-					Quantity:                quarks,
-					ExchangeCurrency:        currency_lib.USD,
-					// The quarks aren't a whole number of tokens, so derive the rate
-					// with the same precision as the server
-					ExchangeRate:   currency_util.CalculateExchangeRate(fromMint, quarks, newCurrencyPurchaseAndFees),
-					NativeAmount:   newCurrencyPurchaseAndFees,
-					UsdMarketValue: newCurrencyPurchaseAndFees,
-					IsWithdrawal:   true,
-					IsSwapSell:     true,
-				},
-				State: intent.StatePending,
-			}},
-			actions:      []*action.Record{expectedTransferAction(intentRecord, 0, ownerVault, destination, quarks)},
-			fulfillments: []*fulfillment.Record{expectedTransferFulfillment(t, intentRecord, result, 0, ownerVault, destination)},
-			balances: []*balance.Record{
-				expectedBalance(ownerVault, owner, fromMint, currencycreator.ToQuarks(100_000)-quarks, -usdCostBasis(newCurrencyPurchaseAndFees), true),
-			},
+				before := env.snapshot(t, owner, swapPda)
+				result := env.submitIntent(t, req)
+				result.requireSuccess(t)
+
+				intentRecord := env.requireIntent(t, req.intentId)
+				env.requireChanges(t, before, &dbChanges{
+					intents: []*intent.Record{{
+						IntentId:              req.intentId.PublicKey().ToBase58(),
+						IntentType:            intent.SendPublicPayment,
+						MintAccount:           fromMint.PublicKey().ToBase58(),
+						InitiatorOwnerAccount: owner.PublicKey().ToBase58(),
+						SendPublicPaymentMetadata: &intent.SendPublicPaymentMetadata{
+							DestinationOwnerAccount: swapPda.PublicKey().ToBase58(),
+							DestinationTokenAccount: destination.PublicKey().ToBase58(),
+							Quantity:                quarks,
+							ExchangeCurrency:        currency_lib.USD,
+							// The quarks aren't a whole number of tokens, so derive the rate
+							// with the same precision as the server
+							ExchangeRate:   currency_util.CalculateExchangeRate(fromMint, quarks, fullUsdValue),
+							NativeAmount:   fullUsdValue,
+							UsdMarketValue: fullUsdValue,
+							IsWithdrawal:   true,
+							IsSwapSell:     true,
+						},
+						State: intent.StatePending,
+					}},
+					actions:      []*action.Record{expectedTransferAction(intentRecord, 0, ownerVault, destination, quarks)},
+					fulfillments: []*fulfillment.Record{expectedTransferFulfillment(t, intentRecord, result, 0, ownerVault, destination)},
+					balances: []*balance.Record{
+						expectedBalance(ownerVault, owner, fromMint, currencycreator.ToQuarks(100_000)-quarks, -usdCostBasis(fullUsdValue), true),
+					},
+				})
+				env.requireReservedNonces(t, result)
+
+				updatedSwapRecord, err := env.data.GetSwapById(env.ctx, swapRecord.SwapId)
+				require.NoError(t, err)
+				assert.Equal(t, swap.StateFunding, updatedSwapRecord.State)
+			})
+
+			t.Run("not valued in usd", func(t *testing.T) {
+				env, owner, fromMint, toMint := newEnv(t)
+
+				exchangeRate := env.signedExchangeRate(t, currency_lib.CAD, 1.35, time.Now())
+				reserveState := env.signedReserveState(t, fromMint, supply, time.Now())
+				quarks := launchpadQuarksForUsdValue(supply, fullUsdValue)
+				swapPda := env.getVmSwapPda(t, owner, fromMint)
+				req := env.withdrawalRequest(t, owner, toAta(t, swapPda, fromMint), swapPda, fromMint, quarks, 0)
+				req.metadata.GetSendPublicPayment().ExchangeData = clientExchangeData(env.launchpadExchangeData(t, fromMint, quarks, exchangeRate, reserveState))
+				swapRecord := env.newSwapRecord(t, owner, fromMint, toMint, req.intentId, quarks, swap.StateCreated)
+				env.setSwapTransactionVersion(t, swapRecord, transactionVersion)
+
+				before := env.snapshot(t, owner, swapPda)
+				env.submitIntent(t, req).requireInvalidIntent(t, "swap funding must be valued in usd")
+				env.requireNoChanges(t, before)
+
+				updatedSwapRecord, err := env.data.GetSwapById(env.ctx, swapRecord.SwapId)
+				require.NoError(t, err)
+				assert.Equal(t, swap.StateCreated, updatedSwapRecord.State)
+			})
+
+			t.Run("not valued at the new currency purchase and fee", func(t *testing.T) {
+				env, owner, fromMint, toMint := newEnv(t)
+
+				quarks := launchpadQuarksForUsdValue(supply, 15)
+				swapPda := env.getVmSwapPda(t, owner, fromMint)
+				req := env.withdrawalRequest(t, owner, toAta(t, swapPda, fromMint), swapPda, fromMint, quarks, 0)
+				swapRecord := env.newSwapRecord(t, owner, fromMint, toMint, req.intentId, quarks, swap.StateCreated)
+				env.setSwapTransactionVersion(t, swapRecord, transactionVersion)
+
+				before := env.snapshot(t, owner, swapPda)
+				env.submitIntent(t, req).requireInvalidIntent(t, fmt.Sprintf("swap funding must be valued at %.2f usd", fullUsdValue))
+				env.requireNoChanges(t, before)
+			})
 		})
-		env.requireReservedNonces(t, result)
-
-		updatedSwapRecord, err := env.data.GetSwapById(env.ctx, swapRecord.SwapId)
-		require.NoError(t, err)
-		assert.Equal(t, swap.StateFunding, updatedSwapRecord.State)
-	})
-
-	t.Run("not valued in usd", func(t *testing.T) {
-		env, owner, fromMint, toMint := newEnv(t)
-
-		exchangeRate := env.signedExchangeRate(t, currency_lib.CAD, 1.35, time.Now())
-		reserveState := env.signedReserveState(t, fromMint, supply, time.Now())
-		quarks := launchpadQuarksForUsdValue(supply, newCurrencyPurchaseAndFees)
-		swapPda := env.getVmSwapPda(t, owner, fromMint)
-		req := env.withdrawalRequest(t, owner, toAta(t, swapPda, fromMint), swapPda, fromMint, quarks, 0)
-		req.metadata.GetSendPublicPayment().ExchangeData = clientExchangeData(env.launchpadExchangeData(t, fromMint, quarks, exchangeRate, reserveState))
-		swapRecord := env.newSwapRecord(t, owner, fromMint, toMint, req.intentId, quarks, swap.StateCreated)
-
-		before := env.snapshot(t, owner, swapPda)
-		env.submitIntent(t, req).requireInvalidIntent(t, "swap funding must be valued in usd")
-		env.requireNoChanges(t, before)
-
-		updatedSwapRecord, err := env.data.GetSwapById(env.ctx, swapRecord.SwapId)
-		require.NoError(t, err)
-		assert.Equal(t, swap.StateCreated, updatedSwapRecord.State)
-	})
-
-	t.Run("not valued at the new currency purchase and fee", func(t *testing.T) {
-		env, owner, fromMint, toMint := newEnv(t)
-
-		quarks := launchpadQuarksForUsdValue(supply, 15)
-		swapPda := env.getVmSwapPda(t, owner, fromMint)
-		req := env.withdrawalRequest(t, owner, toAta(t, swapPda, fromMint), swapPda, fromMint, quarks, 0)
-		env.newSwapRecord(t, owner, fromMint, toMint, req.intentId, quarks, swap.StateCreated)
-
-		before := env.snapshot(t, owner, swapPda)
-		env.submitIntent(t, req).requireInvalidIntent(t, "swap funding must be valued at 20.00 usd")
-		env.requireNoChanges(t, before)
-	})
+	}
 }
 
 type paymentFixture struct {

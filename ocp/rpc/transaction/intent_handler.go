@@ -31,6 +31,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/data/swap"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
+	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	account_worker "github.com/code-payments/ocp-server/ocp/worker/account"
 	"github.com/code-payments/ocp-server/solana"
 )
@@ -2785,7 +2786,12 @@ func validateSwapFunding(ctx context.Context, conf *conf, data ocp_data.Provider
 
 			initializesMint := destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable
 			if initializesMint {
-				expectedUsdValue := float64(conf.newCurrencyPurchaseQuarks.Get(ctx)+conf.newCurrencyFeeQuarks.Get(ctx)) / float64(common.CoreMintQuarksPerUnit)
+				transactionVersion, err := transaction_util.GetInitialPurchaseTransactionVersion(swapRecord)
+				if err != nil {
+					return nil, err
+				}
+				purchaseQuarks, feeQuarks := conf.getNewCurrencyLaunchQuarks(ctx, transactionVersion)
+				expectedUsdValue := float64(purchaseQuarks+feeQuarks) / float64(common.CoreMintQuarksPerUnit)
 				if intentRecord.SendPublicPaymentMetadata.ExchangeCurrency != currency_lib.USD {
 					return nil, NewIntentValidationError("swap funding must be valued in usd")
 				}

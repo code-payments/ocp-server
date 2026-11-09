@@ -247,10 +247,9 @@ func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, accounts 
 // is v1, which initializes every account other than the ALT within the
 // purchase
 func isV1InitialPurchase(swapRecord *swap.Record) (bool, error) {
-	var txn solana.Transaction
-	err := txn.Unmarshal(swapRecord.TransactionBlob)
+	version, err := transaction_util.GetInitialPurchaseTransactionVersion(swapRecord)
 	if err != nil {
-		return false, errors.Wrap(err, "error unmarshalling initial purchase transaction")
+		return false, err
 	}
-	return txn.Message.Version == solana.MessageVersion1, nil
+	return version == solana.MessageVersion1, nil
 }

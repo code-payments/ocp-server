@@ -7,6 +7,7 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/data/swap"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
@@ -27,6 +28,19 @@ const (
 	// realloc limit
 	MemoryResizeStepSize = 10 * 1024
 )
+
+// GetInitialPurchaseTransactionVersion returns the version of a currency's
+// initial purchase transaction, which its swap record holds until the swap
+// reaches a terminal state. The version decides how the currency is
+// initialized and what its launch is charged.
+func GetInitialPurchaseTransactionVersion(swapRecord *swap.Record) (solana.MessageVersion, error) {
+	var txn solana.Transaction
+	err := txn.Unmarshal(swapRecord.TransactionBlob)
+	if err != nil {
+		return 0, errors.Wrap(err, "error unmarshalling initial purchase transaction")
+	}
+	return txn.Message.Version, nil
+}
 
 // CurrencyLaunch builds the instructions that launch a new currency within its
 // first purchase transaction. The currency authority pays for, and signs,

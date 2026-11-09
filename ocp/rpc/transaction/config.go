@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"context"
 	"time"
 
 	"github.com/code-payments/ocp-server/config"
@@ -8,6 +9,7 @@ import (
 	"github.com/code-payments/ocp-server/config/memory"
 	"github.com/code-payments/ocp-server/config/wrapper"
 	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/solana"
 )
 
 const (
@@ -36,9 +38,16 @@ const (
 	SwapTreasuryOwnerPublicKeyConfigEnvName = envConfigPrefix + "SWAP_TREASURY_OWNER_PUBLIC_KEY"
 	defaultSwapTreasuryOwnerPublicKey       = "invalid" // Ensure something valid is set
 
+	// What a currency launch with a legacy or v0 initial purchase transaction
+	// is charged
 	NewCurrencyPurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_PURCHASE_QUARKS"
 
 	NewCurrencyFeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_FEE_QUARKS"
+
+	// What a currency launch with a v1 initial purchase transaction is charged
+	NewCurrencyV1PurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V1_PURCHASE_QUARKS"
+
+	NewCurrencyV1FeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V1_FEE_QUARKS"
 )
 
 // Assumes a USD stable coin core mint
@@ -46,6 +55,8 @@ var (
 	defaultCreateOnSendWithdrawalFeeQuarks = common.CoreMintQuarksPerUnit / 2  // $0.50
 	defaultNewCurrencyPurchaseQuarks       = 10 * common.CoreMintQuarksPerUnit // $10
 	defaultNewCurrencyFeeQuarks            = 10 * common.CoreMintQuarksPerUnit // $10
+	defaultNewCurrencyV1PurchaseQuarks     = 20 * common.CoreMintQuarksPerUnit // $20
+	defaultNewCurrencyV1FeeQuarks          = uint64(0)                         // $0
 )
 
 type conf struct {
@@ -62,6 +73,18 @@ type conf struct {
 	swapTreasuryOwnerPublicKey      config.String
 	newCurrencyPurchaseQuarks       config.Uint64
 	newCurrencyFeeQuarks            config.Uint64
+	newCurrencyV1PurchaseQuarks     config.Uint64
+	newCurrencyV1FeeQuarks          config.Uint64
+}
+
+// getNewCurrencyLaunchQuarks returns the core mint quarks a currency launch
+// purchases with and is charged as a fee, which depend on the initial purchase
+// transaction's version
+func (c *conf) getNewCurrencyLaunchQuarks(ctx context.Context, transactionVersion solana.MessageVersion) (purchaseQuarks, feeQuarks uint64) {
+	if transactionVersion == solana.MessageVersion1 {
+		return c.newCurrencyV1PurchaseQuarks.Get(ctx), c.newCurrencyV1FeeQuarks.Get(ctx)
+	}
+	return c.newCurrencyPurchaseQuarks.Get(ctx), c.newCurrencyFeeQuarks.Get(ctx)
 }
 
 // ConfigProvider defines how config values are pulled
@@ -84,6 +107,8 @@ func WithEnvConfigs() ConfigProvider {
 			swapTreasuryOwnerPublicKey:      env.NewStringConfig(SwapTreasuryOwnerPublicKeyConfigEnvName, defaultSwapTreasuryOwnerPublicKey),
 			newCurrencyPurchaseQuarks:       env.NewUint64Config(NewCurrencyPurchaseQuarksConfigEnvName, defaultNewCurrencyPurchaseQuarks),
 			newCurrencyFeeQuarks:            env.NewUint64Config(NewCurrencyFeeQuarksConfigEnvName, defaultNewCurrencyFeeQuarks),
+			newCurrencyV1PurchaseQuarks:     env.NewUint64Config(NewCurrencyV1PurchaseQuarksConfigEnvName, defaultNewCurrencyV1PurchaseQuarks),
+			newCurrencyV1FeeQuarks:          env.NewUint64Config(NewCurrencyV1FeeQuarksConfigEnvName, defaultNewCurrencyV1FeeQuarks),
 		}
 	}
 }
@@ -114,6 +139,8 @@ func withManualTestOverrides(overrides *testOverrides) ConfigProvider {
 			swapTreasuryOwnerPublicKey:      wrapper.NewStringConfig(memory.NewConfig(overrides.swapTreasuryOwnerPublicKey), defaultSwapTreasuryOwnerPublicKey),
 			newCurrencyPurchaseQuarks:       wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyPurchaseQuarks), defaultNewCurrencyPurchaseQuarks),
 			newCurrencyFeeQuarks:            wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyFeeQuarks), defaultNewCurrencyFeeQuarks),
+			newCurrencyV1PurchaseQuarks:     wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyV1PurchaseQuarks), defaultNewCurrencyV1PurchaseQuarks),
+			newCurrencyV1FeeQuarks:          wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyV1FeeQuarks), defaultNewCurrencyV1FeeQuarks),
 		}
 	}
 }

@@ -590,7 +590,7 @@ func (e *testEnv) expectedStatefulSwapTransaction(t *testing.T, req *statefulSwa
 		case initializesMint && !isSell:
 			h, err = NewReserveCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
 		case initializesMint && transactionVersion == solana.MessageVersion1:
-			h, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyPurchaseQuarks, selectedNonce)
+			h, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyV1PurchaseQuarks, selectedNonce)
 		case initializesMint:
 			h, err = NewReserveTreasuryFundedCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyPurchaseQuarks, selectedNonce)
 		case isBuy && isSell:
@@ -746,20 +746,38 @@ func (e *testEnv) setCurrencyState(t *testing.T, mint *common.Account, state cur
 	require.NoError(t, e.data.SaveCurrencyMetadata(e.ctx, metadataRecord))
 }
 
+// newCurrencyLaunchQuarks returns the default core mint quarks a launch
+// purchases with and is charged as a fee, which depend on the requested
+// transaction version
+func newCurrencyLaunchQuarks(transactionVersion uint32) (purchaseQuarks, feeQuarks uint64) {
+	if selectSwapTransactionVersion(transactionVersion) == solana.MessageVersion1 {
+		return defaultNewCurrencyV1PurchaseQuarks, defaultNewCurrencyV1FeeQuarks
+	}
+	return defaultNewCurrencyPurchaseQuarks, defaultNewCurrencyFeeQuarks
+}
+
+// newCurrencyLaunchUsdValues returns the USD values of the default launch's
+// full amount and fee for the requested transaction version
+func newCurrencyLaunchUsdValues(transactionVersion uint32) (fullUsdValue, feeUsdValue float64) {
+	purchaseQuarks, feeQuarks := newCurrencyLaunchQuarks(transactionVersion)
+	return float64(purchaseQuarks+feeQuarks) / float64(common.CoreMintQuarksPerUnit), float64(feeQuarks) / float64(common.CoreMintQuarksPerUnit)
+}
+
 // treasuryFundedNewCurrencyAmounts splits the new currency purchase and fee,
 // valued in USD at the default launchpad supply, into from_mint quarks
-func treasuryFundedNewCurrencyAmounts() (swapAmount, feeAmount uint64) {
+func treasuryFundedNewCurrencyAmounts(transactionVersion uint32) (swapAmount, feeAmount uint64) {
 	supply := currencycreator.ToQuarks(defaultLaunchpadSupply)
-	total := launchpadQuarksForUsdValue(supply, newCurrencyPurchaseAndFees)
-	fee := launchpadQuarksForUsdValue(supply, float64(defaultNewCurrencyFeeQuarks)/float64(common.CoreMintQuarksPerUnit))
+	fullUsdValue, feeUsdValue := newCurrencyLaunchUsdValues(transactionVersion)
+	total := launchpadQuarksForUsdValue(supply, fullUsdValue)
+	fee := launchpadQuarksForUsdValue(supply, feeUsdValue)
 	return total - fee, fee
 }
 
 // treasuryFundedExchangeData values the full amount at the new currency
 // purchase and fee in USD
-func (e *testEnv) treasuryFundedExchangeData(t *testing.T, fromMint *common.Account, quarks uint64) *transactionpb.VerifiedExchangeData {
+func (e *testEnv) treasuryFundedExchangeData(t *testing.T, fromMint *common.Account, quarks uint64, transactionVersion uint32) *transactionpb.VerifiedExchangeData {
 	exchangeData := e.exchangeData(t, fromMint, quarks)
-	exchangeData.NativeAmount = newCurrencyPurchaseAndFees
+	exchangeData.NativeAmount, _ = newCurrencyLaunchUsdValues(transactionVersion)
 	return exchangeData
 }
 
@@ -2641,7 +2659,8 @@ func TestStatefulSwap_ReserveNewCurrency_HappyPath(t *testing.T) {
 					f := newReserveSwapFixture(t, withAntispamChecks())
 					mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
 
-					req := f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, defaultNewCurrencyPurchaseQuarks, defaultNewCurrencyFeeQuarks)
+					purchaseQuarks, feeQuarks := newCurrencyLaunchQuarks(transactionVersion)
+					req := f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, purchaseQuarks, feeQuarks)
 					req.swapAuthority = f.owner
 					req.transactionVersion = transactionVersion
 					req.reserve.FundingSource = tc.fundingSource
@@ -2649,7 +2668,7 @@ func TestStatefulSwap_ReserveNewCurrency_HappyPath(t *testing.T) {
 					case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
 						req.reserve.FundingId = base58.Encode(make([]byte, ed25519.SignatureSize))
 					case transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP:
-						req.reserve.FundingId = f.env.coinbase.putOrder(t, f.owner, f.swapPda(t), defaultNewCurrencyPurchaseQuarks+defaultNewCurrencyFeeQuarks)
+						req.reserve.FundingId = f.env.coinbase.putOrder(t, f.owner, f.swapPda(t), purchaseQuarks+feeQuarks)
 					}
 
 					before := f.env.swapSnapshot(t, []*common.Account{f.owner}, mint)
@@ -2678,11 +2697,11 @@ func TestStatefulSwap_ReserveNewCurrency_HappyPath(t *testing.T) {
 				f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
 				mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
 
-				swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts()
+				swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts(transactionVersion)
 				req := f.env.reserveSwapRequest(t, f.owner, f.launchpad1, mint, swapAmount, feeAmount)
 				req.swapAuthority = f.owner
 				req.transactionVersion = transactionVersion
-				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount)
+				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount, transactionVersion)
 
 				before := f.env.swapSnapshot(t, []*common.Account{f.owner}, f.launchpad1, mint)
 				result := f.env.statefulSwap(t, req)
@@ -2756,7 +2775,11 @@ func (e *testEnv) requireNewCurrencyServerParameters(t *testing.T, result *state
 	if treasuryFunded {
 		require.NotNil(t, params.Treasury)
 		assert.Equal(t, e.swapTreasury.PublicKey().ToBytes(), params.Treasury.Value)
-		assert.EqualValues(t, defaultNewCurrencyPurchaseQuarks, params.TreasuryPurchaseAmount)
+		expectedPurchaseQuarks := uint64(defaultNewCurrencyPurchaseQuarks)
+		if result.expectedTxn.Message.Version == solana.MessageVersion1 {
+			expectedPurchaseQuarks = defaultNewCurrencyV1PurchaseQuarks
+		}
+		assert.Equal(t, expectedPurchaseQuarks, params.TreasuryPurchaseAmount)
 	} else {
 		assert.Nil(t, params.Treasury)
 		assert.Zero(t, params.TreasuryPurchaseAmount)
@@ -2850,14 +2873,14 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 		name           string
 		treasuryFunded bool
 		setup          func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest)
-		verify         func(t *testing.T, result *statefulSwapResult)
+		verify         func(t *testing.T, result *statefulSwapResult, transactionVersion uint32)
 	}{
 		{
 			name: "owner isn't the swap authority",
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				req.swapAuthority = f.env.newAccount(t)
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "owner must be swap authority")
 			},
 		},
@@ -2866,7 +2889,7 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				req.reserve.ToMint = f.env.newCurrencyAwaitingPurchase(t, f.env.newAccount(t)).ToProto()
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireDenied(t, "only the currency creator can buy initial tokens")
 			},
 		},
@@ -2875,27 +2898,31 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				req.reserve.SwapAmount++
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
-				result.requireDenied(t, fmt.Sprintf("swap amount must be %d quarks", defaultNewCurrencyPurchaseQuarks))
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				purchaseQuarks, _ := newCurrencyLaunchQuarks(transactionVersion)
+				result.requireDenied(t, fmt.Sprintf("swap amount must be %d quarks", purchaseQuarks))
 			},
 		},
 		{
 			name: "core mint fee amount",
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
-				req.reserve.FeeAmount--
+				req.reserve.FeeAmount++
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
-				result.requireDenied(t, fmt.Sprintf("fee amount must be %d quarks", defaultNewCurrencyFeeQuarks))
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				_, feeQuarks := newCurrencyLaunchQuarks(transactionVersion)
+				result.requireDenied(t, fmt.Sprintf("fee amount must be %d quarks", feeQuarks))
 			},
 		},
 		{
 			name: "core mint insufficient balance",
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
-				owner := f.env.newFundedUser(t, defaultNewCurrencyPurchaseQuarks+defaultNewCurrencyFeeQuarks-1)
+				owner := f.env.newFundedUser(t, req.reserve.SwapAmount+req.reserve.FeeAmount-1)
 				req.reserve.ToMint = f.env.newCurrencyAwaitingPurchase(t, owner).ToProto()
 				req.owner, req.swapAuthority = owner, owner
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) { result.requireInvalidSwap(t, "insufficient balance") },
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				result.requireInvalidSwap(t, "insufficient balance")
+			},
 		},
 		{
 			name:           "treasury funded by an external wallet",
@@ -2904,7 +2931,7 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 				req.reserve.FundingSource = transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET
 				req.reserve.FundingId = base58.Encode(make([]byte, ed25519.SignatureSize))
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireDenied(t, "source mint must be core mint")
 			},
 		},
@@ -2914,7 +2941,7 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				req.reserve.FullAmountExchangeData = nil
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "full amount exchange data is required")
 			},
 		},
@@ -2924,7 +2951,7 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
 				req.reserve.FullAmountExchangeData.CoreMintFiatExchangeRate.Signature.Value[0] ^= 0xff
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "exchange rate validation failed")
 			},
 		},
@@ -2932,20 +2959,20 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 			name:           "treasury funded exchange data for another mint",
 			treasuryFunded: true,
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
-				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad2, req.reserve.SwapAmount+req.reserve.FeeAmount)
+				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad2, req.reserve.SwapAmount+req.reserve.FeeAmount, req.transactionVersion)
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "full amount exchange data mint must be the source mint")
 			},
 		},
 		{
-			name:           "treasury funded exchange data excludes the fee",
+			name:           "treasury funded exchange data for another amount",
 			treasuryFunded: true,
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
-				// Consistent exchange data, but only for the swap amount
-				req.reserve.FullAmountExchangeData = f.env.exchangeData(t, f.launchpad1, req.reserve.SwapAmount)
+				// Consistent exchange data, but not for the swap and fee amount
+				req.reserve.FullAmountExchangeData = f.env.exchangeData(t, f.launchpad1, req.reserve.SwapAmount+req.reserve.FeeAmount-1)
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "full amount exchange data quarks must be the full swap and fee amount")
 			},
 		},
@@ -2958,7 +2985,7 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 				reserveState := f.env.signedReserveState(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply), time.Now())
 				req.reserve.FullAmountExchangeData = f.env.launchpadExchangeData(t, f.launchpad1, quarks, exchangeRate, reserveState)
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
 				result.requireInvalidSwap(t, "full amount exchange data must be in usd")
 			},
 		},
@@ -2971,46 +2998,58 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 				req.reserve.SwapAmount += currencycreator.ToQuarks(10)
 				req.reserve.FullAmountExchangeData = f.env.exchangeData(t, f.launchpad1, req.reserve.SwapAmount+req.reserve.FeeAmount)
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
-				result.requireDenied(t, fmt.Sprintf("full amount must be valued at %.2f usd", newCurrencyPurchaseAndFees))
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				fullUsdValue, _ := newCurrencyLaunchUsdValues(transactionVersion)
+				result.requireDenied(t, fmt.Sprintf("full amount must be valued at %.2f usd", fullUsdValue))
 			},
 		},
 		{
 			name:           "treasury funded fee value",
 			treasuryFunded: true,
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
-				shift := currencycreator.ToQuarks(10)
-				req.reserve.SwapAmount += shift
-				req.reserve.FeeAmount -= shift
+				// Moves value from the purchase to the fee, keeping the full
+				// amount
+				shift := req.reserve.SwapAmount / 2
+				req.reserve.SwapAmount -= shift
+				req.reserve.FeeAmount += shift
 			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
-				result.requireDenied(t, "fee amount must be valued at 10.00 usd")
+			verify: func(t *testing.T, result *statefulSwapResult, transactionVersion uint32) {
+				_, feeUsdValue := newCurrencyLaunchUsdValues(transactionVersion)
+				if feeUsdValue == 0 {
+					result.requireDenied(t, "fee amount must be 0 quarks")
+					return
+				}
+				result.requireDenied(t, fmt.Sprintf("fee amount must be valued at %.2f usd", feeUsdValue))
 			},
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newReserveSwapFixture(t)
-			mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
+		for _, transactionVersion := range []uint32{0, 1} {
+			t.Run(fmt.Sprintf("v%d/%s", transactionVersion, tc.name), func(t *testing.T) {
+				f := newReserveSwapFixture(t)
+				mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
 
-			var req *statefulSwapRequest
-			if tc.treasuryFunded {
-				f.env.credit(t, f.env.getVault(t, f.owner, f.launchpad1), currencycreator.ToQuarks(100_000))
-				f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
+				var req *statefulSwapRequest
+				if tc.treasuryFunded {
+					f.env.credit(t, f.env.getVault(t, f.owner, f.launchpad1), currencycreator.ToQuarks(100_000))
+					f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
 
-				swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts()
-				req = f.env.reserveSwapRequest(t, f.owner, f.launchpad1, mint, swapAmount, feeAmount)
-				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount)
-			} else {
-				req = f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, defaultNewCurrencyPurchaseQuarks, defaultNewCurrencyFeeQuarks)
-			}
-			req.swapAuthority = f.owner
-			tc.setup(t, f, req)
+					swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts(transactionVersion)
+					req = f.env.reserveSwapRequest(t, f.owner, f.launchpad1, mint, swapAmount, feeAmount)
+					req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount, transactionVersion)
+				} else {
+					purchaseQuarks, feeQuarks := newCurrencyLaunchQuarks(transactionVersion)
+					req = f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, purchaseQuarks, feeQuarks)
+				}
+				req.swapAuthority = f.owner
+				req.transactionVersion = transactionVersion
+				tc.setup(t, f, req)
 
-			before := f.env.swapSnapshot(t, []*common.Account{f.owner, req.owner}, f.launchpad1, mint)
-			result := f.env.statefulSwap(t, req)
-			tc.verify(t, result)
-			f.env.requireNoSwapChanges(t, before, result)
-		})
+				before := f.env.swapSnapshot(t, []*common.Account{f.owner, req.owner}, f.launchpad1, mint)
+				result := f.env.statefulSwap(t, req)
+				tc.verify(t, result, transactionVersion)
+				f.env.requireNoSwapChanges(t, before, result)
+			})
+		}
 	}
 }
 
@@ -3658,10 +3697,10 @@ func TestGetSwap(t *testing.T) {
 		f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
 		mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
 
-		swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts()
+		swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts(0)
 		req := f.env.reserveSwapRequest(t, f.owner, f.launchpad1, mint, swapAmount, feeAmount)
 		req.swapAuthority = f.owner
-		req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount)
+		req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount, 0)
 		result := f.env.statefulSwap(t, req)
 		result.requireSuccess(t)
 
