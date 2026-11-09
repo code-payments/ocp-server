@@ -585,10 +585,14 @@ func (e *testEnv) expectedStatefulSwapTransaction(t *testing.T, req *statefulSwa
 		}
 
 		switch {
-		case initializesMint && !isSell:
+		case initializesMint && !isSell && transactionVersion == solana.MessageVersion1:
 			h, err = NewReserveCreateAndBuySwapHandler(e.ctx, e.data, req.owner, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
-		case initializesMint:
+		case initializesMint && !isSell:
+			h, err = NewReserveCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
+		case initializesMint && transactionVersion == solana.MessageVersion1:
 			h, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyPurchaseQuarks, selectedNonce)
+		case initializesMint:
+			h, err = NewReserveTreasuryFundedCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyPurchaseQuarks, selectedNonce)
 		case isBuy && isSell:
 			h = NewReserveBuySellSwapHandler(e.data, req.owner, req.swapAuthority, fromMint, toMint, p.SwapAmount, selectedNonce, transactionVersion)
 		case isBuy:
@@ -1361,8 +1365,8 @@ func deriveClientNewCurrencyAccounts(t *testing.T, params *transactionpb.Statefu
 	return accounts
 }
 
-// requireReserveNewCurrencyClientRebuildMatches follows the documented v0
-// instruction formats for currency creation, deriving the new currency's
+// requireReserveNewCurrencyClientRebuildMatches follows the documented v0 and
+// v1 instruction formats for currency creation, deriving the new currency's
 // accounts from the server parameters
 func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 	t *testing.T,
@@ -1390,61 +1394,67 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 	ownerVmDepositAccounts, err := owner.GetVmDepositAccounts(newCurrency.vmConfig)
 	require.NoError(t, err)
 
+	authority := params.Authority.Value
+	isV1 := params.TransactionConfig != nil
+
+	initIxns := []solana.Instruction{
+		currencycreator.NewInitializeCurrencyInstruction(
+			&currencycreator.InitializeCurrencyInstructionAccounts{
+				Authority: authority,
+				Mint:      newCurrency.mint,
+				Currency:  newCurrency.currencyConfig,
+			},
+			&currencycreator.InitializeCurrencyInstructionArgs{
+				Name:     params.Name,
+				Symbol:   params.Symbol,
+				Seed:     params.Seed.Value,
+				Bump:     newCurrency.currencyConfigBump,
+				MintBump: newCurrency.mintBump,
+			},
+		),
+		currencycreator.NewInitializePoolInstruction(
+			&currencycreator.InitializePoolInstructionAccounts{
+				Authority:   authority,
+				Currency:    newCurrency.currencyConfig,
+				TargetMint:  newCurrency.mint,
+				BaseMint:    coreMint,
+				Pool:        newCurrency.liquidityPool,
+				VaultTarget: newCurrency.vaultMint,
+				VaultBase:   newCurrency.vaultCore,
+			},
+			&currencycreator.InitializePoolInstructionArgs{
+				SellFee:         uint16(params.SellFeeBps),
+				Bump:            newCurrency.liquidityPoolBump,
+				VaultTargetBump: newCurrency.vaultMintBump,
+				VaultBaseBump:   newCurrency.vaultCoreBump,
+			},
+		),
+		vm.NewInitVmInstruction(
+			&vm.InitVmInstructionAccounts{
+				VmAuthority: authority,
+				Vm:          newCurrency.vmConfig.Vm.PublicKey().ToBytes(),
+				VmOmnibus:   newCurrency.vmConfig.Omnibus.PublicKey().ToBytes(),
+				Mint:        newCurrency.mint,
+			},
+			&vm.InitVmInstructionArgs{
+				LockDuration:  uint8(params.VmLockDurationInDays),
+				VmBump:        newCurrency.vmBump,
+				VmOmnibusBump: newCurrency.omnibusBump,
+			},
+		),
+	}
+
+	createVmDepositAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(authority, ownerVmDepositAccounts.Pda.PublicKey().ToBytes(), newCurrency.mint)
+	require.NoError(t, err)
+
 	var swapIxns []solana.Instruction
 	if params.Treasury == nil {
 		require.True(t, common.IsCoreMint(fromMint))
 
-		authority := params.Authority.Value
 		createOwnerCoreAtaIxn, ownerCoreAta, err := token.CreateAssociatedTokenAccountIdempotent(authority, owner.PublicKey().ToBytes(), coreMint)
 		require.NoError(t, err)
-		createVmDepositAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(authority, ownerVmDepositAccounts.Pda.PublicKey().ToBytes(), newCurrency.mint)
-		require.NoError(t, err)
 
-		swapIxns = []solana.Instruction{
-			currencycreator.NewInitializeCurrencyInstruction(
-				&currencycreator.InitializeCurrencyInstructionAccounts{
-					Authority: authority,
-					Mint:      newCurrency.mint,
-					Currency:  newCurrency.currencyConfig,
-				},
-				&currencycreator.InitializeCurrencyInstructionArgs{
-					Name:     params.Name,
-					Symbol:   params.Symbol,
-					Seed:     params.Seed.Value,
-					Bump:     newCurrency.currencyConfigBump,
-					MintBump: newCurrency.mintBump,
-				},
-			),
-			currencycreator.NewInitializePoolInstruction(
-				&currencycreator.InitializePoolInstructionAccounts{
-					Authority:   authority,
-					Currency:    newCurrency.currencyConfig,
-					TargetMint:  newCurrency.mint,
-					BaseMint:    coreMint,
-					Pool:        newCurrency.liquidityPool,
-					VaultTarget: newCurrency.vaultMint,
-					VaultBase:   newCurrency.vaultCore,
-				},
-				&currencycreator.InitializePoolInstructionArgs{
-					SellFee:         uint16(params.SellFeeBps),
-					Bump:            newCurrency.liquidityPoolBump,
-					VaultTargetBump: newCurrency.vaultMintBump,
-					VaultBaseBump:   newCurrency.vaultCoreBump,
-				},
-			),
-			vm.NewInitVmInstruction(
-				&vm.InitVmInstructionAccounts{
-					VmAuthority: authority,
-					Vm:          newCurrency.vmConfig.Vm.PublicKey().ToBytes(),
-					VmOmnibus:   newCurrency.vmConfig.Omnibus.PublicKey().ToBytes(),
-					Mint:        newCurrency.mint,
-				},
-				&vm.InitVmInstructionArgs{
-					LockDuration:  uint8(params.VmLockDurationInDays),
-					VmBump:        newCurrency.vmBump,
-					VmOmnibusBump: newCurrency.omnibusBump,
-				},
-			),
+		swapIxns = append(initIxns,
 			createOwnerCoreAtaIxn,
 			createVmDepositAtaIxn,
 			vm.NewTransferForSwapWithFeeInstruction(
@@ -1480,17 +1490,23 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 				},
 			),
 			token.CloseAccount(ownerCoreAta, authority, owner.PublicKey().ToBytes()),
-		}
+		)
 	} else {
 		require.False(t, common.IsCoreMint(fromMint))
+
+		// v1 pays for the treasury's from mint ATA with the currency authority
+		treasuryFromMintAtaPayer := payer
+		if isV1 {
+			treasuryFromMintAtaPayer = authority
+		}
 
 		treasury := params.Treasury.Value
 		treasuryCoreAta, err := token.GetAssociatedAccount(treasury, coreMint)
 		require.NoError(t, err)
-		createTreasuryFromMintAtaIxn, treasuryFromMintAta, err := token.CreateAssociatedTokenAccountIdempotent(payer, treasury, fromMint.PublicKey().ToBytes())
+		createTreasuryFromMintAtaIxn, treasuryFromMintAta, err := token.CreateAssociatedTokenAccountIdempotent(treasuryFromMintAtaPayer, treasury, fromMint.PublicKey().ToBytes())
 		require.NoError(t, err)
 
-		swapIxns = []solana.Instruction{
+		purchaseIxns := []solana.Instruction{
 			createTreasuryFromMintAtaIxn,
 			vm.NewTransferForSwapWithFeeInstruction(
 				&vm.TransferForSwapWithFeeInstructionAccounts{
@@ -1541,11 +1557,83 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 				},
 			),
 		}
+
+		// v0 transactions rely on the launcher initializing the currency, VM
+		// and owner's VM deposit ATA beforehand
+		if isV1 {
+			swapIxns = append(initIxns, createVmDepositAtaIxn)
+		}
+		swapIxns = append(swapIxns, purchaseIxns...)
+	}
+
+	if isV1 {
+		swapIxns = append(swapIxns, clientNewCurrencyPostPurchaseInstructions(t, params, newCurrency)...)
+	} else {
+		assert.Empty(t, params.MemoryAccounts)
 	}
 
 	ixns := clientSwapPrefix(payer, params.Nonce.Value, params.ComputeUnitLimit, params.ComputeUnitPrice, params.MemoValue, params.TransactionConfig)
 	ixns = append(ixns, swapIxns...)
 	requireClientTransactionMatches(t, serverTxn, payer, params.Alts, params.TransactionConfig, params.Blockhash, ixns)
+}
+
+// clientNewCurrencyPostPurchaseInstructions follows the documented v1
+// instructions that complete a launch after the purchase: metadata, memory
+// account initialization, then the fee account
+func clientNewCurrencyPostPurchaseInstructions(
+	t *testing.T,
+	params *transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrencyServerParameter,
+	newCurrency *clientNewCurrencyAccounts,
+) []solana.Instruction {
+	authority := params.Authority.Value
+	vmAddress := newCurrency.vmConfig.Vm.PublicKey().ToBytes()
+
+	metadataAddress, _, err := currencycreator.GetMetadataAddress(&currencycreator.GetMetadataAddressArgs{Mint: newCurrency.mint})
+	require.NoError(t, err)
+
+	ixns := []solana.Instruction{
+		currencycreator.NewInitializeMetadataInstruction(
+			&currencycreator.InitializeMetadataInstructionAccounts{
+				Authority: authority,
+				Mint:      newCurrency.mint,
+				Currency:  newCurrency.currencyConfig,
+				Metadata:  metadataAddress,
+			},
+			&currencycreator.InitializeMetadataInstructionArgs{},
+		),
+	}
+
+	// Clients verify each memory account address is derived from the VM and
+	// name
+	require.NotEmpty(t, params.MemoryAccounts)
+	for _, memoryAccount := range params.MemoryAccounts {
+		address, bump, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
+			Name: memoryAccount.Name,
+			Vm:   vmAddress,
+		})
+		require.NoError(t, err)
+		require.Equal(t, []byte(address), memoryAccount.Address.Value, "memory account address isn't derived from the vm and name")
+
+		ixns = append(ixns, vm.NewInitMemoryInstruction(
+			&vm.InitMemoryInstructionAccounts{
+				VmAuthority: authority,
+				Vm:          vmAddress,
+				VmMemory:    address,
+			},
+			&vm.InitMemoryInstructionArgs{
+				Name:         memoryAccount.Name,
+				NumAccounts:  memoryAccount.NumAccounts,
+				AccountSize:  uint16(memoryAccount.AccountSize),
+				VmMemoryBump: bump,
+			},
+		))
+	}
+
+	createFeeAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(authority, params.FeeAccountOwner.Value, newCurrency.mint)
+	require.NoError(t, err)
+	ixns = append(ixns, createFeeAtaIxn)
+
+	return ixns
 }
 
 //
@@ -2538,73 +2626,111 @@ func TestStatefulSwap_Reserve_Antispam(t *testing.T) {
 //
 
 func TestStatefulSwap_ReserveNewCurrency_HappyPath(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		fundingSource transactionpb.FundingSource
-		initialState  swap.State
-	}{
-		{"core mint funded by submit intent", transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT, swap.StateCreated},
-		{"core mint funded by external wallet", transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET, swap.StateFunding},
-		{"core mint funded by coinbase onramp", transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP, swap.StateFunding},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newReserveSwapFixture(t, withAntispamChecks())
-			mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
+	for _, transactionVersion := range []uint32{0, 1} {
+		t.Run(fmt.Sprintf("v%d", transactionVersion), func(t *testing.T) {
+			for _, tc := range []struct {
+				name          string
+				fundingSource transactionpb.FundingSource
+				initialState  swap.State
+			}{
+				{"core mint funded by submit intent", transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT, swap.StateCreated},
+				{"core mint funded by external wallet", transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET, swap.StateFunding},
+				{"core mint funded by coinbase onramp", transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP, swap.StateFunding},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					f := newReserveSwapFixture(t, withAntispamChecks())
+					mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
 
-			req := f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, defaultNewCurrencyPurchaseQuarks, defaultNewCurrencyFeeQuarks)
-			req.swapAuthority = f.owner
-			req.reserve.FundingSource = tc.fundingSource
-			switch tc.fundingSource {
-			case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
-				req.reserve.FundingId = base58.Encode(make([]byte, ed25519.SignatureSize))
-			case transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP:
-				req.reserve.FundingId = f.env.coinbase.putOrder(t, f.owner, f.swapPda(t), defaultNewCurrencyPurchaseQuarks+defaultNewCurrencyFeeQuarks)
+					req := f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, mint, defaultNewCurrencyPurchaseQuarks, defaultNewCurrencyFeeQuarks)
+					req.swapAuthority = f.owner
+					req.transactionVersion = transactionVersion
+					req.reserve.FundingSource = tc.fundingSource
+					switch tc.fundingSource {
+					case transactionpb.FundingSource_FUNDING_SOURCE_EXTERNAL_WALLET:
+						req.reserve.FundingId = base58.Encode(make([]byte, ed25519.SignatureSize))
+					case transactionpb.FundingSource_FUNDING_SOURCE_COINBASE_ONRAMP:
+						req.reserve.FundingId = f.env.coinbase.putOrder(t, f.owner, f.swapPda(t), defaultNewCurrencyPurchaseQuarks+defaultNewCurrencyFeeQuarks)
+					}
+
+					before := f.env.swapSnapshot(t, []*common.Account{f.owner}, mint)
+					result := f.env.statefulSwap(t, req)
+					f.env.requireSwapCreated(t, before, req, result, expectedSwapRecord(t, req, result, tc.initialState), map[string]currency.MetadataState{
+						mint.PublicKey().ToBase58(): currency.MetadataStatePrePurchaseSetup,
+					})
+
+					require.Len(t, result.signatures, 1)
+					assert.Equal(t, selectSwapTransactionVersion(transactionVersion), result.expectedTxn.Message.Version)
+					f.env.requireNewCurrencyServerParameters(t, result, common.CoreMintAccount, mint, false)
+					requireNewCurrencyServerSigners(t, result, f.env, mint, common.GetSubsidizer(), f.owner)
+
+					assert.Equal(t, []string{
+						expectedAntispamSwapCall(swap.KindReserve, req.reserve.FundingSource, req.reserve.FromMint, req.reserve.ToMint, req.reserve.SwapAmount, req.reserve.FeeAmount, true),
+					}, f.env.antispamIntegration.getCalls())
+
+					// Funding moves the balance later
+					f.env.requireBalance(t, f.env.getVault(t, f.owner, common.CoreMintAccount), common.ToCoreMintQuarks(reserveSwapCoreBalance))
+				})
 			}
 
-			before := f.env.swapSnapshot(t, []*common.Account{f.owner}, mint)
-			result := f.env.statefulSwap(t, req)
-			f.env.requireSwapCreated(t, before, req, result, expectedSwapRecord(t, req, result, tc.initialState), map[string]currency.MetadataState{
-				mint.PublicKey().ToBase58(): currency.MetadataStatePrePurchaseSetup,
+			t.Run("treasury funded", func(t *testing.T) {
+				f := newReserveSwapFixture(t, withAntispamChecks())
+				f.env.credit(t, f.env.getVault(t, f.owner, f.launchpad1), currencycreator.ToQuarks(100_000))
+				f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
+				mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
+
+				swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts()
+				req := f.env.reserveSwapRequest(t, f.owner, f.launchpad1, mint, swapAmount, feeAmount)
+				req.swapAuthority = f.owner
+				req.transactionVersion = transactionVersion
+				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount)
+
+				before := f.env.swapSnapshot(t, []*common.Account{f.owner}, f.launchpad1, mint)
+				result := f.env.statefulSwap(t, req)
+				f.env.requireSwapCreated(t, before, req, result, expectedSwapRecord(t, req, result, swap.StateCreated), map[string]currency.MetadataState{
+					mint.PublicKey().ToBase58(): currency.MetadataStatePrePurchaseSetup,
+				})
+
+				require.Len(t, result.signatures, 1)
+				assert.Equal(t, selectSwapTransactionVersion(transactionVersion), result.expectedTxn.Message.Version)
+				f.env.requireNewCurrencyServerParameters(t, result, f.launchpad1, mint, true)
+
+				sourceVmConfig, err := common.GetVmConfigForMint(f.env.ctx, f.env.data, f.launchpad1)
+				require.NoError(t, err)
+				expectedSigners := []*common.Account{common.GetSubsidizer(), f.owner, sourceVmConfig.Authority, f.env.swapTreasury}
+				requireNewCurrencyServerSigners(t, result, f.env, mint, expectedSigners...)
+
+				assert.Equal(t, []string{
+					expectedAntispamSwapCall(swap.KindReserve, req.reserve.FundingSource, req.reserve.FromMint, req.reserve.ToMint, req.reserve.SwapAmount, req.reserve.FeeAmount, true),
+				}, f.env.antispamIntegration.getCalls())
 			})
-
-			require.Len(t, result.signatures, 1)
-			assert.Equal(t, solana.MessageVersion0, result.expectedTxn.Message.Version)
-			f.env.requireNewCurrencyServerParameters(t, result, common.CoreMintAccount, mint, false)
-
-			assert.Equal(t, []string{
-				expectedAntispamSwapCall(swap.KindReserve, req.reserve.FundingSource, req.reserve.FromMint, req.reserve.ToMint, req.reserve.SwapAmount, req.reserve.FeeAmount, true),
-			}, f.env.antispamIntegration.getCalls())
-
-			// Funding moves the balance later
-			f.env.requireBalance(t, f.env.getVault(t, f.owner, common.CoreMintAccount), common.ToCoreMintQuarks(reserveSwapCoreBalance))
 		})
 	}
+}
 
-	t.Run("treasury funded", func(t *testing.T) {
-		f := newReserveSwapFixture(t, withAntispamChecks())
-		f.env.credit(t, f.env.getVault(t, f.owner, f.launchpad1), currencycreator.ToQuarks(100_000))
-		f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
-		mint := f.env.newCurrencyAwaitingPurchase(t, f.owner)
+// requireNewCurrencyServerSigners requires the transaction's signers to be
+// exactly the expected accounts, plus the new currency's authority whenever
+// the transaction initializes the currency. Treasury-funded v0 transactions
+// don't, because the launcher initializes it beforehand.
+func requireNewCurrencyServerSigners(t *testing.T, result *statefulSwapResult, e *testEnv, mint *common.Account, expected ...*common.Account) {
+	params := result.serverParameters.GetReserveNewCurrency()
+	require.NotNil(t, params)
 
-		swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts()
-		req := f.env.reserveSwapRequest(t, f.owner, f.launchpad1, mint, swapAmount, feeAmount)
-		req.swapAuthority = f.owner
-		req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount)
+	metadataRecord, err := e.data.GetCurrencyMetadata(e.ctx, mint.PublicKey().ToBase58())
+	require.NoError(t, err)
 
-		before := f.env.swapSnapshot(t, []*common.Account{f.owner}, f.launchpad1, mint)
-		result := f.env.statefulSwap(t, req)
-		f.env.requireSwapCreated(t, before, req, result, expectedSwapRecord(t, req, result, swap.StateCreated), map[string]currency.MetadataState{
-			mint.PublicKey().ToBase58(): currency.MetadataStatePrePurchaseSetup,
-		})
+	var expectedSigners []string
+	for _, account := range expected {
+		expectedSigners = append(expectedSigners, account.PublicKey().ToBase58())
+	}
+	if params.Treasury == nil || result.expectedTxn.Message.Version == solana.MessageVersion1 {
+		expectedSigners = append(expectedSigners, metadataRecord.Authority)
+	}
 
-		require.Len(t, result.signatures, 1)
-		assert.Equal(t, solana.MessageVersion0, result.expectedTxn.Message.Version)
-		f.env.requireNewCurrencyServerParameters(t, result, f.launchpad1, mint, true)
-
-		assert.Equal(t, []string{
-			expectedAntispamSwapCall(swap.KindReserve, req.reserve.FundingSource, req.reserve.FromMint, req.reserve.ToMint, req.reserve.SwapAmount, req.reserve.FeeAmount, true),
-		}, f.env.antispamIntegration.getCalls())
-	})
+	var actualSigners []string
+	for i := range result.expectedTxn.Message.Header.NumSignatures {
+		actualSigners = append(actualSigners, base58.Encode(result.expectedTxn.Message.Accounts[i]))
+	}
+	assert.ElementsMatch(t, expectedSigners, actualSigners)
 }
 
 // requireNewCurrencyServerParameters verifies every currency creation server
@@ -2624,9 +2750,23 @@ func (e *testEnv) requireNewCurrencyServerParameters(t *testing.T, result *state
 	assert.EqualValues(t, currencycreator.DefaultSellFeeBps, params.SellFeeBps)
 	assert.EqualValues(t, timelock_token_v1.DefaultNumDaysLocked, params.VmLockDurationInDays)
 	assert.Equal(t, common.CoreMintFeesAccount.PublicKey().ToBytes(), params.FeeDestination.Value)
+	assert.Equal(t, common.GetSubsidizer().PublicKey().ToBytes(), params.FeeAccountOwner.Value)
 	assert.Empty(t, params.MemoValue)
 
-	// Currency creation is v0 only
+	if treasuryFunded {
+		require.NotNil(t, params.Treasury)
+		assert.Equal(t, e.swapTreasury.PublicKey().ToBytes(), params.Treasury.Value)
+		assert.EqualValues(t, defaultNewCurrencyPurchaseQuarks, params.TreasuryPurchaseAmount)
+	} else {
+		assert.Nil(t, params.Treasury)
+		assert.Zero(t, params.TreasuryPurchaseAmount)
+	}
+
+	if result.expectedTxn.Message.Version == solana.MessageVersion1 {
+		e.requireNewCurrencyV1ServerParameters(t, result, mint)
+		return
+	}
+
 	assert.Nil(t, params.TransactionConfig)
 	assert.Empty(t, params.MemoryAccounts)
 	assert.EqualValues(t, 10_000, params.ComputeUnitPrice)
@@ -2637,14 +2777,71 @@ func (e *testEnv) requireNewCurrencyServerParameters(t *testing.T, result *state
 	assert.True(t, proto.Equal(transaction_util.ToProtoAlt(expectedAlt), params.Alts[0]), "unexpected alt")
 
 	if treasuryFunded {
-		require.NotNil(t, params.Treasury)
-		assert.Equal(t, e.swapTreasury.PublicKey().ToBytes(), params.Treasury.Value)
-		assert.EqualValues(t, defaultNewCurrencyPurchaseQuarks, params.TreasuryPurchaseAmount)
 		assert.EqualValues(t, 250_000, params.ComputeUnitLimit)
 	} else {
-		assert.Nil(t, params.Treasury)
-		assert.Zero(t, params.TreasuryPurchaseAmount)
 		assert.EqualValues(t, 300_000, params.ComputeUnitLimit)
+	}
+}
+
+// requireNewCurrencyV1ServerParameters verifies the v1 transaction config and
+// the memory accounts initialized within the transaction
+func (e *testEnv) requireNewCurrencyV1ServerParameters(t *testing.T, result *statefulSwapResult, mint *common.Account) {
+	params := result.serverParameters.GetReserveNewCurrency()
+
+	assert.Empty(t, params.Alts)
+	assert.Zero(t, params.ComputeUnitLimit)
+	assert.Zero(t, params.ComputeUnitPrice)
+
+	config := params.TransactionConfig
+	require.NotNil(t, config)
+	assert.Equal(t, *result.expectedTxn.Message.Config.ComputeUnitLimit, config.ComputeUnitLimit)
+	assert.EqualValues(t, transaction_util.NewCurrencyLaunchLoadedAccountsDataSizeLimit, config.LoadedAccountsDataSizeLimit)
+	assert.Equal(t, transaction_util.PriorityFeeLamports(config.ComputeUnitLimit, 10_000), config.PriorityFeeLamports)
+	assert.Zero(t, config.HeapSize)
+
+	// Measured instructions sum to at least 323k CUs with the margin, and
+	// launches with unlucky bumps can only add to that
+	assert.GreaterOrEqual(t, config.ComputeUnitLimit, uint32(323_000))
+	assert.LessOrEqual(t, config.ComputeUnitLimit, uint32(1_000_000))
+
+	// NewV1Transaction already enforces the v1 limits. Log how close the
+	// launch transaction comes to them.
+	marshalled, err := result.expectedTxn.Marshal()
+	require.NoError(t, err)
+	t.Logf(
+		"v1 launch transaction: %d bytes, %d accounts, %d signers, %d instructions, %d CU limit",
+		len(marshalled),
+		len(result.expectedTxn.Message.Accounts),
+		result.expectedTxn.Message.Header.NumSignatures,
+		len(result.expectedTxn.Message.Instructions),
+		config.ComputeUnitLimit,
+	)
+
+	vmMetadataRecord, err := e.data.GetVmMetadataByMint(e.ctx, mint.PublicKey().ToBase58())
+	require.NoError(t, err)
+	vmAddress, err := base58.Decode(vmMetadataRecord.Vm)
+	require.NoError(t, err)
+
+	expected := []struct {
+		name        string
+		numAccounts uint32
+		accountSize uint32
+	}{
+		{"nonce-0", 250, uint32(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce))},
+		{"timelock-0", 1_000, uint32(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock))},
+	}
+	require.Len(t, params.MemoryAccounts, len(expected))
+	for i, memoryAccount := range params.MemoryAccounts {
+		address, _, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
+			Name: expected[i].name,
+			Vm:   vmAddress,
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, []byte(address), memoryAccount.Address.Value)
+		assert.Equal(t, expected[i].name, memoryAccount.Name)
+		assert.Equal(t, expected[i].numAccounts, memoryAccount.NumAccounts)
+		assert.Equal(t, expected[i].accountSize, memoryAccount.AccountSize)
 	}
 }
 
@@ -2655,15 +2852,6 @@ func TestStatefulSwap_ReserveNewCurrency_Validation(t *testing.T) {
 		setup          func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest)
 		verify         func(t *testing.T, result *statefulSwapResult)
 	}{
-		{
-			name: "v1 transaction",
-			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
-				req.transactionVersion = 1
-			},
-			verify: func(t *testing.T, result *statefulSwapResult) {
-				result.requireDenied(t, "transaction version 1 is not supported for currency creation")
-			},
-		},
 		{
 			name: "owner isn't the swap authority",
 			setup: func(t *testing.T, f *reserveSwapFixture, req *statefulSwapRequest) {
@@ -4642,34 +4830,6 @@ func TestStatefulSwap_ReserveExistingCurrency_TransactionVersions(t *testing.T) 
 			}
 		})
 	}
-}
-
-func TestStatefulSwap_ReserveNewCurrency_TransactionVersionV1Denied(t *testing.T) {
-	env := setupTestEnv(t, withSwapsEnabled())
-
-	owner := env.newFundedUser(t, common.ToCoreMintQuarks(100))
-
-	mint := env.newLaunchpadMint(t)
-	metadataRecord, err := env.data.GetCurrencyMetadata(env.ctx, mint.PublicKey().ToBase58())
-	require.NoError(t, err)
-	metadataRecord.State = currency.MetadataStateWaitingForInitialPurchase
-	metadataRecord.CreatedBy = owner.PublicKey().ToBase58()
-	require.NoError(t, env.data.SaveCurrencyMetadata(env.ctx, metadataRecord))
-
-	resp := env.initiateReserveSwap(t, owner, owner, &transactionpb.StatefulSwapRequest_Initiate_ReserveSwapClientParameters{
-		Id:            &commonpb.SwapId{Value: testutil.NewRandomAccount(t).PublicKey().ToBytes()},
-		FromMint:      common.CoreMintAccount.ToProto(),
-		ToMint:        mint.ToProto(),
-		SwapAmount:    defaultNewCurrencyPurchaseQuarks,
-		FeeAmount:     defaultNewCurrencyFeeQuarks,
-		FundingSource: transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT,
-		FundingId:     testutil.NewRandomAccount(t).PublicKey().ToBase58(),
-	}, 1)
-
-	require.NotNil(t, resp.GetError())
-	require.Equal(t, transactionpb.StatefulSwapResponse_Error_DENIED, resp.GetError().Code)
-	require.Len(t, resp.GetError().ErrorDetails, 1)
-	require.Equal(t, "transaction version 1 is not supported for currency creation", resp.GetError().ErrorDetails[0].GetDenied().Reason)
 }
 
 func TestReserveSwapHandlers_TransactionVersions(t *testing.T) {

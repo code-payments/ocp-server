@@ -25,6 +25,13 @@ const (
 	// server can index, for a worst case of about 12.2 MiB.
 	ReserveSwapLoadedAccountsDataSizeLimit = 16 * 1024 * 1024 // 16 MiB
 
+	// NewCurrencyLaunchLoadedAccountsDataSizeLimit is the loaded accounts data
+	// size limit for v1 transactions that launch a new currency within its
+	// first purchase. Program data loads about 8.1 MiB, dominated by the
+	// 7.0 MB currency creator and 0.8 MB Metaplex programs. Accounts created by
+	// the transaction, including the VM memory accounts, don't count.
+	NewCurrencyLaunchLoadedAccountsDataSizeLimit = 16 * 1024 * 1024 // 16 MiB
+
 	// InitNonceLoadedAccountsDataSizeLimit is the loaded accounts data size
 	// limit for v1 transactions initializing virtual durable nonces. The VM
 	// program data loads 488,621 bytes, and a nonce memory account holding

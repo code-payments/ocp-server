@@ -19,7 +19,7 @@ import (
 func TestInitNonceBatches(t *testing.T) {
 	noneAllocated := func(int) bool { return false }
 
-	batches := initNonceBatches(initialNoncePoolSize, noneAllocated, initNoncesPerTxn)
+	batches := initNonceBatches(transaction_util.CurrencyLaunchNoncePoolSize, noneAllocated, initNoncesPerTxn)
 	require.Len(t, batches, 5)
 	for i, batch := range batches {
 		require.Len(t, batch, initNoncesPerTxn)
@@ -39,7 +39,7 @@ func TestInitNonceBatches(t *testing.T) {
 
 	// A retry only initializes what a failed attempt left unallocated
 	allocated := func(index int) bool { return index < 100 || index%2 == 0 }
-	batches = initNonceBatches(initialNoncePoolSize, allocated, initNoncesPerTxn)
+	batches = initNonceBatches(transaction_util.CurrencyLaunchNoncePoolSize, allocated, initNoncesPerTxn)
 	require.Len(t, batches, 3)
 	for _, batch := range batches {
 		assert.Len(t, batch, 25)
@@ -48,11 +48,11 @@ func TestInitNonceBatches(t *testing.T) {
 		}
 	}
 
-	assert.Empty(t, initNonceBatches(initialNoncePoolSize, func(int) bool { return true }, initNoncesPerTxn))
+	assert.Empty(t, initNonceBatches(transaction_util.CurrencyLaunchNoncePoolSize, func(int) bool { return true }, initNoncesPerTxn))
 }
 
-func TestInitialNoncePoolSize_FitsInitNonceLoadedAccountsDataSizeLimit(t *testing.T) {
-	require.NoError(t, transaction_util.ValidateInitNonceMemoryAccounts(initialNoncePoolSize))
+func TestCurrencyLaunchNoncePoolSize_FitsInitNonceLoadedAccountsDataSizeLimit(t *testing.T) {
+	require.NoError(t, transaction_util.ValidateInitNonceMemoryAccounts(transaction_util.CurrencyLaunchNoncePoolSize))
 }
 
 func TestMakeInitNonceTransaction(t *testing.T) {

@@ -631,6 +631,34 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 	}
 }
 
+// getInitialPurchaseQuarksBought returns the new currency's quarks bought by
+// its initial purchase, which is how much the purchase took out of the pool
+// vault. The vault holds the full token supply before the purchase. It's
+// created within the purchase transaction for v1 launches and v0 launches
+// funded with the core mint, so it has no balance before the transaction, and
+// it's created ahead of the purchase for v0 launches funded with another
+// currency.
+func getInitialPurchaseQuarksBought(vaultMint *common.Account, tokenBalances *solana.TransactionTokenBalances) (uint64, error) {
+	postQuarks, ok, err := transaction_util.GetPostQuarksFromTokenBalances(vaultMint, tokenBalances)
+	if err != nil {
+		return 0, err
+	} else if !ok {
+		return 0, errors.New("pool vault balance not found after the transaction")
+	}
+
+	preQuarks, ok, err := transaction_util.GetPreQuarksFromTokenBalances(vaultMint, tokenBalances)
+	if err != nil {
+		return 0, err
+	} else if !ok {
+		preQuarks = currencycreator.DefaultMintMaxQuarkSupply
+	}
+
+	if postQuarks >= preQuarks {
+		return 0, errors.New("pool vault balance didn't decrease")
+	}
+	return preQuarks - postQuarks, nil
+}
+
 func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, bool, error) {
 	if swapRecord.Kind != swap.KindReserve {
 		return 0, false, errors.New("swap is not a reserve swap")
@@ -667,25 +695,9 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 				return 0, false, err
 			}
 
-			deltaQuarksIntoVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
+			quarksBought, err := getInitialPurchaseQuarksBought(currencyAccounts.VaultMint, tokenBalances)
 			if err != nil {
 				return 0, false, err
-			}
-
-			var quarksBought uint64
-			if common.IsCoreMint(fromMint) {
-				// The currency was initialized within the swap transaction, so
-				// the delta includes seeding the vault with the full token supply
-				if deltaQuarksIntoVault <= 0 {
-					return 0, false, errors.New("delta quarks into pool vault is not positive")
-				}
-				quarksBought = currencycreator.DefaultMintMaxQuarkSupply - uint64(deltaQuarksIntoVault)
-			} else {
-				// The currency was initialized prior to the swap transaction
-				if deltaQuarksIntoVault >= 0 {
-					return 0, false, errors.New("delta quarks out of pool vault is not negative")
-				}
-				quarksBought = uint64(-deltaQuarksIntoVault)
 			}
 
 			// This swap is initializing the VM and the funds will be deposited

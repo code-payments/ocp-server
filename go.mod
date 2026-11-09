@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.59.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.102.2
 	github.com/code-payments/code-vm-indexer v1.2.0
-	github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261102194106-8f029ffa60b0
+	github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261104165959-c337d2c2e618
 	github.com/emirpasic/gods v1.12.0
 	github.com/envoyproxy/protoc-gen-validate v1.3.3
 	github.com/golang/protobuf v1.5.4

@@ -55,6 +55,23 @@ const (
 	// in about 1 in 10^13 attempts, before the compute unit margin.
 	initNonceFindIterationsSlack = 100
 
+	// New currency launch instructions, measured on mainnet from the
+	// create-and-buy transaction 5kqAEba8eS (slot 460,249,402) and the same
+	// launch's post-purchase transactions, after the July 2026 VM program
+	// upgrade. Each measurement includes the PDA finds it ran for that
+	// launch's bumps, which are added back for the bumps of the currency being
+	// launched, so the model over-counts by at least 1,500 CUs per find.
+	initializeCurrencyComputeUnits     = 22_400 // finds the mint and currency PDAs
+	initializePoolComputeUnits         = 29_700 // finds the pool and both vault PDAs
+	initVmComputeUnits                 = 17_400 // finds the VM and omnibus PDAs
+	initializeMetadataComputeUnits     = 67_400 // finds the Metaplex metadata PDA twice
+	initMemoryComputeUnits             = 9_400  // finds the memory PDA
+	transferForSwapWithFeeComputeUnits = 8_400
+	buyTokensComputeUnits              = 36_000
+	sellTokensComputeUnits             = 46_000 // highest across 50 buy/sell swaps was 45,737
+	closeAccountComputeUnits           = 200
+	advanceNonceComputeUnits           = 150
+
 	cuPerPdaDerivation = 1_500
 
 	computeUnitMarginPercent = 15
@@ -156,4 +173,68 @@ func ExternalDepositComputeUnitLimit() uint32 {
 // close_deposit_account_if_empty transaction.
 func CloseVmDepositComputeUnitLimit() uint32 {
 	return WithComputeUnitMargin(baseCloseVmDepositComputeUnits)
+}
+
+// NewCurrencyLaunchComputeUnitArgs are the bumps and counts that determine
+// the compute units of a v1 transaction that launches a new currency within
+// its first purchase
+type NewCurrencyLaunchComputeUnitArgs struct {
+	MintBump             uint8
+	CurrencyConfigBump   uint8
+	LiquidityPoolBump    uint8
+	VaultMintBump        uint8
+	VaultBaseBump        uint8
+	VmBump               uint8
+	OmnibusBump          uint8
+	MetaplexMetadataBump uint8
+
+	// One per VM::InitMemory instruction
+	MemoryAccountBumps []uint8
+
+	// One per AssociatedTokenAccount::CreateIdempotent instruction
+	AtaBumps []uint8
+
+	// Treasury-funded launches sell the source currency and buy with the
+	// treasury's core mint. Core mint funded launches buy directly and close
+	// the temporary core mint ATA.
+	IsTreasuryFunded bool
+}
+
+// NewCurrencyLaunchComputeUnitLimit computes the compute unit limit for a v1
+// create-and-buy transaction, which initializes the currency, pool, VM,
+// metadata and memory accounts alongside the first purchase
+func NewCurrencyLaunchComputeUnitLimit(args *NewCurrencyLaunchComputeUnitArgs) uint32 {
+	computeUnits := uint32(advanceNonceComputeUnits)
+
+	computeUnits += initializeCurrencyComputeUnits +
+		findPdaComputeUnits(args.MintBump) +
+		findPdaComputeUnits(args.CurrencyConfigBump)
+
+	computeUnits += initializePoolComputeUnits +
+		findPdaComputeUnits(args.LiquidityPoolBump) +
+		findPdaComputeUnits(args.VaultMintBump) +
+		findPdaComputeUnits(args.VaultBaseBump)
+
+	computeUnits += initVmComputeUnits +
+		findPdaComputeUnits(args.VmBump) +
+		findPdaComputeUnits(args.OmnibusBump)
+
+	computeUnits += transferForSwapWithFeeComputeUnits + buyTokensComputeUnits
+	if args.IsTreasuryFunded {
+		computeUnits += sellTokensComputeUnits
+	} else {
+		computeUnits += closeAccountComputeUnits
+	}
+
+	computeUnits += initializeMetadataComputeUnits + 2*findPdaComputeUnits(args.MetaplexMetadataBump)
+
+	for _, bump := range args.MemoryAccountBumps {
+		computeUnits += initMemoryComputeUnits + findPdaComputeUnits(bump)
+	}
+
+	for _, bump := range args.AtaBumps {
+		computeUnits += baseAtaCreateComputeUnits + findPdaComputeUnits(bump)
+	}
+
+	return WithComputeUnitMargin(computeUnits)
 }

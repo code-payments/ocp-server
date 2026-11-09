@@ -82,6 +82,10 @@ github.com/code-payments/code-vm-indexer v1.2.0 h1:rSHpBMiT9BKgmKcXg/VIoi/h0t7jN
 github.com/code-payments/code-vm-indexer v1.2.0/go.mod h1:vn91YN2qNqb+gGJeZe2+l+TNxVmEEiRHXXnIn2Y40h8=
 github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261102194106-8f029ffa60b0 h1:zIK9NMnAJ4jcGYw5OgnrgKXfPhLKr32ujTyRw6FgB1U=
 github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261102194106-8f029ffa60b0/go.mod h1:tw6BooY5a8l6CtSZnKOruyKII0W04n89pcM4BizrgG8=
+github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261103165915-112ddeb6b4a2 h1:ArXtsb2rC+8VriIjEkQPCtbTL4ST2zdYyUvHXDnzF2o=
+github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261103165915-112ddeb6b4a2/go.mod h1:tw6BooY5a8l6CtSZnKOruyKII0W04n89pcM4BizrgG8=
+github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261104165959-c337d2c2e618 h1:D1N33kEZCasDfr1aL1r+DgBHBEp5zMlbN9TsApsOY54=
+github.com/code-payments/ocp-protobuf-api v1.19.1-0.20261104165959-c337d2c2e618/go.mod h1:tw6BooY5a8l6CtSZnKOruyKII0W04n89pcM4BizrgG8=
 github.com/containerd/continuity v0.0.0-20190827140505-75bee3e2ccb6 h1:NmTXa/uVnDyp0TY5MKi197+3HWcnYWfnHGyaFthlnGw=
 github.com/containerd/continuity v0.0.0-20190827140505-75bee3e2ccb6/go.mod h1:GL3xCUCBDV3CZiTSEKksMWbLE66hEyuu9qyDOOqM47Y=
 github.com/coreos/bbolt v1.3.2/go.mod h1:iRUV2dpdMOn7Bo10OQBFzIJO9kkE559Wcmn+qkEiiKk=

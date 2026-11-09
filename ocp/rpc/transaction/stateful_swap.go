@@ -307,11 +307,7 @@ func (s *transactionServer) handleReserveStatefulSwap(
 		}
 	}
 
-	// v1 transactions aren't supported for currency creation yet
 	transactionVersion := selectSwapTransactionVersion(initiateReq.TransactionVersion)
-	if initializesMint && transactionVersion != solana.MessageVersion0 {
-		return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("transaction version %d is not supported for currency creation", initiateReq.TransactionVersion))
-	}
 	log = log.With(zap.String("selected_transaction_version", transactionVersion.String()))
 
 	if isSell {
@@ -416,18 +412,6 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			if initiateReserveSwapReq.FeeAmount != expectedFeeQuarks {
 				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("fee amount must be %d quarks", expectedFeeQuarks))
 			}
-
-			// The VM is not supported yet, so we need to work around GetVmConfigForMint
-			destinationVaultRecord, err := s.data.GetKey(ctx, destinationCurrencyMetadataRecord.Authority)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("failure getting destination vm authority vault record")
-				return handleStatefulSwapError(streamer, err)
-			}
-			destinationVmAuthority, err = common.NewAccountFromPrivateKeyString(destinationVaultRecord.PrivateKey)
-			if err != nil {
-				log.With(zap.Error(err)).Warn("invalid destination vm authority private key")
-				return handleStatefulSwapError(streamer, err)
-			}
 		} else {
 			if initiateReserveSwapReq.FundingSource != transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT {
 				return handleStatefulSwapError(streamer, NewSwapDeniedErrorf("funding source %s is not supported for new currency purchases", initiateReserveSwapReq.FundingSource))
@@ -472,6 +456,23 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			}
 
 			treasury = s.swapTreasury
+		}
+
+		// The currency authority signs to initialize the currency within the
+		// purchase. Treasury-funded v0 transactions don't initialize it,
+		// because the launcher does so beforehand.
+		if common.IsCoreMint(fromMint) || transactionVersion == solana.MessageVersion1 {
+			// The VM is not supported yet, so we need to work around GetVmConfigForMint
+			destinationVaultRecord, err := s.data.GetKey(ctx, destinationCurrencyMetadataRecord.Authority)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("failure getting destination vm authority vault record")
+				return handleStatefulSwapError(streamer, err)
+			}
+			destinationVmAuthority, err = common.NewAccountFromPrivateKeyString(destinationVaultRecord.PrivateKey)
+			if err != nil {
+				log.With(zap.Error(err)).Warn("invalid destination vm authority private key")
+				return handleStatefulSwapError(streamer, err)
+			}
 		}
 	}
 
@@ -525,7 +526,11 @@ func (s *transactionServer) handleReserveStatefulSwap(
 
 	var swapHandler SwapHandler
 	if initializesMint && common.IsCoreMint(fromMint) {
-		swapHandler, err = NewReserveCreateAndBuySwapHandler(
+		newHandler := NewReserveCreateAndBuySwapHandler
+		if transactionVersion != solana.MessageVersion1 {
+			newHandler = NewReserveCreateAndBuyLegacySwapHandler
+		}
+		swapHandler, err = newHandler(
 			ctx,
 			s.data,
 			owner,
@@ -535,7 +540,11 @@ func (s *transactionServer) handleReserveStatefulSwap(
 			selectedNonce,
 		)
 	} else if initializesMint {
-		swapHandler, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(
+		newHandler := NewReserveTreasuryFundedCreateAndBuySwapHandler
+		if transactionVersion != solana.MessageVersion1 {
+			newHandler = NewReserveTreasuryFundedCreateAndBuyLegacySwapHandler
+		}
+		swapHandler, err = newHandler(
 			ctx,
 			s.data,
 			owner,
