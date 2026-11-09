@@ -71,6 +71,13 @@ const (
 	sellTokensComputeUnits             = 46_000 // highest across 50 buy/sell swaps was 45,737
 	closeAccountComputeUnits           = 200
 	advanceNonceComputeUnits           = 150
+	systemTransferComputeUnits         = 150
+
+	// VM::ResizeMemory of a memory account pre-funded for its new size, so it
+	// makes no rent transfer CPI. Measured in LiteSVM against the mainnet VM
+	// program binary: 5,455 CUs for every resize, independent of size and
+	// bumps. An unfunded resize costs about 2,000 CUs more.
+	resizeMemoryComputeUnits = 5_500
 
 	cuPerPdaDerivation = 1_500
 
@@ -194,6 +201,11 @@ type NewCurrencyLaunchComputeUnitArgs struct {
 	// One per AssociatedTokenAccount::CreateIdempotent instruction
 	AtaBumps []uint8
 
+	// System::Transfer rent top-ups and the VM::ResizeMemory instructions
+	// they pre-fund
+	NumRentTopUps    int
+	NumMemoryResizes int
+
 	// Treasury-funded launches sell the source currency and buy with the
 	// treasury's core mint. Core mint funded launches buy directly and close
 	// the temporary core mint ATA.
@@ -202,7 +214,8 @@ type NewCurrencyLaunchComputeUnitArgs struct {
 
 // NewCurrencyLaunchComputeUnitLimit computes the compute unit limit for a v1
 // create-and-buy transaction, which initializes the currency, pool, VM,
-// metadata and memory accounts alongside the first purchase
+// metadata and memory accounts alongside the first purchase, and resizes the
+// memory accounts to full capacity
 func NewCurrencyLaunchComputeUnitLimit(args *NewCurrencyLaunchComputeUnitArgs) uint32 {
 	computeUnits := uint32(advanceNonceComputeUnits)
 
@@ -235,6 +248,9 @@ func NewCurrencyLaunchComputeUnitLimit(args *NewCurrencyLaunchComputeUnitArgs) u
 	for _, bump := range args.AtaBumps {
 		computeUnits += baseAtaCreateComputeUnits + findPdaComputeUnits(bump)
 	}
+
+	computeUnits += uint32(args.NumRentTopUps)*systemTransferComputeUnits +
+		uint32(args.NumMemoryResizes)*resizeMemoryComputeUnits
 
 	return WithComputeUnitMargin(computeUnits)
 }

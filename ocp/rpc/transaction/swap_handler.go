@@ -908,10 +908,12 @@ func newReserveNewCurrencyV1ServerParameters(
 	serverParameters.TransactionConfig = transaction_util.ToProtoTransactionConfig(config)
 	for _, memoryAccount := range launch.MemoryAccounts {
 		serverParameters.MemoryAccounts = append(serverParameters.MemoryAccounts, &transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrencyServerParameter_VmMemoryAccountInitialization{
-			Address:     memoryAccount.Address.ToProto(),
-			Name:        memoryAccount.Name,
-			NumAccounts: memoryAccount.NumAccounts,
-			AccountSize: uint32(memoryAccount.AccountSize),
+			Address:           memoryAccount.Address.ToProto(),
+			Name:              memoryAccount.Name,
+			NumAccounts:       memoryAccount.NumAccounts,
+			AccountSize:       uint32(memoryAccount.AccountSize),
+			ResizeSizes:       memoryAccount.ResizeSizes(),
+			RentTopUpLamports: memoryAccount.RentTopUpLamports,
 		})
 	}
 	return serverParameters
@@ -1228,6 +1230,11 @@ func NewReserveCreateAndBuySwapHandler(
 		return nil, err
 	}
 
+	err = h.launch.SetMemoryAccountRentTopUps(ctx, data.GetBlockchainMinimumBalanceForRentExemption)
+	if err != nil {
+		return nil, err
+	}
+
 	return h, nil
 }
 
@@ -1249,6 +1256,11 @@ func (h *ReserveCreateAndBuySwapHandler) GetServerParameters() *transactionpb.St
 }
 
 func (h *ReserveCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
+	err := h.launch.ValidateInstructionTraceLength(false)
+	if err != nil {
+		return nil, err
+	}
+
 	purchaseIxns, purchaseAtaBumps, err := makeCoreMintFundedPurchaseInstructions(h.launch, h.buyer, h.swapAuthority, h.sourceVmConfig, h.swapAmount, h.feeAmount)
 	if err != nil {
 		return nil, err
@@ -1299,6 +1311,11 @@ func NewReserveTreasuryFundedCreateAndBuySwapHandler(
 		return nil, err
 	}
 
+	err = purchase.launch.SetMemoryAccountRentTopUps(ctx, data.GetBlockchainMinimumBalanceForRentExemption)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ReserveTreasuryFundedCreateAndBuySwapHandler{
 		selectedNonce:    selectedNonce,
 		computeUnitPrice: 10_000,
@@ -1322,6 +1339,11 @@ func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) GetServerParameters() *tr
 
 func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) MakeInstructions(ctx context.Context) ([]solana.Instruction, error) {
 	launch := h.purchase.launch
+
+	err := launch.ValidateInstructionTraceLength(true)
+	if err != nil {
+		return nil, err
+	}
 
 	buyerVmDepositAccounts, err := h.purchase.buyer.GetVmDepositAccounts(launch.VmConfig)
 	if err != nil {

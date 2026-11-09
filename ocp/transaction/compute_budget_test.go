@@ -105,4 +105,11 @@ func TestNewCurrencyLaunchComputeUnitLimit(t *testing.T) {
 	args := canonicalArgs(false)
 	args.MetaplexMetadataBump = 254
 	assert.EqualValues(t, 323_667+3_450, NewCurrencyLaunchComputeUnitLimit(args))
+
+	// 2 rent top-ups (150 each) and 5 pre-funded resizes (5,500 each) add
+	// 27,800 = 309,250, plus 15% margin
+	args = canonicalArgs(false)
+	args.NumRentTopUps = 2
+	args.NumMemoryResizes = 5
+	assert.EqualValues(t, 355_637, NewCurrencyLaunchComputeUnitLimit(args))
 }

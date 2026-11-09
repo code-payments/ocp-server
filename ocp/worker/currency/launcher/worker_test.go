@@ -280,10 +280,18 @@ func (e *launcherTestEnv) setMintExists() {
 // setV1PurchaseState applies what a v1 initial purchase leaves on chain
 // besides the currency itself: initialized memory accounts, which the launcher
 // still has to resize
-func (e *launcherTestEnv) setV1PurchaseState(t *testing.T) {
+// setV1PurchaseState applies what a v1 initial purchase initializes after the
+// purchase. Purchases built before memory accounts were resized within the
+// transaction only initialize them.
+func (e *launcherTestEnv) setV1PurchaseState(t *testing.T, resizesMemoryAccounts bool) {
 	e.setMintExists()
 	for _, memoryAccount := range []*transaction_util.CurrencyLaunchMemoryAccount{e.accounts.NonceMemory, e.accounts.TimelockMemory} {
 		e.chain.apply(t, memoryAccount.NewInitMemoryInstruction(e.accounts.Authority, e.accounts.Vm))
+	}
+	if resizesMemoryAccounts {
+		for _, memoryAccount := range []*transaction_util.CurrencyLaunchMemoryAccount{e.accounts.NonceMemory, e.accounts.TimelockMemory} {
+			e.chain.apply(t, memoryAccount.NewResizeMemoryInstructions(e.accounts.Authority, e.accounts.Vm)...)
+		}
 	}
 }
 
@@ -352,16 +360,29 @@ func submittedPrograms(txns []solana.Transaction) [][]string {
 }
 
 func TestCompleteBlockchainInitialization(t *testing.T) {
-	t.Run("v1 initial purchase needs the resizes and alt", func(t *testing.T) {
+	t.Run("v1 initial purchase only needs the alt", func(t *testing.T) {
 		env := setupLauncherTest(t, currency.MetadataStateCompletingInitialization)
-		env.setV1PurchaseState(t)
+		env.setV1PurchaseState(t, true)
 
 		require.NoError(t, env.completeBlockchainInitialization(t))
 
 		assert.Equal(t, [][]string{
-			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"}, // 2 nonce + 8 timelock resizes
 			{"alt"}, // create
 			{"alt"}, // extend
+		}, submittedPrograms(env.chain.getSubmitted()))
+		env.requireFullyInitialized(t)
+	})
+
+	t.Run("v1 initial purchase built before in-transaction resizes", func(t *testing.T) {
+		env := setupLauncherTest(t, currency.MetadataStateCompletingInitialization)
+		env.setV1PurchaseState(t, false)
+
+		require.NoError(t, env.completeBlockchainInitialization(t))
+
+		assert.Equal(t, [][]string{
+			{"vm", "vm", "vm", "vm", "vm"}, // 1 nonce + 4 timelock resizes
+			{"alt"},                        // create
+			{"alt"},                        // extend
 		}, submittedPrograms(env.chain.getSubmitted()))
 		env.requireFullyInitialized(t)
 	})
@@ -373,10 +394,10 @@ func TestCompleteBlockchainInitialization(t *testing.T) {
 		require.NoError(t, env.completeBlockchainInitialization(t))
 
 		assert.Equal(t, [][]string{
-			{"currency_creator", "vm", "vm", "ata"},                      // metadata, memory accounts, fee account
-			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"}, // 2 nonce + 8 timelock resizes
-			{"alt"}, // create
-			{"alt"}, // extend
+			{"currency_creator", "vm", "vm", "ata"}, // metadata, memory accounts, fee account
+			{"vm", "vm", "vm", "vm", "vm"},          // 1 nonce + 4 timelock resizes
+			{"alt"},                                 // create
+			{"alt"},                                 // extend
 		}, submittedPrograms(env.chain.getSubmitted()))
 		env.requireFullyInitialized(t)
 	})
@@ -400,7 +421,7 @@ func TestCompleteBlockchainInitialization(t *testing.T) {
 		require.NoError(t, env.completeBlockchainInitialization(t))
 
 		assert.Equal(t, [][]string{
-			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"},
+			{"vm", "vm", "vm", "vm", "vm"},
 			{"alt"}, // extend
 		}, submittedPrograms(env.chain.getSubmitted()))
 		assert.Equal(t, altAccount.PublicKey().ToBase58(), env.getMetadata(t).Alt)
@@ -409,7 +430,7 @@ func TestCompleteBlockchainInitialization(t *testing.T) {
 
 	t.Run("saved alt that was never created is replaced", func(t *testing.T) {
 		env := setupLauncherTest(t, currency.MetadataStateCompletingInitialization)
-		env.setV1PurchaseState(t)
+		env.setV1PurchaseState(t, true)
 
 		uncreatedAlt := testutil.NewRandomAccount(t).PublicKey().ToBase58()
 		metadataRecord := env.getMetadata(t)
@@ -419,7 +440,6 @@ func TestCompleteBlockchainInitialization(t *testing.T) {
 		require.NoError(t, env.completeBlockchainInitialization(t))
 
 		assert.Equal(t, [][]string{
-			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"}, // 2 nonce + 8 timelock resizes
 			{"alt"}, // create
 			{"alt"}, // extend
 		}, submittedPrograms(env.chain.getSubmitted()))
@@ -441,7 +461,7 @@ func TestCompleteBlockchainInitialization(t *testing.T) {
 		require.NoError(t, env.completeBlockchainInitialization(t))
 
 		assert.Equal(t, [][]string{
-			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"}, // 7 nonce + 8 timelock resizes
+			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"}, // 7 nonce + 4 timelock resizes
 			{"alt"},
 			{"alt"},
 		}, submittedPrograms(env.chain.getSubmitted()))
@@ -461,7 +481,7 @@ func TestCompleteBlockchainInitialization(t *testing.T) {
 		require.NoError(t, env.completeBlockchainInitialization(t))
 
 		assert.Equal(t, [][]string{
-			{"vm", "vm", "vm", "vm", "vm", "vm", "vm", "vm"}, // timelock resizes only
+			{"vm", "vm", "vm", "vm"}, // timelock resizes only
 			{"alt"},
 			{"alt"},
 		}, submittedPrograms(env.chain.getSubmitted()))

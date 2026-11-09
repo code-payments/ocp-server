@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"context"
 	"crypto/ed25519"
 
 	"github.com/pkg/errors"
@@ -11,22 +12,49 @@ import (
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
 	"github.com/code-payments/ocp-server/solana"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
+	"github.com/code-payments/ocp-server/solana/system"
 	timelock_token "github.com/code-payments/ocp-server/solana/timelock/v1"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
 
 const (
-	CurrencyLaunchNoncePoolSize          = 250
+	CurrencyLaunchNoncePoolSize          = 100
 	CurrencyLaunchNonceMemoryAccountName = "nonce-0"
 
-	CurrencyLaunchTimelockAccounts          = 1_000
+	CurrencyLaunchTimelockAccounts          = 500
 	CurrencyLaunchTimelockMemoryAccountName = "timelock-0"
 
 	// MemoryResizeStepSize is the most a single VM::ResizeMemory instruction
 	// grows a memory account by, which is the runtime's per-instruction
 	// realloc limit
 	MemoryResizeStepSize = 10 * 1024
+
+	// MaxInstructionTraceLength is the runtime's limit on a transaction's
+	// instruction trace: its top-level instructions plus every CPI they make
+	MaxInstructionTraceLength = 64
+)
+
+// Instruction trace entries each launch instruction takes in the worst case,
+// where every account it opens is new: the instruction plus the CPIs it
+// makes. Measured against the mainnet programs.
+const (
+	advanceNonceTraceLength           = 1
+	initializeCurrencyTraceLength     = 4
+	initializePoolTraceLength         = 7
+	initVmTraceLength                 = 4
+	createAtaTraceLength              = 5
+	transferForSwapWithFeeTraceLength = 3 // also when the fee is 0
+	buyTokensTraceLength              = 3
+	sellTokensTraceLength             = 3
+	closeAccountTraceLength           = 1
+	initializeMetadataTraceLength     = 6
+	initMemoryTraceLength             = 2
+	rentTopUpTraceLength              = 1
+
+	// VM::ResizeMemory transfers rent with a CPI only when the memory account
+	// is short of rent for its new size. The rent top-up pre-funds it.
+	prefundedResizeMemoryTraceLength = 1
 )
 
 // GetInitialPurchaseTransactionVersion returns the version of a currency's
@@ -183,15 +211,44 @@ func (l *CurrencyLaunch) MakeCreateAtaInstruction(owner, mint *common.Account) (
 	return ixn, ata, bump, nil
 }
 
+// SetMemoryAccountRentTopUps sets each memory account's rent top-up to the
+// rent for its full capacity beyond what VM::InitMemory pays. Rent is read
+// rather than computed because the network's rent rate can change.
+func (l *CurrencyLaunch) SetMemoryAccountRentTopUps(ctx context.Context, getMinimumBalanceForRentExemption func(ctx context.Context, size uint64) (uint64, error)) error {
+	initRent, err := getMinimumBalanceForRentExemption(ctx, vm.MemoryAccountSize)
+	if err != nil {
+		return errors.Wrap(err, "error getting rent for initialized memory account")
+	}
+
+	for _, memoryAccount := range l.MemoryAccounts {
+		fullRent, err := getMinimumBalanceForRentExemption(ctx, uint64(memoryAccount.Capacity()))
+		if err != nil {
+			return errors.Wrapf(err, "error getting rent for %s memory account", memoryAccount.Name)
+		}
+		if fullRent <= initRent {
+			return errors.Errorf("%s memory account rent at full capacity (%d) doesn't exceed rent at initialization (%d)", memoryAccount.Name, fullRent, initRent)
+		}
+		memoryAccount.RentTopUpLamports = fullRent - initRent
+	}
+	return nil
+}
+
 // MakePostPurchaseInstructions makes the instructions that follow the
 // purchase: Reserve::InitializeMetadata, VM::InitMemory for each memory
-// account, then the fee account's creation. It returns the fee account's bump.
+// account, the fee account's creation, a System::Transfer of each memory
+// account's rent top-up, then the VM::ResizeMemory instructions growing each
+// memory account to full capacity. It returns the fee account's bump.
 //
-// The memory accounts are resized to full capacity by the launcher worker
-// after the purchase. Each resize costs two entries in the transaction's
-// instruction trace, which is capped at 64 top-level and CPI instructions,
-// and the launch transaction can't fit them.
+// The rent top-ups pre-fund the resizes, so VM::ResizeMemory doesn't transfer
+// rent with a CPI. That keeps the transaction's instruction trace within
+// MaxInstructionTraceLength.
 func (l *CurrencyLaunch) MakePostPurchaseInstructions() ([]solana.Instruction, uint8, error) {
+	for _, memoryAccount := range l.MemoryAccounts {
+		if memoryAccount.RentTopUpLamports == 0 {
+			return nil, 0, errors.Errorf("%s memory account rent top-up is not set", memoryAccount.Name)
+		}
+	}
+
 	ixns := []solana.Instruction{
 		NewInitializeMetadataInstruction(
 			l.Accounts.Authority,
@@ -211,7 +268,57 @@ func (l *CurrencyLaunch) MakePostPurchaseInstructions() ([]solana.Instruction, u
 	}
 	ixns = append(ixns, createFeeAtaIxn)
 
+	for _, memoryAccount := range l.MemoryAccounts {
+		ixns = append(ixns, memoryAccount.NewRentTopUpInstruction(l.Accounts.Authority))
+	}
+
+	for _, memoryAccount := range l.MemoryAccounts {
+		ixns = append(ixns, memoryAccount.NewResizeMemoryInstructions(l.Accounts.Authority, l.VmConfig.Vm)...)
+	}
+
 	return ixns, feeAtaBump, nil
+}
+
+// InstructionTraceLength returns the worst-case instruction trace length of
+// a launch transaction, where every account the transaction opens is new
+func (l *CurrencyLaunch) InstructionTraceLength(isTreasuryFunded bool) int {
+	length := advanceNonceTraceLength +
+		initializeCurrencyTraceLength +
+		initializePoolTraceLength +
+		initVmTraceLength
+
+	// The VM deposit ATA, then either the temporary core mint ATA or the
+	// treasury's from mint ATA
+	length += 2 * createAtaTraceLength
+
+	length += transferForSwapWithFeeTraceLength + buyTokensTraceLength
+	if isTreasuryFunded {
+		length += sellTokensTraceLength
+	} else {
+		length += closeAccountTraceLength
+	}
+
+	length += initializeMetadataTraceLength
+	for _, memoryAccount := range l.MemoryAccounts {
+		length += initMemoryTraceLength +
+			rentTopUpTraceLength +
+			len(memoryAccount.ResizeSizes())*prefundedResizeMemoryTraceLength
+	}
+
+	// The fee ATA
+	length += createAtaTraceLength
+
+	return length
+}
+
+// ValidateInstructionTraceLength errors when a launch transaction's
+// worst-case instruction trace exceeds MaxInstructionTraceLength
+func (l *CurrencyLaunch) ValidateInstructionTraceLength(isTreasuryFunded bool) error {
+	length := l.InstructionTraceLength(isTreasuryFunded)
+	if length > MaxInstructionTraceLength {
+		return errors.Errorf("launch transaction instruction trace length %d exceeds %d", length, MaxInstructionTraceLength)
+	}
+	return nil
 }
 
 // ComputeUnitLimit computes the compute unit limit for a launch transaction
@@ -231,6 +338,8 @@ func (l *CurrencyLaunch) ComputeUnitLimit(ataBumps []uint8, isTreasuryFunded boo
 	}
 	for _, memoryAccount := range l.MemoryAccounts {
 		args.MemoryAccountBumps = append(args.MemoryAccountBumps, memoryAccount.Bump)
+		args.NumRentTopUps++
+		args.NumMemoryResizes += len(memoryAccount.ResizeSizes())
 	}
 	return NewCurrencyLaunchComputeUnitLimit(args)
 }
@@ -249,6 +358,8 @@ type CurrencyLaunchMemoryAccount struct {
 	Name        string
 	NumAccounts uint32
 	AccountSize uint16
+
+	RentTopUpLamports uint64
 }
 
 // GetCurrencyLaunchMemoryAccounts returns the memory accounts a new currency's
@@ -300,10 +411,21 @@ func newCurrencyLaunchMemoryAccount(vmAccount *common.Account, name string, numA
 	}, nil
 }
 
+// Capacity returns the memory account's size at full capacity
+func (m *CurrencyLaunchMemoryAccount) Capacity() uint32 {
+	return MemoryCapacity(m.NumAccounts, m.AccountSize)
+}
+
 // ResizeSizes returns the account sizes passed to successive VM::ResizeMemory
 // instructions to grow the memory account to its full capacity
 func (m *CurrencyLaunchMemoryAccount) ResizeSizes() []uint32 {
 	return MemoryResizeSizes(m.NumAccounts, m.AccountSize)
+}
+
+// NewRentTopUpInstruction makes the System::Transfer of the memory account's
+// rent top-up from the VM authority
+func (m *CurrencyLaunchMemoryAccount) NewRentTopUpInstruction(vmAuthority *common.Account) solana.Instruction {
+	return system.Transfer(vmAuthority.PublicKey().ToBytes(), m.Address.PublicKey().ToBytes(), m.RentTopUpLamports)
 }
 
 // NewInitMemoryInstruction makes the VM::InitMemory instruction for the
@@ -334,16 +456,22 @@ func (m *CurrencyLaunchMemoryAccount) NewResizeMemoryInstructions(vmAuthority, v
 // VM::ResizeMemory instructions to grow a memory account holding numAccounts
 // virtual accounts of accountSize bytes to its full capacity
 func MemoryResizeSizes(numAccounts uint32, accountSize uint16) []uint32 {
-	capacity := vm.MemoryAccountSize + vm.GetSliceAllocatorSize(int(numAccounts), int(accountSize))
+	capacity := MemoryCapacity(numAccounts, accountSize)
 
 	var sizes []uint32
-	for size := MemoryResizeStepSize; ; size += MemoryResizeStepSize {
+	for size := uint32(MemoryResizeStepSize); ; size += MemoryResizeStepSize {
 		if size >= capacity {
-			sizes = append(sizes, uint32(capacity))
+			sizes = append(sizes, capacity)
 			return sizes
 		}
-		sizes = append(sizes, uint32(size))
+		sizes = append(sizes, size)
 	}
+}
+
+// MemoryCapacity returns the size of a memory account holding numAccounts
+// virtual accounts of accountSize bytes at full capacity
+func MemoryCapacity(numAccounts uint32, accountSize uint16) uint32 {
+	return uint32(vm.MemoryAccountSize + vm.GetSliceAllocatorSize(int(numAccounts), int(accountSize)))
 }
 
 // NewResizeMemoryInstructions makes a VM::ResizeMemory instruction for each

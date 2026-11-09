@@ -96,6 +96,19 @@ func (p *testDataProvider) GetBlockchainLatestBlockhash(ctx context.Context) (so
 	return p.latestBlockhash, nil
 }
 
+// GetBlockchainMinimumBalanceForRentExemption models the network's rent at
+// 6,960 lamports per byte including the 128 byte account overhead
+func (p *testDataProvider) GetBlockchainMinimumBalanceForRentExemption(ctx context.Context, size uint64) (uint64, error) {
+	if err := p.injectedErr("GetBlockchainMinimumBalanceForRentExemption"); err != nil {
+		return 0, err
+	}
+	return testMinimumBalanceForRentExemption(size), nil
+}
+
+func testMinimumBalanceForRentExemption(size uint64) uint64 {
+	return (size + 128) * 6_960
+}
+
 func (p *testDataProvider) SubmitBlockchainTransaction(ctx context.Context, txn *solana.Transaction) (solana.Signature, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -1615,7 +1628,8 @@ func (e *testEnv) requireReserveNewCurrencyClientRebuildMatches(
 
 // clientNewCurrencyPostPurchaseInstructions follows the documented v1
 // instructions that complete a launch after the purchase: metadata, memory
-// account initialization, then the fee account
+// account initialization, the fee account, memory account rent top-ups, then
+// memory account resizes
 func clientNewCurrencyPostPurchaseInstructions(
 	t *testing.T,
 	params *transactionpb.StatefulSwapResponse_ServerParameters_ReserveNewCurrencyServerParameter,
@@ -1668,6 +1682,37 @@ func clientNewCurrencyPostPurchaseInstructions(
 	createFeeAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(authority, params.FeeAccountOwner.Value, newCurrency.mint)
 	require.NoError(t, err)
 	ixns = append(ixns, createFeeAtaIxn)
+
+	for _, memoryAccount := range params.MemoryAccounts {
+		require.NotZero(t, memoryAccount.RentTopUpLamports)
+		ixns = append(ixns, system.Transfer(authority, memoryAccount.Address.Value, memoryAccount.RentTopUpLamports))
+	}
+
+	// Clients verify the resizes grow each memory account to its full
+	// capacity, within the runtime's per-instruction realloc limit
+	for _, memoryAccount := range params.MemoryAccounts {
+		require.NotEmpty(t, memoryAccount.ResizeSizes)
+		capacity := uint32(vm.MemoryAccountSize + vm.GetSliceAllocatorSize(int(memoryAccount.NumAccounts), int(memoryAccount.AccountSize)))
+		require.Equal(t, capacity, memoryAccount.ResizeSizes[len(memoryAccount.ResizeSizes)-1])
+
+		previous := uint32(vm.MemoryAccountSize)
+		for _, size := range memoryAccount.ResizeSizes {
+			require.Greater(t, size, previous)
+			require.LessOrEqual(t, size-previous, uint32(10*1024))
+			previous = size
+
+			ixns = append(ixns, vm.NewResizeMemoryInstruction(
+				&vm.ResizeMemoryInstructionAccounts{
+					VmAuthority: authority,
+					Vm:          vmAddress,
+					VmMemory:    memoryAccount.Address.Value,
+				},
+				&vm.ResizeMemoryInstructionArgs{
+					AccountSize: size,
+				},
+			))
+		}
+	}
 
 	return ixns
 }
@@ -2871,9 +2916,10 @@ func (e *testEnv) requireNewCurrencyV1ServerParameters(t *testing.T, result *sta
 		name        string
 		numAccounts uint32
 		accountSize uint32
+		resizeSizes []uint32
 	}{
-		{"nonce-0", 250, uint32(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce))},
-		{"timelock-0", 1_000, uint32(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock))},
+		{"nonce-0", 100, uint32(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce)), []uint32{6_680}},
+		{"timelock-0", 500, uint32(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock)), []uint32{10_240, 20_480, 30_720, 39_080}},
 	}
 	require.Len(t, params.MemoryAccounts, len(expected))
 	for i, memoryAccount := range params.MemoryAccounts {
@@ -2887,6 +2933,11 @@ func (e *testEnv) requireNewCurrencyV1ServerParameters(t *testing.T, result *sta
 		assert.Equal(t, expected[i].name, memoryAccount.Name)
 		assert.Equal(t, expected[i].numAccounts, memoryAccount.NumAccounts)
 		assert.Equal(t, expected[i].accountSize, memoryAccount.AccountSize)
+		assert.Equal(t, expected[i].resizeSizes, memoryAccount.ResizeSizes)
+
+		// The rent for the full capacity beyond the rent VM::InitMemory pays
+		capacity := uint64(expected[i].resizeSizes[len(expected[i].resizeSizes)-1])
+		assert.Equal(t, testMinimumBalanceForRentExemption(capacity)-testMinimumBalanceForRentExemption(vm.MemoryAccountSize), memoryAccount.RentTopUpLamports)
 	}
 }
 
@@ -3404,6 +3455,32 @@ func TestStatefulSwap_Reserve_DependencyFailures(t *testing.T) {
 			setup: func(t *testing.T, f *reserveSwapFixture) *statefulSwapRequest {
 				f.env.data.injectErr("SaveSwap", errInjected)
 				return f.buyRequest(t)
+			},
+		},
+		{
+			name: "new currency rent",
+			setup: func(t *testing.T, f *reserveSwapFixture) *statefulSwapRequest {
+				purchaseQuarks, feeQuarks := newCurrencyLaunchQuarks(1)
+				req := f.env.reserveSwapRequest(t, f.owner, common.CoreMintAccount, f.env.newCurrencyAwaitingPurchase(t, f.owner), purchaseQuarks, feeQuarks)
+				req.swapAuthority = newCurrencySwapAuthority(t, f.env, f.owner, common.CoreMintAccount, 1)
+				req.transactionVersion = 1
+				f.env.data.injectErr("GetBlockchainMinimumBalanceForRentExemption", errInjected)
+				return req
+			},
+		},
+		{
+			name: "treasury funded new currency rent",
+			setup: func(t *testing.T, f *reserveSwapFixture) *statefulSwapRequest {
+				f.env.credit(t, f.env.getVault(t, f.owner, f.launchpad1), currencycreator.ToQuarks(100_000))
+				f.env.setLiveSupply(t, f.launchpad1, currencycreator.ToQuarks(defaultLaunchpadSupply))
+
+				swapAmount, feeAmount := treasuryFundedNewCurrencyAmounts(1)
+				req := f.env.reserveSwapRequest(t, f.owner, f.launchpad1, f.env.newCurrencyAwaitingPurchase(t, f.owner), swapAmount, feeAmount)
+				req.reserve.FullAmountExchangeData = f.env.treasuryFundedExchangeData(t, f.launchpad1, swapAmount+feeAmount, 1)
+				req.swapAuthority = f.owner
+				req.transactionVersion = 1
+				f.env.data.injectErr("GetBlockchainMinimumBalanceForRentExemption", errInjected)
+				return req
 			},
 		},
 		{

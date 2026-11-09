@@ -20,7 +20,7 @@ func TestInitNonceBatches(t *testing.T) {
 	noneAllocated := func(int) bool { return false }
 
 	batches := initNonceBatches(transaction_util.CurrencyLaunchNoncePoolSize, noneAllocated, initNoncesPerTxn)
-	require.Len(t, batches, 5)
+	require.Len(t, batches, 2)
 	for i, batch := range batches {
 		require.Len(t, batch, initNoncesPerTxn)
 		for j, memoryIndex := range batch {
@@ -39,7 +39,7 @@ func TestInitNonceBatches(t *testing.T) {
 
 	// A retry only initializes what a failed attempt left unallocated
 	allocated := func(index int) bool { return index < 100 || index%2 == 0 }
-	batches = initNonceBatches(transaction_util.CurrencyLaunchNoncePoolSize, allocated, initNoncesPerTxn)
+	batches = initNonceBatches(250, allocated, initNoncesPerTxn)
 	require.Len(t, batches, 3)
 	for _, batch := range batches {
 		assert.Len(t, batch, 25)
