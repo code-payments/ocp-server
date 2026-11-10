@@ -603,7 +603,7 @@ func (e *testEnv) expectedStatefulSwapTransaction(t *testing.T, req *statefulSwa
 		case initializesMint && !isSell:
 			h, err = NewReserveCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, toMint, p.SwapAmount, p.FeeAmount, selectedNonce)
 		case initializesMint && transactionVersion == solana.MessageVersion1:
-			h, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyV1PurchaseQuarks, selectedNonce)
+			h, err = NewReserveTreasuryFundedCreateAndBuySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyV2PurchaseQuarks, selectedNonce)
 		case initializesMint:
 			h, err = NewReserveTreasuryFundedCreateAndBuyLegacySwapHandler(e.ctx, e.data, req.owner, fromMint, toMint, p.SwapAmount, p.FeeAmount, e.swapTreasury, defaultNewCurrencyPurchaseQuarks, selectedNonce)
 		case isBuy && isSell:
@@ -774,7 +774,7 @@ func newCurrencySwapAuthority(t *testing.T, e *testEnv, owner, fromMint *common.
 // transaction version
 func newCurrencyLaunchQuarks(transactionVersion uint32) (purchaseQuarks, feeQuarks uint64) {
 	if selectSwapTransactionVersion(transactionVersion) == solana.MessageVersion1 {
-		return defaultNewCurrencyV1PurchaseQuarks, defaultNewCurrencyV1FeeQuarks
+		return defaultNewCurrencyV2PurchaseQuarks, defaultNewCurrencyV2FeeQuarks
 	}
 	return defaultNewCurrencyPurchaseQuarks, defaultNewCurrencyFeeQuarks
 }
@@ -2844,7 +2844,7 @@ func (e *testEnv) requireNewCurrencyServerParameters(t *testing.T, result *state
 		assert.Equal(t, e.swapTreasury.PublicKey().ToBytes(), params.Treasury.Value)
 		expectedPurchaseQuarks := uint64(defaultNewCurrencyPurchaseQuarks)
 		if result.expectedTxn.Message.Version == solana.MessageVersion1 {
-			expectedPurchaseQuarks = defaultNewCurrencyV1PurchaseQuarks
+			expectedPurchaseQuarks = defaultNewCurrencyV2PurchaseQuarks
 		}
 		assert.Equal(t, expectedPurchaseQuarks, params.TreasuryPurchaseAmount)
 	} else {
@@ -2853,7 +2853,7 @@ func (e *testEnv) requireNewCurrencyServerParameters(t *testing.T, result *state
 	}
 
 	if result.expectedTxn.Message.Version == solana.MessageVersion1 {
-		e.requireNewCurrencyV1ServerParameters(t, result, mint)
+		e.requireNewCurrencyV2ServerParameters(t, result, mint)
 		return
 	}
 
@@ -2873,9 +2873,9 @@ func (e *testEnv) requireNewCurrencyServerParameters(t *testing.T, result *state
 	}
 }
 
-// requireNewCurrencyV1ServerParameters verifies the v1 transaction config and
+// requireNewCurrencyV2ServerParameters verifies the v1 transaction config and
 // the memory accounts initialized within the transaction
-func (e *testEnv) requireNewCurrencyV1ServerParameters(t *testing.T, result *statefulSwapResult, mint *common.Account) {
+func (e *testEnv) requireNewCurrencyV2ServerParameters(t *testing.T, result *statefulSwapResult, mint *common.Account) {
 	params := result.serverParameters.GetReserveNewCurrency()
 
 	assert.Empty(t, params.Alts)

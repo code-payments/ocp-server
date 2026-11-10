@@ -131,8 +131,8 @@ func (p *runtime) getCurrencyLaunchTerms(ctx context.Context, swapRecord *swap.R
 
 	if transactionVersion == solana.MessageVersion1 {
 		return &history_util.CurrencyLaunchTerms{
-			PurchaseQuarks: p.conf.newCurrencyV1PurchaseQuarks.Get(ctx),
-			FeeQuarks:      p.conf.newCurrencyV1FeeQuarks.Get(ctx),
+			PurchaseQuarks: p.conf.newCurrencyV2PurchaseQuarks.Get(ctx),
+			FeeQuarks:      p.conf.newCurrencyV2FeeQuarks.Get(ctx),
 		}, nil
 	}
 	return &history_util.CurrencyLaunchTerms{

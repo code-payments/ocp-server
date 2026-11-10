@@ -44,10 +44,11 @@ const (
 
 	NewCurrencyFeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_FEE_QUARKS"
 
-	// What a currency launch with a v1 initial purchase transaction is charged
-	NewCurrencyV1PurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V1_PURCHASE_QUARKS"
+	// The V2 launch terms, which are what a currency launch with a v1 initial
+	// purchase transaction is charged
+	NewCurrencyV2PurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V2_PURCHASE_QUARKS"
 
-	NewCurrencyV1FeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V1_FEE_QUARKS"
+	NewCurrencyV2FeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V2_FEE_QUARKS"
 )
 
 // Assumes a USD stable coin core mint
@@ -55,8 +56,8 @@ var (
 	defaultCreateOnSendWithdrawalFeeQuarks = common.CoreMintQuarksPerUnit / 2  // $0.50
 	defaultNewCurrencyPurchaseQuarks       = 10 * common.CoreMintQuarksPerUnit // $10
 	defaultNewCurrencyFeeQuarks            = 10 * common.CoreMintQuarksPerUnit // $10
-	defaultNewCurrencyV1PurchaseQuarks     = 20 * common.CoreMintQuarksPerUnit // $20
-	defaultNewCurrencyV1FeeQuarks          = uint64(0)                         // $0
+	defaultNewCurrencyV2PurchaseQuarks     = 20 * common.CoreMintQuarksPerUnit // $20
+	defaultNewCurrencyV2FeeQuarks          = uint64(0)                         // $0
 )
 
 type conf struct {
@@ -73,8 +74,8 @@ type conf struct {
 	swapTreasuryOwnerPublicKey      config.String
 	newCurrencyPurchaseQuarks       config.Uint64
 	newCurrencyFeeQuarks            config.Uint64
-	newCurrencyV1PurchaseQuarks     config.Uint64
-	newCurrencyV1FeeQuarks          config.Uint64
+	newCurrencyV2PurchaseQuarks     config.Uint64
+	newCurrencyV2FeeQuarks          config.Uint64
 }
 
 // getNewCurrencyLaunchQuarks returns the core mint quarks a currency launch
@@ -82,7 +83,7 @@ type conf struct {
 // transaction's version
 func (c *conf) getNewCurrencyLaunchQuarks(ctx context.Context, transactionVersion solana.MessageVersion) (purchaseQuarks, feeQuarks uint64) {
 	if transactionVersion == solana.MessageVersion1 {
-		return c.newCurrencyV1PurchaseQuarks.Get(ctx), c.newCurrencyV1FeeQuarks.Get(ctx)
+		return c.newCurrencyV2PurchaseQuarks.Get(ctx), c.newCurrencyV2FeeQuarks.Get(ctx)
 	}
 	return c.newCurrencyPurchaseQuarks.Get(ctx), c.newCurrencyFeeQuarks.Get(ctx)
 }
@@ -107,8 +108,8 @@ func WithEnvConfigs() ConfigProvider {
 			swapTreasuryOwnerPublicKey:      env.NewStringConfig(SwapTreasuryOwnerPublicKeyConfigEnvName, defaultSwapTreasuryOwnerPublicKey),
 			newCurrencyPurchaseQuarks:       env.NewUint64Config(NewCurrencyPurchaseQuarksConfigEnvName, defaultNewCurrencyPurchaseQuarks),
 			newCurrencyFeeQuarks:            env.NewUint64Config(NewCurrencyFeeQuarksConfigEnvName, defaultNewCurrencyFeeQuarks),
-			newCurrencyV1PurchaseQuarks:     env.NewUint64Config(NewCurrencyV1PurchaseQuarksConfigEnvName, defaultNewCurrencyV1PurchaseQuarks),
-			newCurrencyV1FeeQuarks:          env.NewUint64Config(NewCurrencyV1FeeQuarksConfigEnvName, defaultNewCurrencyV1FeeQuarks),
+			newCurrencyV2PurchaseQuarks:     env.NewUint64Config(NewCurrencyV2PurchaseQuarksConfigEnvName, defaultNewCurrencyV2PurchaseQuarks),
+			newCurrencyV2FeeQuarks:          env.NewUint64Config(NewCurrencyV2FeeQuarksConfigEnvName, defaultNewCurrencyV2FeeQuarks),
 		}
 	}
 }
@@ -139,8 +140,8 @@ func withManualTestOverrides(overrides *testOverrides) ConfigProvider {
 			swapTreasuryOwnerPublicKey:      wrapper.NewStringConfig(memory.NewConfig(overrides.swapTreasuryOwnerPublicKey), defaultSwapTreasuryOwnerPublicKey),
 			newCurrencyPurchaseQuarks:       wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyPurchaseQuarks), defaultNewCurrencyPurchaseQuarks),
 			newCurrencyFeeQuarks:            wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyFeeQuarks), defaultNewCurrencyFeeQuarks),
-			newCurrencyV1PurchaseQuarks:     wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyV1PurchaseQuarks), defaultNewCurrencyV1PurchaseQuarks),
-			newCurrencyV1FeeQuarks:          wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyV1FeeQuarks), defaultNewCurrencyV1FeeQuarks),
+			newCurrencyV2PurchaseQuarks:     wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyV2PurchaseQuarks), defaultNewCurrencyV2PurchaseQuarks),
+			newCurrencyV2FeeQuarks:          wrapper.NewUint64Config(memory.NewConfig(defaultNewCurrencyV2FeeQuarks), defaultNewCurrencyV2FeeQuarks),
 		}
 	}
 }
