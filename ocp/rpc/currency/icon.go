@@ -32,6 +32,13 @@ import (
 const (
 	maxIconSize = 512
 
+	// Checked from the image header before decoding, since decoded pixel
+	// buffers can be far larger than the upload
+	maxIconUploadSide = 4096
+
+	// Icons must be square, with some leeway for client crop rounding
+	maxIconAspectSkewPercent = 2
+
 	iconWebpQuality = 90
 	iconWebpMethod  = 5
 
@@ -128,6 +135,18 @@ func processIcon(data []byte) ([]byte, error) {
 	isJpeg := len(data) >= len(jpegMagic) && bytes.Equal(data[:len(jpegMagic)], jpegMagic)
 	isPng := len(data) >= len(pngMagic) && bytes.Equal(data[:len(pngMagic)], pngMagic)
 	if !isJpeg && !isPng && !isWebp(data) {
+		return nil, errInvalidIcon
+	}
+
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, errInvalidIcon
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxIconUploadSide || cfg.Height > maxIconUploadSide {
+		return nil, errInvalidIcon
+	}
+	longSide, shortSide := max(cfg.Width, cfg.Height), min(cfg.Width, cfg.Height)
+	if longSide*100 > shortSide*(100+maxIconAspectSkewPercent) {
 		return nil, errInvalidIcon
 	}
 
