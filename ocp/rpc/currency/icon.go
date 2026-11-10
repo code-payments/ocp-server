@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	iconSize = 64
+	maxIconSize = 512
 
 	// Icon keys are content addressed, so the object at a given URL never changes
 	iconCacheControl = "public, max-age=31536000, immutable"
@@ -145,8 +145,14 @@ func processIcon(data []byte) ([]byte, string, string, error) {
 		return nil, "", "", errInvalidIcon
 	}
 
-	if bounds := src.Bounds(); bounds.Dx() != iconSize || bounds.Dy() != iconSize {
-		dst := image.NewRGBA(image.Rect(0, 0, iconSize, iconSize))
+	// Icons are square, sized to the smaller uploaded dimension and never upscaled
+	bounds := src.Bounds()
+	side := min(maxIconSize, bounds.Dx(), bounds.Dy())
+	if side <= 0 {
+		return nil, "", "", errInvalidIcon
+	}
+	if bounds.Dx() != side || bounds.Dy() != side {
+		dst := image.NewRGBA(image.Rect(0, 0, side, side))
 		draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
 		src = dst
 	}
