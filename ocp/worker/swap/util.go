@@ -68,16 +68,9 @@ func (p *runtime) markSwapSubmitting(ctx context.Context, record *swap.Record) e
 	if err != nil {
 		return err
 	}
-	isCurrencyLaunch, err := p.isCurrencyLaunch(ctx, record)
+	launchTerms, err := p.getCurrencyLaunchTerms(ctx, record)
 	if err != nil {
 		return err
-	}
-	var launchTerms *history_util.CurrencyLaunchTerms
-	if isCurrencyLaunch {
-		launchTerms = &history_util.CurrencyLaunchTerms{
-			PurchaseQuarks: p.conf.newCurrencyPurchaseQuarks.Get(ctx),
-			FeeQuarks:      p.conf.newCurrencyFeeQuarks.Get(ctx),
-		}
 	}
 	historyRecord, err := history_util.BuildRecordForFundedSwap(record, exchangeCurrency, nativeAmount, fiatExchangeRate, launchTerms)
 	if err != nil {
@@ -120,6 +113,32 @@ func (p *runtime) isCurrencyLaunch(ctx context.Context, swapRecord *swap.Record)
 		return false, err
 	}
 	return destinationCurrencyMetadataRecord.State != currency.MetadataStateAvailable, nil
+}
+
+// getCurrencyLaunchTerms returns what a currency launch is charged when the
+// swap is a currency's initial purchase, and nil otherwise. The terms depend on
+// the initial purchase transaction's version.
+func (p *runtime) getCurrencyLaunchTerms(ctx context.Context, swapRecord *swap.Record) (*history_util.CurrencyLaunchTerms, error) {
+	isCurrencyLaunch, err := p.isCurrencyLaunch(ctx, swapRecord)
+	if err != nil || !isCurrencyLaunch {
+		return nil, err
+	}
+
+	transactionVersion, err := transaction_util.GetInitialPurchaseTransactionVersion(swapRecord)
+	if err != nil {
+		return nil, err
+	}
+
+	if transactionVersion == solana.MessageVersion1 {
+		return &history_util.CurrencyLaunchTerms{
+			PurchaseQuarks: p.conf.newCurrencyV2PurchaseQuarks.Get(ctx),
+			FeeQuarks:      p.conf.newCurrencyV2FeeQuarks.Get(ctx),
+		}, nil
+	}
+	return &history_util.CurrencyLaunchTerms{
+		PurchaseQuarks: p.conf.newCurrencyPurchaseQuarks.Get(ctx),
+		FeeQuarks:      p.conf.newCurrencyFeeQuarks.Get(ctx),
+	}, nil
 }
 
 // getFundedSwapValue derives the value funding a swap, along with the client's
@@ -631,6 +650,34 @@ func (p *runtime) maybeUpdateBalancesForFinalizedSwap(ctx context.Context, swapR
 	}
 }
 
+// getInitialPurchaseQuarksBought returns the new currency's quarks bought by
+// its initial purchase, which is how much the purchase took out of the pool
+// vault. The vault holds the full token supply before the purchase. It's
+// created within the purchase transaction for v1 launches and v0 launches
+// funded with the core mint, so it has no balance before the transaction, and
+// it's created ahead of the purchase for v0 launches funded with another
+// currency.
+func getInitialPurchaseQuarksBought(vaultMint *common.Account, tokenBalances *solana.TransactionTokenBalances) (uint64, error) {
+	postQuarks, ok, err := transaction_util.GetPostQuarksFromTokenBalances(vaultMint, tokenBalances)
+	if err != nil {
+		return 0, err
+	} else if !ok {
+		return 0, errors.New("pool vault balance not found after the transaction")
+	}
+
+	preQuarks, ok, err := transaction_util.GetPreQuarksFromTokenBalances(vaultMint, tokenBalances)
+	if err != nil {
+		return 0, err
+	} else if !ok {
+		preQuarks = currencycreator.DefaultMintMaxQuarkSupply
+	}
+
+	if postQuarks >= preQuarks {
+		return 0, errors.New("pool vault balance didn't decrease")
+	}
+	return preQuarks - postQuarks, nil
+}
+
 func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context, swapRecord *swap.Record, tokenBalances *solana.TransactionTokenBalances) (uint64, bool, error) {
 	if swapRecord.Kind != swap.KindReserve {
 		return 0, false, errors.New("swap is not a reserve swap")
@@ -667,25 +714,9 @@ func (p *runtime) maybeUpdateBalancesForFinalizedReserveSwap(ctx context.Context
 				return 0, false, err
 			}
 
-			deltaQuarksIntoVault, err := transaction_util.GetDeltaQuarksFromTokenBalances(currencyAccounts.VaultMint, tokenBalances)
+			quarksBought, err := getInitialPurchaseQuarksBought(currencyAccounts.VaultMint, tokenBalances)
 			if err != nil {
 				return 0, false, err
-			}
-
-			var quarksBought uint64
-			if common.IsCoreMint(fromMint) {
-				// The currency was initialized within the swap transaction, so
-				// the delta includes seeding the vault with the full token supply
-				if deltaQuarksIntoVault <= 0 {
-					return 0, false, errors.New("delta quarks into pool vault is not positive")
-				}
-				quarksBought = currencycreator.DefaultMintMaxQuarkSupply - uint64(deltaQuarksIntoVault)
-			} else {
-				// The currency was initialized prior to the swap transaction
-				if deltaQuarksIntoVault >= 0 {
-					return 0, false, errors.New("delta quarks out of pool vault is not negative")
-				}
-				quarksBought = uint64(-deltaQuarksIntoVault)
 			}
 
 			// This swap is initializing the VM and the funds will be deposited

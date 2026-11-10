@@ -131,6 +131,11 @@ func (m *model) dbSave(ctx context.Context, db *sqlx.DB) error {
 			m.CreatedAt,
 		).StructScan(m)
 		if err != nil {
+			// Conflicts on swap_id update the existing record, so a unique
+			// violation means another swap already uses the funding ID
+			if pgutil.IsUniqueViolation(err) {
+				return swap.ErrExists
+			}
 			return pgutil.CheckNoRows(err, swap.ErrStaleVersion)
 		}
 		return nil

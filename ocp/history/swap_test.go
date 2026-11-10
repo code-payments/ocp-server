@@ -124,6 +124,42 @@ func TestBuildRecordForFundedReserveSwap_CurrencyLaunchWithLaunchpadCurrency(t *
 	assert.NoError(t, record.Validate())
 }
 
+func TestBuildRecordForFundedReserveSwap_FreeCurrencyLaunch(t *testing.T) {
+	// v1 launches buy the currency's initial supply with $20 and charge no fee
+	freeLaunchTerms := &CurrencyLaunchTerms{
+		PurchaseQuarks: 20 * common.CoreMintQuarksPerUnit,
+		FeeQuarks:      0,
+	}
+
+	t.Run("core mint", func(t *testing.T) {
+		swapRecord := newReserveSwapRecord()
+		swapRecord.SwapAmount = 20 * common.CoreMintQuarksPerUnit
+		swapRecord.FeeAmount = 0
+
+		record, err := BuildRecordForFundedSwap(swapRecord, "usd", 20.0, 1.0, freeLaunchTerms)
+		require.NoError(t, err)
+		assert.Empty(t, record.Fees)
+		assert.Equal(t, 20.0, record.NativeAmount)
+		assert.Equal(t, swapRecord.SwapAmount, record.Quantity)
+		assert.NoError(t, record.Validate())
+	})
+
+	t.Run("launchpad currency", func(t *testing.T) {
+		// The treasury pays the pool's sell fee, so the swapper is charged
+		// nothing
+		swapRecord := newReserveSwapRecord()
+		swapRecord.FromMint = testutil.NewRandomAccount(t).PublicKey().ToBase58()
+		swapRecord.SwapAmount = 18_335_942_827_079
+		swapRecord.FeeAmount = 0
+
+		record, err := BuildRecordForFundedSwap(swapRecord, "usd", 20.0, 1.0, freeLaunchTerms)
+		require.NoError(t, err)
+		assert.Empty(t, record.Fees)
+		assert.Equal(t, swapRecord.SwapAmount, record.Quantity)
+		assert.NoError(t, record.Validate())
+	})
+}
+
 func TestBuildRecordForFundedStablecoinSwap(t *testing.T) {
 	swapRecord := newStablecoinSwapRecord()
 

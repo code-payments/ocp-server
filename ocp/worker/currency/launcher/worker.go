@@ -18,13 +18,14 @@ import (
 )
 
 const (
-	initialAuthorityFundingLamports = 1_300_000_000 // 1.3 SOL
+	// Covers the rent and fees the currency authority pays for a launch, which
+	// the nonce and timelock memory accounts dominate. A launch costs about
+	// 0.27 SOL at 5,080 lamports per byte of rent, and about 0.36 SOL at the
+	// previous rate of 6,960. Growing transaction_util.CurrencyLaunchNoncePoolSize
+	// or transaction_util.CurrencyLaunchTimelockAccounts requires raising this.
+	initialAuthorityFundingLamports = 400_000_000 // 0.4 SOL
 
-	initialNoncePoolSize          = 1_000
-	initialNonceMemoryAccountName = "nonce-0"
-
-	initialTimelockAccounts          = 1_000
-	initialTimelockMemoryAccountName = "timelock-0"
+	initNoncesPerTxn = 50
 )
 
 // todo: Improve paralellization, given blocking initialization takes a long time
@@ -173,28 +174,9 @@ func (p *runtime) handleStatePrePurchaseSetup(ctx context.Context, currencyMetad
 		return errors.Wrap(err, "error getting vm metadata record")
 	}
 
-	// Initial purchases funded outside the core mint require the currency to
-	// be fully initialized on the blockchain before the purchase transaction
-	// can be executed.
-	fromMint, err := common.NewAccountFromPublicKeyString(swapRecords[0].FromMint)
+	err = p.initCurrencyAheadOfLegacyPurchase(ctx, currencyMetadataRecord, vmMetadataRecord, swapRecords[0])
 	if err != nil {
-		return errors.Wrap(err, "invalid swap source mint")
-	}
-	if !common.IsCoreMint(fromMint) {
-		accounts, err := p.getNewCurrencyAccounts(ctx, currencyMetadataRecord, vmMetadataRecord)
-		if err != nil {
-			return errors.Wrap(err, "error getting currency accounts")
-		}
-
-		ok, err := validateMintExists(ctx, p.data, accounts.Mint)
-		if err != nil {
-			return errors.Wrap(err, "error checking if currency is initialized")
-		} else if !ok {
-			err = p.initCurrencyOnBlockchain(ctx, currencyMetadataRecord, vmMetadataRecord, accounts)
-			if err != nil {
-				return errors.Wrap(err, "error initializing currency on blockchain")
-			}
-		}
+		return err
 	}
 
 	return p.data.ExecuteInTx(ctx, sql.LevelDefault, func(ctx context.Context) error {
@@ -222,6 +204,56 @@ func (p *runtime) handleStateCompletingInitialization(ctx context.Context, curre
 		return errors.Wrap(err, "error getting currency accounts")
 	}
 
+	err = p.completeBlockchainInitialization(ctx, currencyMetadataRecord, accounts)
+	if err != nil {
+		return err
+	}
+
+	// todo: Need mechanism for nonce memory accounts, which are pre-populated with random accounts
+	//       not known until after finalization. No direct impact here, given that we don't need to
+	//       reserve state later.
+
+	err = p.addTimelockMemoryAccountToDb(ctx, accounts)
+	if err != nil {
+		return errors.Wrap(err, "error adding timelock memory account to db")
+	}
+
+	//
+	// Initialization phase 5 (nonce pool)
+	//
+
+	ok, err := validateNonceMemoryAccountPopulated(ctx, p.data, accounts.NonceMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 5 is complete")
+	} else if !ok {
+		err := p.populateNonceMemory(ctx, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error populating nonce memory")
+		}
+	}
+
+	ok, err = validateNoncePoolInitialized(ctx, p.data, accounts.NonceMemoryAccount)
+	if err != nil {
+		return errors.Wrap(err, "error checking if initialization phase 5 is complete")
+	} else if !ok {
+		err := p.initializeNoncePool(ctx, accounts)
+		if err != nil {
+			return errors.Wrap(err, "error initializing nonce pool")
+		}
+	}
+
+	//
+	// Initialization complete
+	//
+
+	return p.markCurrencyMetadataFinalValidation(ctx, currencyMetadataRecord)
+}
+
+// completeBlockchainInitialization initializes the blockchain accounts the
+// initial purchase didn't, through the ALT. Each phase is gated on blockchain
+// state, so v0 and v1 initial purchases converge, and a phase interrupted by a
+// failure is retried on the next attempt.
+func (p *runtime) completeBlockchainInitialization(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
 	//
 	// Initialization phase 1 (sanity check that initial purchase and init succeeded)
 	//
@@ -235,83 +267,40 @@ func (p *runtime) handleStateCompletingInitialization(ctx context.Context, curre
 	}
 
 	//
-	// Initialization phase 2 (init remaming blockchain accounts not initialized during initial purchase)
+	// Initialization phase 2 (metadata, memory accounts and fee account). v1
+	// initial purchases do this within the purchase.
 	//
 
-	ok, err = validateMemoryAccountExists(ctx, p.data, accounts.TimelockMemoryAccount)
+	err = p.completeLegacyInitialization(ctx, accounts)
 	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 2 is complete")
-	} else if !ok {
-		// Must derive ALT near time of creation due to recent slot requirement
-		err := p.deriveNewAlt(ctx, accounts)
-		if err != nil {
-			return errors.Wrap(err, "error deriving new alt")
-		}
+		return err
+	}
 
-		currencyMetadataRecord.Alt = accounts.Alt.PublicKey().ToBase58()
-		err = p.data.SaveCurrencyMetadata(ctx, currencyMetadataRecord)
-		if err != nil {
-			return errors.Wrap(err, "error saving new alt")
-		}
+	//
+	// Initialization phase 3 (memory account resizes). Every flow resizes after
+	// the initial purchase, because the resizes don't fit within the v1
+	// purchase transaction's instruction trace limit.
+	//
 
-		err = p.initRemainingBlockchainAccounts(ctx, currencyMetadataRecord, accounts)
+	for _, memoryAccount := range []*common.Account{accounts.NonceMemoryAccount, accounts.TimelockMemoryAccount} {
+		ok, err = validateMemoryAccountIsResized(ctx, p.data, memoryAccount)
 		if err != nil {
-			return errors.Wrap(err, "error initializing remaining blockchain accounts")
+			return errors.Wrap(err, "error checking if memory accounts are resized")
+		} else if !ok {
+			err = p.resizeMemoryAccounts(ctx, accounts)
+			if err != nil {
+				return errors.Wrap(err, "error resizing memory accounts")
+			}
+			break
 		}
 	}
 
 	//
-	// Initialization phase 3 (resize and extend blockchain accounts)
+	// Initialization phase 4 (ALT). Every flow creates the ALT after the
+	// initial purchase, and legacy clients require it.
 	//
 
-	ok, err = validateAltIsExtended(ctx, p.data, accounts.Alt)
-	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 3 is complete")
-	} else if !ok {
-		err = p.resizeAndExtendBlockchainAccounts(ctx, accounts)
-		if err != nil {
-			return errors.Wrap(err, "error resizing and extending blockchain accounts")
-		}
-	}
-
-	// todo: Need mechanism for nonce memory accounts, which are pre-populated with random accounts
-	//       not known until after finalization. No direct impact here, given that we don't need to
-	//       reserve state later.
-
-	err = p.addTimelockMemoryAccountToDb(ctx, accounts)
-	if err != nil {
-		return errors.Wrap(err, "error adding timelock memory account to db")
-	}
-
-	//
-	// Initialization phase 4 (nonce pool)
-	//
-
-	ok, err = validateNonceMemoryAccountPopulated(ctx, p.data, accounts.NonceMemoryAccount)
-	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 4 is complete")
-	} else if !ok {
-		err := p.populateNonceMemory(ctx, accounts)
-		if err != nil {
-			return errors.Wrap(err, "error populating nonce memory")
-		}
-	}
-
-	ok, err = validateNoncePoolInitialized(ctx, p.data, accounts.NonceMemoryAccount)
-	if err != nil {
-		return errors.Wrap(err, "error checking if initialization phase 4 is complete")
-	} else if !ok {
-		err := p.initializeNoncePool(ctx, accounts)
-		if err != nil {
-			return errors.Wrap(err, "error initializing nonce pool")
-		}
-	}
-
-	//
-	// Initialization complete
-	//
-
-	return p.markCurrencyMetadataFinalValidation(ctx, currencyMetadataRecord)
+	return p.initializeAlt(ctx, currencyMetadataRecord, accounts)
 }
 
 func (p *runtime) handleStateFinalValidation(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord) error {

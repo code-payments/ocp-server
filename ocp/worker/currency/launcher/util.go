@@ -25,10 +25,8 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/vm/ram"
 	transaction_util "github.com/code-payments/ocp-server/ocp/transaction"
 	"github.com/code-payments/ocp-server/solana"
-	address_lookup_table "github.com/code-payments/ocp-server/solana/addresslookuptable"
 	compute_budget "github.com/code-payments/ocp-server/solana/computebudget"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
-	"github.com/code-payments/ocp-server/solana/system"
 	"github.com/code-payments/ocp-server/solana/token"
 	"github.com/code-payments/ocp-server/solana/vm"
 )
@@ -38,27 +36,26 @@ import (
 type newCurrencyAccounts struct {
 	Authority *common.Account
 
-	Mint                 *common.Account
-	MintBump             uint8
-	CurrencyConfig       *common.Account
-	CurrencyConfigBump   uint8
-	LiquidityPool        *common.Account
-	LiquidityPoolBump    uint8
-	MetaplexMetadata     *common.Account
-	MetaplexMetadataBump uint8
-	VaultBase            *common.Account
-	VaultBaseBump        uint8
-	VaultMint            *common.Account
-	VaultMintBump        uint8
+	Mint               *common.Account
+	MintBump           uint8
+	CurrencyConfig     *common.Account
+	CurrencyConfigBump uint8
+	LiquidityPool      *common.Account
+	LiquidityPoolBump  uint8
+	MetaplexMetadata   *common.Account
+	VaultBase          *common.Account
+	VaultBaseBump      uint8
+	VaultMint          *common.Account
+	VaultMintBump      uint8
 
 	Vm                    *common.Account
 	VmBump                uint8
 	Omnibus               *common.Account
 	OmnibusBump           uint8
+	NonceMemory           *transaction_util.CurrencyLaunchMemoryAccount
 	NonceMemoryAccount    *common.Account
-	NonceMemoryBump       uint8
+	TimelockMemory        *transaction_util.CurrencyLaunchMemoryAccount
 	TimelockMemoryAccount *common.Account
-	TimelockMemoryBump    uint8
 
 	Alt           *common.Account
 	AltBump       uint8
@@ -318,41 +315,6 @@ func validateVmExists(ctx context.Context, data ocp_data.Provider, account *comm
 	return true, nil
 }
 
-func validateAltExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58())
-	if err == solana.ErrNoAccountInfo {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-
-	var state address_lookup_table.AddressLookupTableAccount
-	err = state.Unmarshal(ai.Data)
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
-func validateAltIsExtended(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58())
-	if err == solana.ErrNoAccountInfo {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-
-	var state address_lookup_table.AddressLookupTableAccount
-	err = state.Unmarshal(ai.Data)
-	if err != nil {
-		return false, err
-	}
-
-	// todo: validate addresses
-	return len(state.Addresses) > 0, nil
-}
-
 func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
 	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58())
 	if err == solana.ErrNoAccountInfo {
@@ -365,23 +327,6 @@ func validateFeeAccountExists(ctx context.Context, data ocp_data.Provider, accou
 	ok := state.Unmarshal(ai.Data)
 	if !ok {
 		return false, errors.New("invalid token account state")
-	}
-
-	return true, nil
-}
-
-func validateMemoryAccountExists(ctx context.Context, data ocp_data.Provider, account *common.Account) (bool, error) {
-	ai, _, err := data.GetBlockchainAccountInfo(ctx, account.PublicKey().ToBase58())
-	if err == solana.ErrNoAccountInfo {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-
-	var state vm.MemoryAccount
-	err = state.Unmarshal(ai.Data)
-	if err != nil {
-		return false, err
 	}
 
 	return true, nil
@@ -461,301 +406,49 @@ func validateNoncePoolInitialized(ctx context.Context, data ocp_data.Provider, a
 	return count == uint64(state.NumAccounts), nil
 }
 
-func (p *runtime) deriveNewAlt(ctx context.Context, accounts *newCurrencyAccounts) error {
-	recentSlot, err := p.data.GetBlockchainSlot(ctx)
-	if err != nil {
-		return err
-	}
-
-	address, bump, err := address_lookup_table.GetAddress(accounts.Authority.PublicKey().ToBytes(), recentSlot)
-	if err != nil {
-		return err
-	}
-
-	account, err := common.NewAccountFromPublicKeyBytes(address)
-	if err != nil {
-		return err
-	}
-
-	accounts.Alt = account
-	accounts.AltBump = bump
-	accounts.AltRecentSlot = recentSlot
-
-	return nil
-}
-
-// Initializes the currency, liquidity pool, VM and creator's VM deposit ATA on
-// the blockchain ahead of the initial purchase. This is only required for flows
-// where the initial purchase transaction doesn't atomically perform initialization
-// (ie. purchases funded outside the core mint).
-func (p *runtime) initCurrencyOnBlockchain(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, vmMetadataRecord *vm_metadata.Record, accounts *newCurrencyAccounts) error {
-	seedAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.Seed)
-	if err != nil {
-		return errors.Wrap(err, "invalid seed")
-	}
-
-	creatorAccount, err := common.NewAccountFromPublicKeyString(currencyMetadataRecord.CreatedBy)
-	if err != nil {
-		return errors.Wrap(err, "invalid creator")
-	}
-
-	vmConfig := &common.VmConfig{
-		Authority: accounts.Authority,
-		Vm:        accounts.Vm,
-		Omnibus:   accounts.Omnibus,
-		Mint:      accounts.Mint,
-	}
-	creatorVmDepositAccounts, err := creatorAccount.GetVmDepositAccounts(vmConfig)
-	if err != nil {
-		return errors.Wrap(err, "error getting creator vm deposit accounts")
-	}
-
-	initCurrencyIxn := currencycreator.NewInitializeCurrencyInstruction(
-		&currencycreator.InitializeCurrencyInstructionAccounts{
-			Authority: accounts.Authority.PublicKey().ToBytes(),
-			Mint:      accounts.Mint.PublicKey().ToBytes(),
-			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializeCurrencyInstructionArgs{
-			Name:     currencyMetadataRecord.Name,
-			Symbol:   currencyMetadataRecord.Symbol,
-			Seed:     seedAccount.PublicKey().ToBytes(),
-			Bump:     accounts.CurrencyConfigBump,
-			MintBump: accounts.MintBump,
-		},
-	)
-
-	initPoolIxn := currencycreator.NewInitializePoolInstruction(
-		&currencycreator.InitializePoolInstructionAccounts{
-			Authority:   accounts.Authority.PublicKey().ToBytes(),
-			Currency:    accounts.CurrencyConfig.PublicKey().ToBytes(),
-			TargetMint:  accounts.Mint.PublicKey().ToBytes(),
-			BaseMint:    common.CoreMintAccount.PublicKey().ToBytes(),
-			Pool:        accounts.LiquidityPool.PublicKey().ToBytes(),
-			VaultTarget: accounts.VaultMint.PublicKey().ToBytes(),
-			VaultBase:   accounts.VaultBase.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializePoolInstructionArgs{
-			SellFee:         currencyMetadataRecord.SellFeeBps,
-			Bump:            accounts.LiquidityPoolBump,
-			VaultTargetBump: accounts.VaultMintBump,
-			VaultBaseBump:   accounts.VaultBaseBump,
-		},
-	)
-
-	initVmIxn := vm.NewInitVmInstruction(
-		&vm.InitVmInstructionAccounts{
-			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-			Vm:          accounts.Vm.PublicKey().ToBytes(),
-			VmOmnibus:   accounts.Omnibus.PublicKey().ToBytes(),
-			Mint:        accounts.Mint.PublicKey().ToBytes(),
-		},
-		&vm.InitVmInstructionArgs{
-			LockDuration:  vmMetadataRecord.DaysLocked,
-			VmBump:        accounts.VmBump,
-			VmOmnibusBump: accounts.OmnibusBump,
-		},
-	)
-
-	createCreatorVmDepositAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(
-		accounts.Authority.PublicKey().ToBytes(),
-		creatorVmDepositAccounts.Pda.PublicKey().ToBytes(),
-		accounts.Mint.PublicKey().ToBytes(),
-	)
-	if err != nil {
-		return errors.Wrap(err, "error creating creator vm deposit ata ixn")
-	}
-
-	txn := solana.NewLegacyTransaction(
-		accounts.Authority.PublicKey().ToBytes(),
-		compute_budget.SetComputeUnitLimit(200_000),
-		compute_budget.SetComputeUnitPrice(10_000),
-		initCurrencyIxn,
-		initPoolIxn,
-		initVmIxn,
-		createCreatorVmDepositAtaIxn,
-	)
-
-	bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
-	if err != nil {
-		return errors.Wrap(err, "error getting latest blockhash")
-	}
-	txn.SetBlockhash(bh)
-
-	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
-	if err != nil {
-		return errors.Wrap(err, "error signing transaction")
-	}
-
-	return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
-}
-
-func (p *runtime) initRemainingBlockchainAccounts(ctx context.Context, currencyMetadataRecord *currency.MetadataRecord, accounts *newCurrencyAccounts) error {
-	initMetadataIxn := currencycreator.NewInitializeMetadataInstruction(
-		&currencycreator.InitializeMetadataInstructionAccounts{
-			Authority: accounts.Authority.PublicKey().ToBytes(),
-			Mint:      accounts.Mint.PublicKey().ToBytes(),
-			Currency:  accounts.CurrencyConfig.PublicKey().ToBytes(),
-			Metadata:  accounts.MetaplexMetadata.PublicKey().ToBytes(),
-		},
-		&currencycreator.InitializeMetadataInstructionArgs{},
-	)
-
-	initNonceMemoryIxn := vm.NewInitMemoryInstruction(
-		&vm.InitMemoryInstructionAccounts{
-			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-			Vm:          accounts.Vm.PublicKey().ToBytes(),
-			VmMemory:    accounts.NonceMemoryAccount.PublicKey().ToBytes(),
-		},
-		&vm.InitMemoryInstructionArgs{
-			Name:         initialNonceMemoryAccountName,
-			NumAccounts:  uint32(initialNoncePoolSize),
-			AccountSize:  uint16(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce)),
-			VmMemoryBump: accounts.NonceMemoryBump,
-		},
-	)
-
-	initTimelockMemoryIxn := vm.NewInitMemoryInstruction(
-		&vm.InitMemoryInstructionAccounts{
-			VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-			Vm:          accounts.Vm.PublicKey().ToBytes(),
-			VmMemory:    accounts.TimelockMemoryAccount.PublicKey().ToBytes(),
-		},
-		&vm.InitMemoryInstructionArgs{
-			Name:         initialTimelockMemoryAccountName,
-			NumAccounts:  uint32(initialTimelockAccounts),
-			AccountSize:  uint16(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock)),
-			VmMemoryBump: accounts.TimelockMemoryBump,
-		},
-	)
-
-	initFeeAtaIxn, _, err := token.CreateAssociatedTokenAccountIdempotent(
-		accounts.Authority.PublicKey().ToBytes(),
-		common.GetSubsidizer().PublicKey().ToBytes(),
-		accounts.Mint.PublicKey().ToBytes(),
-	)
-	if err != nil {
-		return errors.Wrap(err, "error creating init fee ata ixn")
-	}
-
-	initAltIxn := address_lookup_table.Create(
-		accounts.Alt.PublicKey().ToBytes(),
-		accounts.Authority.PublicKey().ToBytes(),
-		accounts.Authority.PublicKey().ToBytes(),
-		accounts.AltRecentSlot,
-		accounts.AltBump,
-	)
-
-	txn := solana.NewLegacyTransaction(
-		accounts.Authority.PublicKey().ToBytes(),
-		compute_budget.SetComputeUnitLimit(300_000), // todo: optimize
-		compute_budget.SetComputeUnitPrice(10_000),
-		initMetadataIxn,
-		initNonceMemoryIxn,
-		initTimelockMemoryIxn,
-		initFeeAtaIxn,
-		initAltIxn,
-	)
-
-	bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
-	if err != nil {
-		return errors.Wrap(err, "error getting latest blockhash")
-	}
-	txn.SetBlockhash(bh)
-
-	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
-	if err != nil {
-		return errors.Wrap(err, "error signing transaction")
-	}
-
-	return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
-}
-
-func (p *runtime) resizeAndExtendBlockchainAccounts(ctx context.Context, accounts *newCurrencyAccounts) error {
+// resizeMemoryAccounts grows the nonce and timelock memory accounts to their
+// full capacity. Sizes come from the on-chain account counts, which can differ
+// from the current initial sizes for currencies launched earlier, and only
+// sizes beyond each account's current size are included.
+func (p *runtime) resizeMemoryAccounts(ctx context.Context, accounts *newCurrencyAccounts) error {
 	ixns := []solana.Instruction{
 		compute_budget.SetComputeUnitLimit(350_000),
 		compute_budget.SetComputeUnitPrice(10_000),
 	}
 
-	ai, _, err := p.data.GetBlockchainAccountInfo(ctx, accounts.NonceMemoryAccount.PublicKey().ToBase58())
-	if err != nil {
-		return errors.Wrap(err, "error getting nonce memory account info")
-	}
-	var nonceMemoryAccountState vm.MemoryAccount
-	err = nonceMemoryAccountState.Unmarshal(ai.Data)
-	if err != nil {
-		return errors.Wrap(err, "error unmarshalling nonce memory account")
-	}
+	var numResizes int
+	for _, memoryAccount := range []*common.Account{accounts.NonceMemoryAccount, accounts.TimelockMemoryAccount} {
+		ai, _, err := p.data.GetBlockchainAccountInfo(ctx, memoryAccount.PublicKey().ToBase58())
+		if err != nil {
+			return errors.Wrap(err, "error getting memory account info")
+		}
+		var state vm.MemoryAccount
+		err = state.Unmarshal(ai.Data)
+		if err != nil {
+			return errors.Wrap(err, "error unmarshalling memory account")
+		}
 
-	ai, _, err = p.data.GetBlockchainAccountInfo(ctx, accounts.TimelockMemoryAccount.PublicKey().ToBase58())
-	if err != nil {
-		return errors.Wrap(err, "error getting timelock memory account info")
-	}
-	var timelockMemoryAccountState vm.MemoryAccount
-	err = timelockMemoryAccountState.Unmarshal(ai.Data)
-	if err != nil {
-		return errors.Wrap(err, "error unmarshalling timelock memory account")
-	}
+		var sizes []uint32
+		for _, size := range transaction_util.MemoryResizeSizes(state.NumAccounts, state.AccountSize) {
+			if int(size) > len(ai.Data) {
+				sizes = append(sizes, size)
+			}
+		}
 
-	memoryResizeChunkSize := 10 * 1024
-
-	desiredNonceMemoryCapacity := vm.MemoryAccountSize + vm.GetSliceAllocatorSize(
-		int(nonceMemoryAccountState.NumAccounts),
-		int(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeDurableNonce)),
-	)
-	for i := 1; i <= desiredNonceMemoryCapacity/memoryResizeChunkSize+1; i++ {
-		nextSize := min(i*memoryResizeChunkSize, desiredNonceMemoryCapacity)
-		ixns = append(ixns, vm.NewResizeMemoryInstruction(
-			&vm.ResizeMemoryInstructionAccounts{
-				VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-				Vm:          accounts.Vm.PublicKey().ToBytes(),
-				VmMemory:    accounts.NonceMemoryAccount.PublicKey().ToBytes(),
-			},
-			&vm.ResizeMemoryInstructionArgs{
-				AccountSize: uint32(nextSize),
-			},
-		))
+		ixns = append(ixns, transaction_util.NewResizeMemoryInstructions(accounts.Authority, accounts.Vm, memoryAccount, sizes)...)
+		numResizes += len(sizes)
 	}
 
-	desiredTimelockMemoryCapacity := vm.MemoryAccountSize + vm.GetSliceAllocatorSize(
-		int(timelockMemoryAccountState.NumAccounts),
-		int(vm.GetVirtualAccountSizeInMemory(vm.VirtualAccountTypeTimelock)),
-	)
-	for i := 1; i <= desiredTimelockMemoryCapacity/memoryResizeChunkSize+1; i++ {
-		nextSize := min(i*memoryResizeChunkSize, desiredTimelockMemoryCapacity)
-		ixns = append(ixns, vm.NewResizeMemoryInstruction(
-			&vm.ResizeMemoryInstructionAccounts{
-				VmAuthority: accounts.Authority.PublicKey().ToBytes(),
-				Vm:          accounts.Vm.PublicKey().ToBytes(),
-				VmMemory:    accounts.TimelockMemoryAccount.PublicKey().ToBytes(),
-			},
-			&vm.ResizeMemoryInstructionArgs{
-				AccountSize: uint32(nextSize),
-			},
-		))
+	if numResizes == 0 {
+		return nil
 	}
+	return p.submitAuthorityTransaction(ctx, accounts, ixns...)
+}
 
-	ixns = append(ixns, address_lookup_table.Extend(
-		accounts.Alt.PublicKey().ToBytes(),
-		accounts.Authority.PublicKey().ToBytes(),
-		accounts.Authority.PublicKey().ToBytes(),
-
-		// Address ordering matters
-		accounts.Vm.PublicKey().ToBytes(),
-		accounts.Omnibus.PublicKey().ToBytes(),
-		accounts.Mint.PublicKey().ToBytes(),
-		accounts.LiquidityPool.PublicKey().ToBytes(),
-		accounts.VaultBase.PublicKey().ToBytes(),
-		accounts.VaultMint.PublicKey().ToBytes(),
-		common.CoreMintAccount.PublicKey().ToBytes(),
-		system.RentSysVar,
-		system.RecentBlockhashesSysVar,
-	))
-
-	txn := solana.NewLegacyTransaction(
-		accounts.Authority.PublicKey().ToBytes(),
-		ixns...,
-	)
+// submitAuthorityTransaction submits a legacy transaction paid for and signed
+// by the currency authority, and waits for it to finalize
+func (p *runtime) submitAuthorityTransaction(ctx context.Context, accounts *newCurrencyAccounts, ixns ...solana.Instruction) error {
+	txn := solana.NewLegacyTransaction(accounts.Authority.PublicKey().ToBytes(), ixns...)
 
 	marshalledTxn, err := txn.Marshal()
 	if err != nil {
@@ -791,67 +484,30 @@ func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrency
 		return err
 	}
 
-	initVdnIxnsPerTxn := 22
-	initVdnBatchTxns := int(state.NumAccounts) / initVdnIxnsPerTxn
-	if int(state.NumAccounts)%initVdnIxnsPerTxn != 0 {
-		initVdnBatchTxns += 1
+	err = transaction_util.ValidateInitNonceMemoryAccounts(state.NumAccounts)
+	if err != nil {
+		return err
 	}
+
+	batches := initNonceBatches(int(state.NumAccounts), state.Data.IsAllocated, initNoncesPerTxn)
 
 	var mu sync.Mutex
 	var anyError error
 	var wg sync.WaitGroup
-	wg.Add(initVdnBatchTxns)
-	for batch := range initVdnBatchTxns {
-		go func(batch int) {
+	wg.Add(len(batches))
+	for _, memoryIndexes := range batches {
+		go func(memoryIndexes []int) {
 			defer wg.Done()
 
 			err := func() error {
-				ixns := []solana.Instruction{
-					compute_budget.SetComputeUnitLimit(400_000),
-					compute_budget.SetComputeUnitPrice(10_000),
-				}
-				for i := range initVdnIxnsPerTxn {
-					randomOwner, err := common.NewRandomAccount()
-					if err != nil {
-						return errors.Wrap(err, "error generating random nonce owner")
-					}
-
-					memoryIndex := batch*initVdnIxnsPerTxn + i
-
-					if state.Data.IsAllocated(memoryIndex) {
-						continue
-					}
-					if memoryIndex >= int(state.NumAccounts) {
-						break
-					}
-
-					ixns = append(ixns, vm.NewInitNonceInstruction(
-						&vm.InitNonceInstructionAccounts{
-							VmAuthority:         accounts.Authority.PublicKey().ToBytes(),
-							Vm:                  accounts.Vm.PublicKey().ToBytes(),
-							VmMemory:            accounts.NonceMemoryAccount.PublicKey().ToBytes(),
-							VirtualAccountOwner: randomOwner.PublicKey().ToBytes(),
-						},
-						&vm.InitNonceInstructionArgs{
-							AccountIndex: uint16(memoryIndex),
-						},
-					))
-				}
-
-				txn := solana.NewLegacyTransaction(
-					accounts.Authority.PublicKey().ToBytes(),
-					ixns...,
-				)
-
 				bh, err := p.data.GetBlockchainLatestBlockhash(ctx)
 				if err != nil {
 					return errors.Wrap(err, "error getting latest blockhash")
 				}
-				txn.SetBlockhash(bh)
 
-				err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+				txn, err := makeInitNonceTransaction(accounts, memoryIndexes, bh)
 				if err != nil {
-					return errors.Wrap(err, "error signing transaction")
+					return err
 				}
 
 				return transaction_util.SubmitAndWaitForFinalization(ctx, p.data, &txn)
@@ -862,11 +518,70 @@ func (p *runtime) populateNonceMemory(ctx context.Context, accounts *newCurrency
 				anyError = err
 				mu.Unlock()
 			}
-		}(batch)
+		}(memoryIndexes)
 	}
 	wg.Wait()
 
 	return anyError
+}
+
+// initNonceBatches groups the unallocated indexes of a nonce memory account
+// into batches of at most perTxn indexes, one batch per transaction.
+func initNonceBatches(numAccounts int, isAllocated func(index int) bool, perTxn int) [][]int {
+	var batches [][]int
+	for start := 0; start < numAccounts; start += perTxn {
+		var batch []int
+		for memoryIndex := start; memoryIndex < min(start+perTxn, numAccounts); memoryIndex++ {
+			if !isAllocated(memoryIndex) {
+				batch = append(batch, memoryIndex)
+			}
+		}
+		if len(batch) > 0 {
+			batches = append(batches, batch)
+		}
+	}
+	return batches
+}
+
+// makeInitNonceTransaction builds a signed v1 transaction initializing a
+// virtual durable nonce with a random owner at each memory index.
+func makeInitNonceTransaction(accounts *newCurrencyAccounts, memoryIndexes []int, blockhash solana.Blockhash) (solana.Transaction, error) {
+	ixns := make([]solana.Instruction, 0, len(memoryIndexes))
+	for _, memoryIndex := range memoryIndexes {
+		randomOwner, err := common.NewRandomAccount()
+		if err != nil {
+			return solana.Transaction{}, errors.Wrap(err, "error generating random nonce owner")
+		}
+
+		ixns = append(ixns, vm.NewInitNonceInstruction(
+			&vm.InitNonceInstructionAccounts{
+				VmAuthority:         accounts.Authority.PublicKey().ToBytes(),
+				Vm:                  accounts.Vm.PublicKey().ToBytes(),
+				VmMemory:            accounts.NonceMemoryAccount.PublicKey().ToBytes(),
+				VirtualAccountOwner: randomOwner.PublicKey().ToBytes(),
+			},
+			&vm.InitNonceInstructionArgs{
+				AccountIndex: uint16(memoryIndex),
+			},
+		))
+	}
+
+	config := transaction_util.NewV1TransactionConfig(
+		transaction_util.InitNonceBatchComputeUnitLimit(len(memoryIndexes)),
+		10_000,
+		transaction_util.InitNonceLoadedAccountsDataSizeLimit,
+	)
+	txn, err := solana.NewV1Transaction(accounts.Authority.PublicKey().ToBytes(), config, ixns...)
+	if err != nil {
+		return solana.Transaction{}, errors.Wrap(err, "error creating transaction")
+	}
+	txn.SetBlockhash(blockhash)
+
+	err = txn.Sign(accounts.Authority.PrivateKey().ToBytes())
+	if err != nil {
+		return solana.Transaction{}, errors.Wrap(err, "error signing transaction")
+	}
+	return txn, nil
 }
 
 func (p *runtime) initializeNoncePool(ctx context.Context, accounts *newCurrencyAccounts) error {
@@ -1007,41 +722,17 @@ func (p *runtime) getNewCurrencyAccounts(ctx context.Context, currencyMetadataRe
 	}
 
 	// Derived metaplex metadata address
-	metaplexMetadataAddress, metaplexMetadataBump, err := currencycreator.GetMetadataAddress(&currencycreator.GetMetadataAddressArgs{
-		Mint: mint.PublicKey().ToBytes(),
-	})
+	metaplexMetadata, _, err := transaction_util.GetMetaplexMetadataAccount(mint)
 	if err != nil {
 		return nil, errors.Wrap(err, "error deriving metaplex metadata address")
 	}
-	metaplexMetadata, err := common.NewAccountFromPublicKeyBytes(metaplexMetadataAddress)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid metaplex metadata account")
-	}
 
 	// Derived memory account addresses
-	nonceMemoryAddress, nonceMemoryBump, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
-		Name: initialNonceMemoryAccountName,
-		Vm:   vmAccount.PublicKey().ToBytes(),
-	})
+	memoryAccounts, err := transaction_util.GetCurrencyLaunchMemoryAccounts(vmAccount)
 	if err != nil {
-		return nil, errors.Wrap(err, "error deriving nonce memory account address")
+		return nil, err
 	}
-	nonceMemoryAccount, err := common.NewAccountFromPublicKeyBytes(nonceMemoryAddress)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid nonce memory account")
-	}
-
-	timelockMemoryAddress, timelockMemoryBump, err := vm.GetMemoryAccountAddress(&vm.GetMemoryAccountAddressArgs{
-		Name: initialTimelockMemoryAccountName,
-		Vm:   vmAccount.PublicKey().ToBytes(),
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "error deriving timelock memory account address")
-	}
-	timelockMemoryAccount, err := common.NewAccountFromPublicKeyBytes(timelockMemoryAddress)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid timelock memory account")
-	}
+	nonceMemory, timelockMemory := memoryAccounts[0], memoryAccounts[1]
 
 	// Derived fee account address
 	feeAtaAddress, err := token.GetAssociatedAccount(common.GetSubsidizer().PublicKey().ToBytes(), mint.PublicKey().ToBytes())
@@ -1065,8 +756,7 @@ func (p *runtime) getNewCurrencyAccounts(ctx context.Context, currencyMetadataRe
 		LiquidityPool:     liquidityPool,
 		LiquidityPoolBump: currencyMetadataRecord.LiquidityPoolBump,
 
-		MetaplexMetadata:     metaplexMetadata,
-		MetaplexMetadataBump: metaplexMetadataBump,
+		MetaplexMetadata: metaplexMetadata,
 
 		VaultBase:     vaultBase,
 		VaultBaseBump: currencyMetadataRecord.VaultCoreBump,
@@ -1080,11 +770,11 @@ func (p *runtime) getNewCurrencyAccounts(ctx context.Context, currencyMetadataRe
 		Omnibus:     omnibus,
 		OmnibusBump: vmMetadataRecord.OmnibusBump,
 
-		NonceMemoryAccount: nonceMemoryAccount,
-		NonceMemoryBump:    nonceMemoryBump,
+		NonceMemory:        nonceMemory,
+		NonceMemoryAccount: nonceMemory.Address,
 
-		TimelockMemoryAccount: timelockMemoryAccount,
-		TimelockMemoryBump:    timelockMemoryBump,
+		TimelockMemory:        timelockMemory,
+		TimelockMemoryAccount: timelockMemory.Address,
 
 		Alt:           alt,
 		AltBump:       0, // Not tracked

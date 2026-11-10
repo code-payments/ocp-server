@@ -23,20 +23,29 @@ const (
 	CoinbaseOnrampOrderTimeoutConfigEnvName = envConfigPrefix + "COINBASE_ONRAMP_ORDER_TIMEOUT"
 	defaultCoinbaseOnrampOrderTimeout       = 5 * time.Minute
 
-	// The amounts a currency launch is charged. These MUST be kept equal to the
-	// transaction service's TRANSACTION_SERVICE_NEW_CURRENCY_PURCHASE_QUARKS and
-	// TRANSACTION_SERVICE_NEW_CURRENCY_FEE_QUARKS, which are what a launch is
-	// actually validated and charged against. Nothing checks the two agree, and
-	// a divergence silently misstates the launch fee in transaction history.
+	// The amounts a currency launch is charged: the original terms for legacy
+	// or v0 initial purchase transactions, and the V2 terms for v1 initial
+	// purchase transactions. These MUST be kept equal to the transaction
+	// service's TRANSACTION_SERVICE_NEW_CURRENCY_PURCHASE_QUARKS,
+	// TRANSACTION_SERVICE_NEW_CURRENCY_FEE_QUARKS and their V2 counterparts,
+	// which are what a launch is actually validated and charged against.
+	// Nothing checks the two agree, and a divergence silently misstates the
+	// launch fee in transaction history.
 	NewCurrencyPurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_PURCHASE_QUARKS"
 
 	NewCurrencyFeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_FEE_QUARKS"
+
+	NewCurrencyV2PurchaseQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V2_PURCHASE_QUARKS"
+
+	NewCurrencyV2FeeQuarksConfigEnvName = envConfigPrefix + "NEW_CURRENCY_V2_FEE_QUARKS"
 )
 
 // Assumes a USD stable coin core mint
 var (
-	defaultNewCurrencyPurchaseQuarks = 10 * common.CoreMintQuarksPerUnit // $10
-	defaultNewCurrencyFeeQuarks      = 10 * common.CoreMintQuarksPerUnit // $10
+	defaultNewCurrencyPurchaseQuarks   = 10 * common.CoreMintQuarksPerUnit // $10
+	defaultNewCurrencyFeeQuarks        = 10 * common.CoreMintQuarksPerUnit // $10
+	defaultNewCurrencyV2PurchaseQuarks = 20 * common.CoreMintQuarksPerUnit // $20
+	defaultNewCurrencyV2FeeQuarks      = uint64(0)                         // $0
 )
 
 type conf struct {
@@ -46,6 +55,8 @@ type conf struct {
 	coinbaseOnrampOrderTimeout        config.Duration
 	newCurrencyPurchaseQuarks         config.Uint64
 	newCurrencyFeeQuarks              config.Uint64
+	newCurrencyV2PurchaseQuarks       config.Uint64
+	newCurrencyV2FeeQuarks            config.Uint64
 }
 
 // ConfigProvider defines how config values are pulled
@@ -61,6 +72,8 @@ func WithEnvConfigs() ConfigProvider {
 			coinbaseOnrampOrderTimeout:        env.NewDurationConfig(CoinbaseOnrampOrderTimeoutConfigEnvName, defaultCoinbaseOnrampOrderTimeout),
 			newCurrencyPurchaseQuarks:         env.NewUint64Config(NewCurrencyPurchaseQuarksConfigEnvName, defaultNewCurrencyPurchaseQuarks),
 			newCurrencyFeeQuarks:              env.NewUint64Config(NewCurrencyFeeQuarksConfigEnvName, defaultNewCurrencyFeeQuarks),
+			newCurrencyV2PurchaseQuarks:       env.NewUint64Config(NewCurrencyV2PurchaseQuarksConfigEnvName, defaultNewCurrencyV2PurchaseQuarks),
+			newCurrencyV2FeeQuarks:            env.NewUint64Config(NewCurrencyV2FeeQuarksConfigEnvName, defaultNewCurrencyV2FeeQuarks),
 		}
 	}
 }
