@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -31,6 +32,9 @@ const iconSize = 64
 var (
 	jpegMagic = []byte{0xFF, 0xD8, 0xFF}
 	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47}
+
+	riffMagic = []byte("RIFF")
+	webpMagic = []byte("WEBP")
 
 	errInvalidIcon = errors.New("invalid icon")
 )
@@ -109,8 +113,9 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 
 // processIcon validates, decodes, resizes, and re-encodes raw icon data.
 // It returns the processed image bytes, the file extension ("jpg" or "png"),
-// and the content type. Returns errInvalidIcon if the data is not a valid
-// JPEG or PNG image.
+// and the content type. WebP input is stored as PNG since there's no WebP
+// encoder available. Returns errInvalidIcon if the data is not a valid JPEG,
+// PNG, or WebP image.
 func processIcon(data []byte) ([]byte, string, string, error) {
 	var contentType string
 	var ext string
@@ -119,6 +124,9 @@ func processIcon(data []byte) ([]byte, string, string, error) {
 		contentType = "image/jpeg"
 		ext = "jpg"
 	case len(data) >= len(pngMagic) && bytes.Equal(data[:len(pngMagic)], pngMagic):
+		contentType = "image/png"
+		ext = "png"
+	case isWebp(data):
 		contentType = "image/png"
 		ext = "png"
 	default:
@@ -148,6 +156,10 @@ func processIcon(data []byte) ([]byte, string, string, error) {
 	}
 
 	return encoded.Bytes(), ext, contentType, nil
+}
+
+func isWebp(data []byte) bool {
+	return len(data) >= 12 && bytes.Equal(data[:4], riffMagic) && bytes.Equal(data[8:12], webpMagic)
 }
 
 // uploadIcon uploads processed icon data to S3 and returns the public URL.
