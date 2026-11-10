@@ -126,7 +126,6 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	}
 
 	var processedIcon []byte
-	var iconExt, iconContentType string
 	if len(req.Icon) > 0 {
 		if req.IconModerationAttestation == nil {
 			log.Info("icon moderation attestation is missing")
@@ -141,7 +140,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
 
-		processedIcon, iconExt, iconContentType, err = processIcon(req.Icon)
+		processedIcon, err = processIcon(req.Icon)
 		if err == errInvalidIcon {
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_INVALID_ICON}, nil
 		} else if err != nil {
@@ -324,7 +323,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 	if !isDryRun {
 		var iconUploaded bool
 		if len(processedIcon) > 0 {
-			imageUrl, err := uploadIcon(ctx, s.s3Client, targetMintAccount, processedIcon, iconExt, iconContentType)
+			imageUrl, err := uploadIcon(ctx, s.s3Client, targetMintAccount, processedIcon)
 			if err != nil {
 				log.With(zap.Error(err)).Warn("failed to upload icon to s3")
 				return nil, status.Error(codes.Internal, "")
@@ -348,7 +347,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		})
 		if err != nil {
 			if iconUploaded {
-				if err := deleteIcon(context.Background(), s.s3Client, targetMintAccount, iconExt); err != nil {
+				if err := deleteIcon(context.Background(), s.s3Client, targetMintAccount, processedIcon); err != nil {
 					log.With(zap.Error(err)).Warn("best-effort icon cleanup failed")
 				}
 			}

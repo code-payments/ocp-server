@@ -3,13 +3,16 @@ package currency
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"image"
-	"image/jpeg"
-	"image/png"
+	_ "image/jpeg"
+	_ "image/png"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/gen2brain/webp"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
@@ -26,11 +29,26 @@ import (
 	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
-const iconSize = 64
+const (
+	maxIconSize = 512
+
+	// Checked from the image header before decoding, since decoded pixel
+	// buffers can be far larger than the upload
+	maxIconUploadSide = 4096
+
+	// Icons must be square, with some leeway for client crop rounding
+	maxIconAspectSkewPercent = 2
+
+	iconWebpQuality = 90
+	iconWebpMethod  = 5
+)
 
 var (
 	jpegMagic = []byte{0xFF, 0xD8, 0xFF}
 	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47}
+
+	riffMagic = []byte("RIFF")
+	webpMagic = []byte("WEBP")
 
 	errInvalidIcon = errors.New("invalid icon")
 )
@@ -82,7 +100,7 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_DENIED}, nil
 	}
 
-	processed, ext, contentType, err := processIcon(req.Icon)
+	processed, err := processIcon(req.Icon)
 	if err == errInvalidIcon {
 		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_INVALID_ICON}, nil
 	} else if err != nil {
@@ -90,7 +108,7 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		return nil, status.Error(codes.Internal, "")
 	}
 
-	imageUrl, err := uploadIcon(ctx, s.s3Client, mintAccount, processed, ext, contentType)
+	imageUrl, err := uploadIcon(ctx, s.s3Client, mintAccount, processed)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to upload icon to s3")
 		return nil, status.Error(codes.Internal, "")
@@ -107,58 +125,70 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 	return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_OK}, nil
 }
 
-// processIcon validates, decodes, resizes, and re-encodes raw icon data.
-// It returns the processed image bytes, the file extension ("jpg" or "png"),
-// and the content type. Returns errInvalidIcon if the data is not a valid
-// JPEG or PNG image.
-func processIcon(data []byte) ([]byte, string, string, error) {
-	var contentType string
-	var ext string
-	switch {
-	case len(data) >= len(jpegMagic) && bytes.Equal(data[:len(jpegMagic)], jpegMagic):
-		contentType = "image/jpeg"
-		ext = "jpg"
-	case len(data) >= len(pngMagic) && bytes.Equal(data[:len(pngMagic)], pngMagic):
-		contentType = "image/png"
-		ext = "png"
-	default:
-		return nil, "", "", errInvalidIcon
+// processIcon validates, decodes, resizes, and re-encodes raw icon data as
+// WebP. Returns errInvalidIcon if the data is not a valid JPEG, PNG, or WebP
+// image.
+func processIcon(data []byte) ([]byte, error) {
+	isJpeg := len(data) >= len(jpegMagic) && bytes.Equal(data[:len(jpegMagic)], jpegMagic)
+	isPng := len(data) >= len(pngMagic) && bytes.Equal(data[:len(pngMagic)], pngMagic)
+	if !isJpeg && !isPng && !isWebp(data) {
+		return nil, errInvalidIcon
+	}
+
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, errInvalidIcon
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxIconUploadSide || cfg.Height > maxIconUploadSide {
+		return nil, errInvalidIcon
+	}
+	longSide, shortSide := max(cfg.Width, cfg.Height), min(cfg.Width, cfg.Height)
+	if longSide*100 > shortSide*(100+maxIconAspectSkewPercent) {
+		return nil, errInvalidIcon
 	}
 
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, "", "", errInvalidIcon
+		return nil, errInvalidIcon
 	}
 
-	if bounds := src.Bounds(); bounds.Dx() != iconSize || bounds.Dy() != iconSize {
-		dst := image.NewRGBA(image.Rect(0, 0, iconSize, iconSize))
+	// Icons are square, sized to the smaller uploaded dimension and never upscaled
+	bounds := src.Bounds()
+	side := min(maxIconSize, bounds.Dx(), bounds.Dy())
+	if side <= 0 {
+		return nil, errInvalidIcon
+	}
+	if bounds.Dx() != side || bounds.Dy() != side {
+		dst := image.NewRGBA(image.Rect(0, 0, side, side))
 		draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
 		src = dst
 	}
 
 	var encoded bytes.Buffer
-	switch ext {
-	case "jpg":
-		err = jpeg.Encode(&encoded, src, &jpeg.Options{Quality: 100})
-	case "png":
-		err = png.Encode(&encoded, src)
-	}
+	err = webp.Encode(&encoded, src, webp.Options{
+		Quality: iconWebpQuality,
+		Method:  iconWebpMethod,
+	})
 	if err != nil {
-		return nil, "", "", errors.Wrap(err, "failed to encode icon")
+		return nil, errors.Wrap(err, "failed to encode icon")
 	}
 
-	return encoded.Bytes(), ext, contentType, nil
+	return encoded.Bytes(), nil
+}
+
+func isWebp(data []byte) bool {
+	return len(data) >= 12 && bytes.Equal(data[:4], riffMagic) && bytes.Equal(data[8:12], webpMagic)
 }
 
 // uploadIcon uploads processed icon data to S3 and returns the public URL.
-func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte, ext string, contentType string) (string, error) {
-	key := iconKey(mint, ext)
+func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte) (string, error) {
+	key := iconKey(mint, data)
 
 	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(config.CurrencyAssetsS3BucketName),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(data),
-		ContentType: aws.String(contentType),
+		ContentType: aws.String("image/webp"),
 	})
 	if err != nil {
 		return "", errors.Wrap(err, "failed to upload icon to s3")
@@ -168,8 +198,8 @@ func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, 
 }
 
 // deleteIcon removes a previously uploaded icon from S3.
-func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, ext string) error {
-	key := iconKey(mint, ext)
+func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte) error {
+	key := iconKey(mint, data)
 
 	_, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(config.CurrencyAssetsS3BucketName),
@@ -181,6 +211,7 @@ func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, 
 	return nil
 }
 
-func iconKey(mint *common.Account, ext string) string {
-	return fmt.Sprintf("%s/icon.%s", mint.PublicKey().ToBase58(), ext)
+func iconKey(mint *common.Account, data []byte) string {
+	hash := sha256.Sum256(data)
+	return fmt.Sprintf("%s/icon-%s.webp", mint.PublicKey().ToBase58(), hex.EncodeToString(hash[:8]))
 }
