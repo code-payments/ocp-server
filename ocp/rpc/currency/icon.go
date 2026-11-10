@@ -41,9 +41,6 @@ const (
 
 	iconWebpQuality = 90
 	iconWebpMethod  = 5
-
-	// Icon keys are content addressed, so the object at a given URL never changes
-	iconCacheControl = "public, max-age=31536000, immutable"
 )
 
 var (
@@ -188,11 +185,10 @@ func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, 
 	key := iconKey(mint, data)
 
 	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:       aws.String(config.CurrencyAssetsS3BucketName),
-		Key:          aws.String(key),
-		Body:         bytes.NewReader(data),
-		ContentType:  aws.String("image/webp"),
-		CacheControl: aws.String(iconCacheControl),
+		Bucket:      aws.String(config.CurrencyAssetsS3BucketName),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String("image/webp"),
 	})
 	if err != nil {
 		return "", errors.Wrap(err, "failed to upload icon to s3")
