@@ -348,7 +348,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		})
 		if err != nil {
 			if iconUploaded {
-				if err := deleteIcon(context.Background(), s.s3Client, targetMintAccount, iconExt); err != nil {
+				if err := deleteIcon(context.Background(), s.s3Client, targetMintAccount, processedIcon, iconExt); err != nil {
 					log.With(zap.Error(err)).Warn("best-effort icon cleanup failed")
 				}
 			}

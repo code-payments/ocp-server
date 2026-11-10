@@ -3,6 +3,8 @@ package currency
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -27,7 +29,12 @@ import (
 	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
-const iconSize = 64
+const (
+	iconSize = 64
+
+	// Icon keys are content addressed, so the object at a given URL never changes
+	iconCacheControl = "public, max-age=31536000, immutable"
+)
 
 var (
 	jpegMagic = []byte{0xFF, 0xD8, 0xFF}
@@ -164,13 +171,14 @@ func isWebp(data []byte) bool {
 
 // uploadIcon uploads processed icon data to S3 and returns the public URL.
 func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte, ext string, contentType string) (string, error) {
-	key := iconKey(mint, ext)
+	key := iconKey(mint, data, ext)
 
 	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(config.CurrencyAssetsS3BucketName),
-		Key:         aws.String(key),
-		Body:        bytes.NewReader(data),
-		ContentType: aws.String(contentType),
+		Bucket:       aws.String(config.CurrencyAssetsS3BucketName),
+		Key:          aws.String(key),
+		Body:         bytes.NewReader(data),
+		ContentType:  aws.String(contentType),
+		CacheControl: aws.String(iconCacheControl),
 	})
 	if err != nil {
 		return "", errors.Wrap(err, "failed to upload icon to s3")
@@ -180,8 +188,8 @@ func uploadIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, 
 }
 
 // deleteIcon removes a previously uploaded icon from S3.
-func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, ext string) error {
-	key := iconKey(mint, ext)
+func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, data []byte, ext string) error {
+	key := iconKey(mint, data, ext)
 
 	_, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(config.CurrencyAssetsS3BucketName),
@@ -193,6 +201,7 @@ func deleteIcon(ctx context.Context, s3Client *s3.Client, mint *common.Account, 
 	return nil
 }
 
-func iconKey(mint *common.Account, ext string) string {
-	return fmt.Sprintf("%s/icon.%s", mint.PublicKey().ToBase58(), ext)
+func iconKey(mint *common.Account, data []byte, ext string) string {
+	hash := sha256.Sum256(data)
+	return fmt.Sprintf("%s/icon-%s.%s", mint.PublicKey().ToBase58(), hex.EncodeToString(hash[:8]), ext)
 }
