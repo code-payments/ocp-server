@@ -18,7 +18,12 @@ import (
 )
 
 const (
-	initialAuthorityFundingLamports = 1_300_000_000 // 1.3 SOL
+	// Covers the rent and fees the currency authority pays for a launch, which
+	// the nonce and timelock memory accounts dominate. A launch costs about
+	// 0.27 SOL at 5,080 lamports per byte of rent, and about 0.36 SOL at the
+	// previous rate of 6,960. Growing transaction_util.CurrencyLaunchNoncePoolSize
+	// or transaction_util.CurrencyLaunchTimelockAccounts requires raising this.
+	initialAuthorityFundingLamports = 400_000_000 // 0.4 SOL
 
 	initNoncesPerTxn = 50
 )
