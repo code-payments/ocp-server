@@ -12,6 +12,7 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
@@ -86,7 +87,7 @@ func (s *currencyServer) UpdateMetadata(ctx context.Context, req *currencypb.Upd
 	}
 
 	if req.NewDescription != nil {
-		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.NewDescription.ModerationAttestation.RawValue, req.NewDescription.Value)
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.NewDescription.ModerationAttestation.RawValue, integration.ModeratedContentKindCurrencyDescription, req.NewDescription.Value)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to validate description moderation attestation")
 			return nil, status.Error(codes.Internal, "")
