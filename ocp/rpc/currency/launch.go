@@ -19,6 +19,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/data/currency"
 	"github.com/code-payments/ocp-server/ocp/data/vault"
 	vm_metadata "github.com/code-payments/ocp-server/ocp/data/vm/metadata"
+	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 	"github.com/code-payments/ocp-server/solana/currencycreator"
 	"github.com/code-payments/ocp-server/solana/system"
@@ -66,7 +67,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 		return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 	}
 
-	isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.NameModerationAttestation.RawValue, req.Name)
+	isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.NameModerationAttestation.RawValue, integration.ModeratedContentKindCurrencyName, req.Name)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to validate name moderation attestation")
 		return nil, status.Error(codes.Internal, "")
@@ -98,7 +99,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			log.Info("symbol moderation attestation is missing")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
-		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.SymbolModerationAttestation.RawValue, req.Symbol)
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.SymbolModerationAttestation.RawValue, integration.ModeratedContentKindCurrencySymbol, req.Symbol)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to validate symbol moderation attestation")
 			return nil, status.Error(codes.Internal, "")
@@ -114,7 +115,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			log.Info("description moderation attestation is missing")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
-		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.DescriptionModerationAttestation.RawValue, req.Description)
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.DescriptionModerationAttestation.RawValue, integration.ModeratedContentKindCurrencyDescription, req.Description)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to validate description moderation attestation")
 			return nil, status.Error(codes.Internal, "")
@@ -131,7 +132,7 @@ func (s *currencyServer) Launch(ctx context.Context, req *currencypb.LaunchReque
 			log.Info("icon moderation attestation is missing")
 			return &currencypb.LaunchResponse{Result: currencypb.LaunchResponse_DENIED}, nil
 		}
-		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.IconModerationAttestation.RawValue, req.Icon)
+		isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.IconModerationAttestation.RawValue, integration.ModeratedContentKindCurrencyIcon, req.Icon)
 		if err != nil {
 			log.With(zap.Error(err)).Warn("failed to validate icon moderation attestation")
 			return nil, status.Error(codes.Internal, "")

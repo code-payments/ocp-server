@@ -22,6 +22,7 @@ import (
 	"github.com/code-payments/ocp-server/ocp/common"
 	"github.com/code-payments/ocp-server/ocp/config"
 	"github.com/code-payments/ocp-server/ocp/data/currency"
+	"github.com/code-payments/ocp-server/ocp/integration"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
@@ -73,7 +74,7 @@ func (s *currencyServer) UpdateIcon(ctx context.Context, req *currencypb.UpdateI
 		return &currencypb.UpdateIconResponse{Result: currencypb.UpdateIconResponse_DENIED}, nil
 	}
 
-	isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.ModerationAttestation.RawValue, req.Icon)
+	isModerated, err := s.moderation.ValidateAttestation(ctx, ownerAccount, req.ModerationAttestation.RawValue, integration.ModeratedContentKindCurrencyIcon, req.Icon)
 	if err != nil {
 		log.With(zap.Error(err)).Warn("failed to validate moderation attestation")
 		return nil, status.Error(codes.Internal, "")
