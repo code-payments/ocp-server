@@ -22,7 +22,7 @@ func UnaryServerInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 		if v, ok := req.(Validator); ok {
 			if err := v.Validate(); err != nil {
 				// We use an info level here because it is outside of 'our' control.
-				log.With(zap.Error(err), zap.Any("req", req)).Info("dropping invalid request")
+				log.With(zap.Error(err)).Info("dropping invalid request")
 				return nil, status.Error(codes.InvalidArgument, err.Error())
 			}
 		}
@@ -35,7 +35,7 @@ func UnaryServerInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 		if v, ok := resp.(Validator); ok {
 			if err := v.Validate(); err != nil {
 				// We warn here because this indicates a problem with 'our' service.
-				log.With(zap.Error(err), zap.Any("resp", resp)).Warn("dropping invalid response")
+				log.With(zap.Error(err)).Warn("dropping invalid response")
 				return nil, status.Error(codes.Internal, err.Error())
 			}
 		}
@@ -67,7 +67,7 @@ func (s *serverStreamWrapper) RecvMsg(req interface{}) error {
 
 	if v, ok := req.(Validator); ok {
 		if err := v.Validate(); err != nil {
-			s.log.With(zap.Error(err), zap.Any("req", req)).Info("dropping invalid request")
+			s.log.With(zap.Error(err)).Info("dropping invalid request")
 			return status.Error(codes.InvalidArgument, err.Error())
 		}
 	}
@@ -78,7 +78,7 @@ func (s *serverStreamWrapper) RecvMsg(req interface{}) error {
 func (s *serverStreamWrapper) SendMsg(resp interface{}) error {
 	if v, ok := resp.(Validator); ok {
 		if err := v.Validate(); err != nil {
-			s.log.With(zap.Error(err), zap.Any("resp", resp)).Warn("dropping invalid response")
+			s.log.With(zap.Error(err)).Warn("dropping invalid response")
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
