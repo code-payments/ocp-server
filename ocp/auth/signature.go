@@ -3,9 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 
-	"github.com/mr-tron/base58"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -13,9 +11,9 @@ import (
 
 	commonpb "github.com/code-payments/ocp-protobuf-api/generated/go/common/v1"
 
+	"github.com/code-payments/ocp-server/metrics"
 	"github.com/code-payments/ocp-server/ocp/common"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
-	"github.com/code-payments/ocp-server/metrics"
 )
 
 const (
@@ -82,15 +80,6 @@ func (v *RPCSignatureVerifier) isSignatureVerifiedProtoMessage(owner *common.Acc
 		if isSignatureValid {
 			return true, nil
 		}
-	}
-
-	encoded, err := proto.Marshal(message)
-	if err == nil {
-		v.log.With(
-			zap.Any("proto_message_type", message.ProtoReflect().Descriptor().FullName()),
-			zap.String("proto_message", base64.StdEncoding.EncodeToString(encoded)),
-			zap.String("signature", base58.Encode(signature.Value)),
-		).Info("proto message is not signature verified")
 	}
 
 	return false, nil
