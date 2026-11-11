@@ -276,6 +276,13 @@ func Run(app App, options ...Option) error {
 		client.MinVersionStreamServerInterceptor(config.UserAgentNames...),
 	}
 
+	// Tell the client package how many proxies in front of the server write
+	// the address clients are read from. Set before anything is served.
+	if err := client.SetTrustedProxies(config.TrustedProxies); err != nil {
+		log.With(zap.Error(err)).Error("invalid trusted proxies")
+		os.Exit(1)
+	}
+
 	opts := opts{
 		unaryServerInterceptors:  defaultUnaryServerInterceptors,
 		streamServerInterceptors: defaultStreamServerInterceptors,

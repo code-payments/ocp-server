@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/code-payments/ocp-server/grpc/client"
 )
 
 // Config is the application specific configuration.
@@ -59,6 +61,18 @@ type BaseConfig struct {
 	// this is a comma-separated list.
 	UserAgentNames []string `mapstructure:"user_agent_names"`
 
+	// TrustedProxies is the number of proxies in front of the server that
+	// each append the address of whoever connected to them to the
+	// x-forwarded-for header: one, the default, for a single load balancer,
+	// two when something that appends sits in front of it. The app passes it
+	// to client.SetTrustedProxies at startup, and client.GetIPAddr and
+	// client.ResolveIPAddr read the client's address past that many proxies.
+	// Below one is refused at startup.
+	//
+	// Set too low, the address is a proxy's; set too high, it is one the
+	// client chose.
+	TrustedProxies int `mapstructure:"trusted_proxies"`
+
 	// Arbitrary configuration that the service can define / implement.
 	//
 	// Users should use mapstructure.Decode for ServiceConfig.
@@ -85,6 +99,8 @@ var defaultConfig = BaseConfig{
 	MemoryLeakCronSchedule: "0 5 * * *",
 
 	UserAgentNames: []string{"OpenCodeProtocol"},
+
+	TrustedProxies: client.DefaultTrustedProxies,
 }
 
 func init() {
@@ -112,4 +128,6 @@ func init() {
 	_ = viper.BindEnv("new_relic_license_key", "NEW_RELIC_LICENSE_KEY")
 
 	_ = viper.BindEnv("user_agent_names", "USER_AGENT_NAMES")
+
+	_ = viper.BindEnv("trusted_proxies", "TRUSTED_PROXIES")
 }
