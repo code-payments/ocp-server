@@ -32,8 +32,9 @@ type SwapV2InstructionAccounts struct {
 	User                     ed25519.PublicKey
 }
 
-// NewSwapV2Instruction builds a swap_v2 instruction, which is swap without the
-// deprecated whitelist account. Args, logic, and effects are unchanged.
+// NewSwapV2Instruction builds a swap_v2 instruction. The original swap
+// instruction, which required an address whitelist account, is deprecated and
+// unsupported.
 func NewSwapV2Instruction(
 	accounts *SwapV2InstructionAccounts,
 	args *SwapV2InstructionArgs,
