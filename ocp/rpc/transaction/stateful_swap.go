@@ -894,6 +894,10 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		return handleStatefulSwapError(streamer, err)
 	}
 
+	if initiateStablecoinSwapReq.SwapVersion != requiredCoinbaseSwapVersion {
+		return handleStatefulSwapError(streamer, NewSwapValidationErrorf("swap version must be %d", requiredCoinbaseSwapVersion))
+	}
+
 	if !common.IsCoreMint(fromMint) {
 		return handleStatefulSwapError(streamer, NewSwapValidationError("source mint must be the core mint"))
 	}
@@ -1035,9 +1039,6 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		selectedNonce.ReleaseIfNotReserved(ctx)
 	}()
 
-	coinbaseSwapVersion := selectCoinbaseSwapVersion(initiateStablecoinSwapReq.SwapVersion)
-	log = log.With(zap.String("coinbase_swap_version", coinbaseSwapVersion.String()))
-
 	transactionVersion := selectSwapTransactionVersion(initiateReq.TransactionVersion)
 	log = log.With(zap.String("selected_transaction_version", transactionVersion.String()))
 
@@ -1052,7 +1053,6 @@ func (s *transactionServer) handleStablecoinStatefulSwap(
 		initiateStablecoinSwapReq.FeeAmount,
 		selectedNonce,
 		transactionVersion,
-		coinbaseSwapVersion,
 	)
 
 	txn, err := makeStatefulSwapTransaction(ctx, swapHandler)

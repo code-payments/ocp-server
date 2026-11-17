@@ -1380,18 +1380,13 @@ func (h *ReserveTreasuryFundedCreateAndBuySwapHandler) MakeInstructions(ctx cont
 	return ixns, nil
 }
 
-// selectCoinbaseSwapVersion picks the CoinbaseStableSwapper swap instruction
-// version from the client's requested swap_version. Clients rebuild and sign
-// the transaction locally, so the server must match what the client builds.
-// Only an explicit 2 selects v2. Older clients leave it unset and build v1.
-func selectCoinbaseSwapVersion(requested uint32) transaction_util.CoinbaseSwapVersion {
-	if requested == 2 {
-		return transaction_util.CoinbaseSwapV2
-	}
-	return transaction_util.CoinbaseSwapV1
-}
-
 const (
+	// The only supported CoinbaseStableSwapper swap instruction version is
+	// swap_v2. Clients rebuild and sign the transaction locally, so a request
+	// for any other version, including older clients that leave it unset and
+	// build the deprecated whitelist swap, is rejected.
+	requiredCoinbaseSwapVersion = 2
+
 	// Measured on mainnet at 62k CU with an existing destination ATA. Creating
 	// the destination ATA adds about 9k, and the swap authority ATA, destination
 	// ATA and VM swap PDA derivations each cost 1,500 CU per bump below 255, for
@@ -1418,9 +1413,8 @@ type CoinbaseStableSwapperSwapHandler struct {
 	computeUnitPrice   uint64
 	memoValue          string
 
-	feeDestination      *common.Account
-	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion
-	coinbaseAccounts    *transaction_util.CoinbaseSwapAccounts
+	feeDestination   *common.Account
+	coinbaseAccounts *transaction_util.CoinbaseSwapAccounts
 }
 
 func NewCoinbaseStableSwapperSwapHandler(
@@ -1434,7 +1428,6 @@ func NewCoinbaseStableSwapperSwapHandler(
 	feeAmount uint64,
 	selectedNonce *transaction_util.Nonce,
 	transactionVersion solana.MessageVersion,
-	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion,
 ) *CoinbaseStableSwapperSwapHandler {
 	return &CoinbaseStableSwapperSwapHandler{
 		data: data,
@@ -1453,8 +1446,7 @@ func NewCoinbaseStableSwapperSwapHandler(
 		computeUnitPrice:   coinbaseStatefulSwapComputeUnitPrice,
 		memoValue:          swapMemoValue("coinbase_stable_swapper", transactionVersion),
 
-		feeDestination:      common.CoreMintFeesAccount,
-		coinbaseSwapVersion: coinbaseSwapVersion,
+		feeDestination: common.CoreMintFeesAccount,
 	}
 }
 
@@ -1564,8 +1556,7 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 		},
 	)
 
-	coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
-		h.coinbaseSwapVersion,
+	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
 		coinbaseAccounts,
 		h.swapAuthority.PublicKey().ToBytes(),
 		h.fromMint.PublicKey().ToBytes(),
@@ -1575,9 +1566,6 @@ func (h *CoinbaseStableSwapperSwapHandler) MakeInstructions(ctx context.Context)
 		h.swapAmount,
 		h.swapAmount,
 	)
-	if err != nil {
-		return nil, err
-	}
 
 	closeSwapAuthorityFromMintAtaIxn := token.CloseAccount(
 		swapAuthorityFromMintAta,

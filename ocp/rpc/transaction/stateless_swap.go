@@ -123,6 +123,10 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 	// Section: Validation
 	//
 
+	if initiateStablecoinSwapReq.SwapVersion != requiredCoinbaseSwapVersion {
+		return handleStatelessSwapError(streamer, NewSwapValidationErrorf("swap version must be %d", requiredCoinbaseSwapVersion))
+	}
+
 	if fromMint.PublicKey().ToBase58() != usdc.Mint {
 		return handleStatelessSwapError(streamer, NewSwapValidationError("source mint must be usdc"))
 	}
@@ -242,11 +246,7 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		return handleStatelessSwapError(streamer, err)
 	}
 
-	coinbaseSwapVersion := selectCoinbaseSwapVersion(initiateStablecoinSwapReq.SwapVersion)
-	log = log.With(zap.String("coinbase_swap_version", coinbaseSwapVersion.String()))
-
-	coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
-		coinbaseSwapVersion,
+	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
 		coinbaseAccounts,
 		owner.PublicKey().ToBytes(),
 		fromMint.PublicKey().ToBytes(),
@@ -256,10 +256,6 @@ func (s *transactionServer) handleStablecoinStatelessSwap(
 		initiateStablecoinSwapReq.SwapAmount,
 		initiateStablecoinSwapReq.SwapAmount,
 	)
-	if err != nil {
-		log.With(zap.Error(err)).Warn("failure building coinbase swap instruction")
-		return handleStatelessSwapError(streamer, err)
-	}
 
 	feeRecipient, err := common.NewAccountFromPublicKeyBytes(coinbaseAccounts.FeeRecipient)
 	if err != nil {

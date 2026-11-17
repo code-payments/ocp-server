@@ -579,7 +579,7 @@ func (e *testEnv) expectedStatefulSwapTransaction(t *testing.T, req *statefulSwa
 		destinationOwner, err := common.NewAccountFromProto(p.DestinationOwner)
 		require.NoError(t, err)
 
-		h = NewCoinbaseStableSwapperSwapHandler(e.data, req.owner, req.swapAuthority, destinationOwner, fromMint, toMint, p.SwapAmount, p.FeeAmount, selectedNonce, transactionVersion, selectCoinbaseSwapVersion(p.SwapVersion))
+		h = NewCoinbaseStableSwapperSwapHandler(e.data, req.owner, req.swapAuthority, destinationOwner, fromMint, toMint, p.SwapAmount, p.FeeAmount, selectedNonce, transactionVersion)
 	} else {
 		p := req.reserve
 		fromMint, err := common.NewAccountFromProto(p.FromMint)
@@ -741,7 +741,7 @@ func (e *testEnv) stablecoinSwapRequest(t *testing.T, owner *common.Account, swa
 			FundingSource:    transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT,
 			FundingId:        testutil.NewRandomAccount(t).PublicKey().ToBase58(),
 			DestinationOwner: testutil.NewRandomAccount(t).ToProto(),
-			SwapVersion:      uint32(transaction_util.CoinbaseSwapV2),
+			SwapVersion:      requiredCoinbaseSwapVersion,
 		},
 	}
 }
@@ -1038,7 +1038,7 @@ func (e *testEnv) requireClientRebuildMatchesServer(t *testing.T, req *statefulS
 		require.NoError(t, err)
 		toMint, err := common.NewAccountFromProto(p.ToMint)
 		require.NoError(t, err)
-		requireCoinbaseStatefulClientRebuildMatches(t, e, *result.expectedTxn, typed.Stablecoin, req.owner, req.swapAuthority, destinationOwner, fromMint, toMint, p.SwapAmount, p.FeeAmount, selectCoinbaseSwapVersion(p.SwapVersion))
+		requireCoinbaseStatefulClientRebuildMatches(t, e, *result.expectedTxn, typed.Stablecoin, req.owner, req.swapAuthority, destinationOwner, fromMint, toMint, p.SwapAmount, p.FeeAmount)
 	default:
 		require.Fail(t, "unexpected server parameters")
 	}
@@ -1749,7 +1749,7 @@ func (e *testEnv) statelessSwapRequest(t *testing.T, owner *common.Account, swap
 			FromMint:    usdcMint(t),
 			ToMint:      common.CoreMintAccount.ToProto(),
 			SwapAmount:  swapAmount,
-			SwapVersion: uint32(transaction_util.CoinbaseSwapV2),
+			SwapVersion: requiredCoinbaseSwapVersion,
 		},
 	}
 }
@@ -1851,8 +1851,7 @@ func (e *testEnv) expectedStatelessSwapTransaction(t *testing.T, req *statelessS
 
 	coinbaseAccounts, err := transaction_util.GetCoinbaseSwapAccounts(e.ctx, e.data, fromMint.PublicKey().ToBytes(), toMint.PublicKey().ToBytes())
 	require.NoError(t, err)
-	coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
-		selectCoinbaseSwapVersion(req.params.SwapVersion),
+	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
 		coinbaseAccounts,
 		req.owner.PublicKey().ToBytes(),
 		fromMint.PublicKey().ToBytes(),
@@ -1862,7 +1861,6 @@ func (e *testEnv) expectedStatelessSwapTransaction(t *testing.T, req *statelessS
 		req.params.SwapAmount,
 		req.params.SwapAmount,
 	)
-	require.NoError(t, err)
 
 	feeRecipient, err := common.NewAccountFromPublicKeyBytes(coinbaseAccounts.FeeRecipient)
 	require.NoError(t, err)
@@ -3173,28 +3171,25 @@ func newStablecoinSwapFixture(t *testing.T, overrides ...func(*testOverrides)) (
 
 func TestStatefulSwap_Stablecoin_HappyPath(t *testing.T) {
 	for _, transactionVersion := range []uint32{0, 1} {
-		for _, swapVersion := range []transaction_util.CoinbaseSwapVersion{transaction_util.CoinbaseSwapV1, transaction_util.CoinbaseSwapV2} {
-			t.Run(fmt.Sprintf("txn v%d swap %s", transactionVersion, swapVersion), func(t *testing.T) {
-				env, owner := newStablecoinSwapFixture(t, withAntispamChecks())
+		t.Run(fmt.Sprintf("txn v%d", transactionVersion), func(t *testing.T) {
+			env, owner := newStablecoinSwapFixture(t, withAntispamChecks())
 
-				req := env.stablecoinSwapRequest(t, owner, common.ToCoreMintQuarks(10))
-				req.transactionVersion = transactionVersion
-				req.stablecoin.SwapVersion = uint32(swapVersion)
+			req := env.stablecoinSwapRequest(t, owner, common.ToCoreMintQuarks(10))
+			req.transactionVersion = transactionVersion
 
-				before := env.swapSnapshot(t, []*common.Account{owner})
-				result := env.statefulSwap(t, req)
-				env.requireSwapCreated(t, before, req, result, expectedSwapRecord(t, req, result, swap.StateCreated), nil)
+			before := env.swapSnapshot(t, []*common.Account{owner})
+			result := env.statefulSwap(t, req)
+			env.requireSwapCreated(t, before, req, result, expectedSwapRecord(t, req, result, swap.StateCreated), nil)
 
-				params := result.serverParameters.GetStablecoin()
-				require.NotNil(t, params)
-				assert.Equal(t, fmt.Sprintf("coinbase_stable_swapper_v%d", transactionVersion), params.MemoValue)
+			params := result.serverParameters.GetStablecoin()
+			require.NotNil(t, params)
+			assert.Equal(t, fmt.Sprintf("coinbase_stable_swapper_v%d", transactionVersion), params.MemoValue)
 
-				assert.Equal(t, []string{
-					expectedAntispamSwapCall(swap.KindStablecoin, req.stablecoin.FundingSource, req.stablecoin.FromMint, req.stablecoin.ToMint, req.stablecoin.SwapAmount, req.stablecoin.FeeAmount, false),
-				}, env.antispamIntegration.getCalls())
-				env.requireBalance(t, env.getVault(t, owner, common.CoreMintAccount), common.ToCoreMintQuarks(100))
-			})
-		}
+			assert.Equal(t, []string{
+				expectedAntispamSwapCall(swap.KindStablecoin, req.stablecoin.FundingSource, req.stablecoin.FromMint, req.stablecoin.ToMint, req.stablecoin.SwapAmount, req.stablecoin.FeeAmount, false),
+			}, env.antispamIntegration.getCalls())
+			env.requireBalance(t, env.getVault(t, owner, common.CoreMintAccount), common.ToCoreMintQuarks(100))
+		})
 	}
 }
 
@@ -3223,6 +3218,24 @@ func TestStatefulSwap_Stablecoin_Validation(t *testing.T) {
 			},
 			verify: func(t *testing.T, result *statefulSwapResult) {
 				result.requireDenied(t, "attempt to reuse swap funding id")
+			},
+		},
+		{
+			name: "swap version unset",
+			setup: func(t *testing.T, env *testEnv, req *statefulSwapRequest) {
+				req.stablecoin.SwapVersion = 0
+			},
+			verify: func(t *testing.T, result *statefulSwapResult) {
+				result.requireInvalidSwap(t, "swap version must be 2")
+			},
+		},
+		{
+			name: "swap version 1",
+			setup: func(t *testing.T, env *testEnv, req *statefulSwapRequest) {
+				req.stablecoin.SwapVersion = 1
+			},
+			verify: func(t *testing.T, result *statefulSwapResult) {
+				result.requireInvalidSwap(t, "swap version must be 2")
 			},
 		},
 		{
@@ -3768,7 +3781,10 @@ func requireProtoSwap(t *testing.T, req *statefulSwapRequest, result *statefulSw
 			},
 		}
 	} else {
-		params := req.stablecoin
+		// Swap records don't persist swap_version, so it's omitted from the
+		// returned metadata
+		params := proto.Clone(req.stablecoin).(*transactionpb.StatefulSwapRequest_Initiate_CoinbaseStableSwapperClientParameters)
+		params.SwapVersion = 0
 		expectedMetadata = &transactionpb.VerifiedSwapMetadata{
 			Kind: &transactionpb.VerifiedSwapMetadata_Stablecoin{
 				Stablecoin: &transactionpb.VerifiedCoinbaseStableSwapperSwapMetadata{ClientParameters: params},
@@ -3777,7 +3793,13 @@ func requireProtoSwap(t *testing.T, req *statefulSwapRequest, result *statefulSw
 	}
 	assert.True(t, proto.Equal(expectedMetadata, actual.VerifiedMetadata), "expected %v, got %v", expectedMetadata, actual.VerifiedMetadata)
 
-	marshalled, err := proto.Marshal(actual.VerifiedMetadata)
+	// Clients re-insert the swap_version they signed before verifying, which
+	// is always the required version
+	signedMetadata := proto.Clone(actual.VerifiedMetadata).(*transactionpb.VerifiedSwapMetadata)
+	if stablecoin := signedMetadata.GetStablecoin(); stablecoin != nil {
+		stablecoin.ClientParameters.SwapVersion = requiredCoinbaseSwapVersion
+	}
+	marshalled, err := proto.Marshal(signedMetadata)
 	require.NoError(t, err)
 	assert.True(t, ed25519.Verify(req.owner.PublicKey().ToBytes(), marshalled, actual.Signature.Value), "proof signature doesn't verify against the returned metadata")
 }
@@ -3790,10 +3812,7 @@ func TestGetSwap(t *testing.T) {
 	reserveResult := f.env.statefulSwap(t, reserveReq)
 	reserveResult.requireSuccess(t)
 
-	// Swap records don't persist the swap version, so use the legacy swap
-	// instruction, whose metadata the server can reproduce
 	stablecoinReq := f.env.stablecoinSwapRequest(t, f.owner, common.ToCoreMintQuarks(10))
-	stablecoinReq.stablecoin.SwapVersion = 0
 	stablecoinResult := f.env.statefulSwap(t, stablecoinReq)
 	stablecoinResult.requireSuccess(t)
 
@@ -3809,18 +3828,6 @@ func TestGetSwap(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, transactionpb.GetSwapResponse_OK, resp.Result)
 		requireProtoSwap(t, stablecoinReq, stablecoinResult, resp.Swap, transactionpb.SwapMetadata_CREATED)
-	})
-
-	t.Run("stablecoin with a swap version", func(t *testing.T) {
-		t.Skip("known bug: swap records don't persist swap_version, so toProtoSwap omits it and the proof signature doesn't verify against the returned metadata")
-
-		req := f.env.stablecoinSwapRequest(t, f.owner, common.ToCoreMintQuarks(10))
-		result := f.env.statefulSwap(t, req)
-		result.requireSuccess(t)
-
-		resp, err := f.env.getSwap(t, f.owner, req.swapId(), f.owner)
-		require.NoError(t, err)
-		requireProtoSwap(t, req, result, resp.Swap, transactionpb.SwapMetadata_CREATED)
 	})
 
 	t.Run("treasury funded new currency", func(t *testing.T) {
@@ -3896,11 +3903,9 @@ func TestGetPendingSwaps(t *testing.T) {
 		pendingResults[req.swapId()] = result
 	}
 
-	// A stablecoin swap is pending too. Its swap version isn't returned, so
-	// leave it unset to get metadata the proof signature verifies against.
+	// A stablecoin swap is pending too
 	f.env.setupCoinbasePool(t, common.ToCoreMintQuarks(1_000_000))
 	stablecoinReq := f.env.stablecoinSwapRequest(t, f.owner, common.ToCoreMintQuarks(10))
-	stablecoinReq.stablecoin.SwapVersion = 0
 	stablecoinResult := f.env.statefulSwap(t, stablecoinReq)
 	stablecoinResult.requireSuccess(t)
 	pending[stablecoinReq.swapId()] = stablecoinReq
@@ -3990,7 +3995,6 @@ func TestMakeStatelessSwapTransaction(t *testing.T) {
 		OutVault:                 testutil.NewRandomAccount(t).PublicKey().ToBytes(),
 		InVaultTokenAccount:      testutil.NewRandomAccount(t).PublicKey().ToBytes(),
 		OutVaultTokenAccount:     testutil.NewRandomAccount(t).PublicKey().ToBytes(),
-		Whitelist:                testutil.NewRandomAccount(t).PublicKey().ToBytes(),
 		FeeRecipient:             poolFeeRecipient.PublicKey().ToBytes(),
 		FeeRecipientTokenAccount: testutil.NewRandomAccount(t).PublicKey().ToBytes(),
 	}
@@ -3998,66 +4002,62 @@ func TestMakeStatelessSwapTransaction(t *testing.T) {
 	var blockhash solana.Blockhash
 	copy(blockhash[:], testutil.NewRandomAccount(t).PublicKey().ToBytes())
 
-	for _, swapVersion := range []transaction_util.CoinbaseSwapVersion{transaction_util.CoinbaseSwapV1, transaction_util.CoinbaseSwapV2} {
-		coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
-			swapVersion,
-			coinbaseAccounts,
-			owner.PublicKey().ToBytes(),
-			fromMint.PublicKey().ToBytes(),
-			common.CoreMintAccount.PublicKey().ToBytes(),
-			testutil.NewRandomAccount(t).PublicKey().ToBytes(),
-			depositAta,
-			1_000_000,
-			1_000_000,
-		)
+	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
+		coinbaseAccounts,
+		owner.PublicKey().ToBytes(),
+		fromMint.PublicKey().ToBytes(),
+		common.CoreMintAccount.PublicKey().ToBytes(),
+		testutil.NewRandomAccount(t).PublicKey().ToBytes(),
+		depositAta,
+		1_000_000,
+		1_000_000,
+	)
+
+	t.Run("txn v0", func(t *testing.T) {
+		txn, serverParameters, err := makeStatelessSwapTransaction(solana.MessageVersion0, blockhash, poolFeeRecipient, createDepositAtaIxn, coinbaseSwapIxn)
 		require.NoError(t, err)
 
-		t.Run("txn v0 swap "+swapVersion.String(), func(t *testing.T) {
-			txn, serverParameters, err := makeStatelessSwapTransaction(solana.MessageVersion0, blockhash, poolFeeRecipient, createDepositAtaIxn, coinbaseSwapIxn)
-			require.NoError(t, err)
+		assert.Equal(t, solana.MessageVersion0, txn.Message.Version)
+		assertCommonStatelessSwapServerParameters(t, serverParameters, blockhash, poolFeeRecipient)
+		assert.Equal(t, "coinbase_stable_swapper_v0", serverParameters.MemoValue)
+		assert.Equal(t, transaction_util.ToProtoAlts([]solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}), serverParameters.Alts)
+		assert.EqualValues(t, statelessSwapComputeUnitLimit, serverParameters.ComputeUnitLimit)
+		assert.EqualValues(t, statelessSwapComputeUnitPrice, serverParameters.ComputeUnitPrice)
+		assert.Nil(t, serverParameters.TransactionConfig)
 
-			assert.Equal(t, solana.MessageVersion0, txn.Message.Version)
-			assertCommonStatelessSwapServerParameters(t, serverParameters, blockhash, poolFeeRecipient)
-			assert.Equal(t, "coinbase_stable_swapper_v0", serverParameters.MemoValue)
-			assert.Equal(t, transaction_util.ToProtoAlts([]solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}), serverParameters.Alts)
-			assert.EqualValues(t, statelessSwapComputeUnitLimit, serverParameters.ComputeUnitLimit)
-			assert.EqualValues(t, statelessSwapComputeUnitPrice, serverParameters.ComputeUnitPrice)
-			assert.Nil(t, serverParameters.TransactionConfig)
+		requireClientRebuildMatches(t, txn, serverParameters, createDepositAtaIxn, coinbaseSwapIxn)
+	})
 
-			requireClientRebuildMatches(t, txn, serverParameters, createDepositAtaIxn, coinbaseSwapIxn)
-		})
+	t.Run("txn v1", func(t *testing.T) {
+		txn, serverParameters, err := makeStatelessSwapTransaction(solana.MessageVersion1, blockhash, poolFeeRecipient, createDepositAtaIxn, coinbaseSwapIxn)
+		require.NoError(t, err)
 
-		t.Run("txn v1 swap "+swapVersion.String(), func(t *testing.T) {
-			txn, serverParameters, err := makeStatelessSwapTransaction(solana.MessageVersion1, blockhash, poolFeeRecipient, createDepositAtaIxn, coinbaseSwapIxn)
-			require.NoError(t, err)
+		assert.Equal(t, solana.MessageVersion1, txn.Message.Version)
+		assert.Empty(t, txn.Message.AddressTableLookups)
+		assertCommonStatelessSwapServerParameters(t, serverParameters, blockhash, poolFeeRecipient)
+		assert.Equal(t, "coinbase_stable_swapper_v1", serverParameters.MemoValue)
+		assert.Empty(t, serverParameters.Alts)
+		assert.Zero(t, serverParameters.ComputeUnitLimit)
+		assert.Zero(t, serverParameters.ComputeUnitPrice)
 
-			assert.Equal(t, solana.MessageVersion1, txn.Message.Version)
-			assert.Empty(t, txn.Message.AddressTableLookups)
-			assertCommonStatelessSwapServerParameters(t, serverParameters, blockhash, poolFeeRecipient)
-			assert.Equal(t, "coinbase_stable_swapper_v1", serverParameters.MemoValue)
-			assert.Empty(t, serverParameters.Alts)
-			assert.Zero(t, serverParameters.ComputeUnitLimit)
-			assert.Zero(t, serverParameters.ComputeUnitPrice)
+		require.NotNil(t, serverParameters.TransactionConfig)
+		assert.EqualValues(t, statelessSwapComputeUnitLimit, serverParameters.TransactionConfig.ComputeUnitLimit)
+		assert.EqualValues(t, transaction_util.CoinbaseSwapLoadedAccountsDataSizeLimit, serverParameters.TransactionConfig.LoadedAccountsDataSizeLimit)
+		assert.EqualValues(t, 1_000, serverParameters.TransactionConfig.PriorityFeeLamports)
+		assert.Zero(t, serverParameters.TransactionConfig.HeapSize)
 
-			require.NotNil(t, serverParameters.TransactionConfig)
-			assert.EqualValues(t, statelessSwapComputeUnitLimit, serverParameters.TransactionConfig.ComputeUnitLimit)
-			assert.EqualValues(t, transaction_util.CoinbaseSwapLoadedAccountsDataSizeLimit, serverParameters.TransactionConfig.LoadedAccountsDataSizeLimit)
-			assert.EqualValues(t, 1_000, serverParameters.TransactionConfig.PriorityFeeLamports)
-			assert.Zero(t, serverParameters.TransactionConfig.HeapSize)
+		// ComputeBudget instructions are omitted in v1
+		for _, account := range txn.Message.Accounts {
+			assert.NotEqual(t, compute_budget.ProgramKey, account)
+		}
+		assert.Len(t, txn.Message.Instructions, 3)
 
-			// ComputeBudget instructions are omitted in v1
-			for _, account := range txn.Message.Accounts {
-				assert.NotEqual(t, compute_budget.ProgramKey, account)
-			}
-			assert.Len(t, txn.Message.Instructions, 3)
+		marshalled, err := txn.Marshal()
+		require.NoError(t, err)
+		assert.LessOrEqual(t, len(marshalled), solana.MaxV1TransactionSize)
 
-			marshalled, err := txn.Marshal()
-			require.NoError(t, err)
-			assert.LessOrEqual(t, len(marshalled), solana.MaxV1TransactionSize)
-
-			requireClientRebuildMatches(t, txn, serverParameters, createDepositAtaIxn, coinbaseSwapIxn)
-		})
-	}
+		requireClientRebuildMatches(t, txn, serverParameters, createDepositAtaIxn, coinbaseSwapIxn)
+	})
 
 	t.Run("unsupported version", func(t *testing.T) {
 		_, _, err := makeStatelessSwapTransaction(solana.MessageVersionLegacy, blockhash, poolFeeRecipient, createDepositAtaIxn, createDepositAtaIxn)
@@ -4286,27 +4286,24 @@ func TestStatelessSwap_ClientReceiveTimeout(t *testing.T) {
 
 func TestStatelessSwap_HappyPath(t *testing.T) {
 	for _, transactionVersion := range []uint32{0, 1} {
-		for _, swapVersion := range []transaction_util.CoinbaseSwapVersion{transaction_util.CoinbaseSwapV1, transaction_util.CoinbaseSwapV2} {
-			t.Run(fmt.Sprintf("txn v%d swap %s", transactionVersion, swapVersion), func(t *testing.T) {
-				env, owner := newStatelessSwapFixture(t, withAntispamChecks())
+		t.Run(fmt.Sprintf("txn v%d", transactionVersion), func(t *testing.T) {
+			env, owner := newStatelessSwapFixture(t, withAntispamChecks())
 
-				req := env.statelessSwapRequest(t, owner, 25*1_000_000)
-				req.transactionVersion = transactionVersion
-				req.params.SwapVersion = uint32(swapVersion)
+			req := env.statelessSwapRequest(t, owner, 25*1_000_000)
+			req.transactionVersion = transactionVersion
 
-				before := env.swapSnapshot(t, []*common.Account{owner})
-				result := env.statelessSwap(t, req)
-				require.NoError(t, result.err)
-				require.NotNil(t, result.resp.GetSuccess(), "expected success, got %v", result.resp)
-				assert.Equal(t, transactionpb.StatelessSwapResponse_Success_SUBMITTED, result.resp.GetSuccess().Code)
-				env.requireSubmitted(t, before, req, result)
+			before := env.swapSnapshot(t, []*common.Account{owner})
+			result := env.statelessSwap(t, req)
+			require.NoError(t, result.err)
+			require.NotNil(t, result.resp.GetSuccess(), "expected success, got %v", result.resp)
+			assert.Equal(t, transactionpb.StatelessSwapResponse_Success_SUBMITTED, result.resp.GetSuccess().Code)
+			env.requireSubmitted(t, before, req, result)
 
-				assert.Equal(t, selectSwapTransactionVersion(transactionVersion), result.expectedTxn.Message.Version)
-				assert.Equal(t, []string{
-					expectedAntispamSwapCall(swap.KindStablecoin, transactionpb.FundingSource_FUNDING_SOURCE_UNKNOWN, req.params.FromMint, req.params.ToMint, req.params.SwapAmount, 0, false),
-				}, env.antispamIntegration.getCalls())
-			})
-		}
+			assert.Equal(t, selectSwapTransactionVersion(transactionVersion), result.expectedTxn.Message.Version)
+			assert.Equal(t, []string{
+				expectedAntispamSwapCall(swap.KindStablecoin, transactionpb.FundingSource_FUNDING_SOURCE_UNKNOWN, req.params.FromMint, req.params.ToMint, req.params.SwapAmount, 0, false),
+			}, env.antispamIntegration.getCalls())
+		})
 	}
 }
 
@@ -4417,6 +4414,24 @@ func TestStatelessSwap_Validation(t *testing.T) {
 		setup  func(t *testing.T, env *testEnv, req *statelessSwapRequest)
 		verify func(t *testing.T, result *statelessSwapResult)
 	}{
+		{
+			name: "swap version unset",
+			setup: func(t *testing.T, env *testEnv, req *statelessSwapRequest) {
+				req.params.SwapVersion = 0
+			},
+			verify: func(t *testing.T, result *statelessSwapResult) {
+				result.requireInvalidSwap(t, "swap version must be 2")
+			},
+		},
+		{
+			name: "swap version 1",
+			setup: func(t *testing.T, env *testEnv, req *statelessSwapRequest) {
+				req.params.SwapVersion = 1
+			},
+			verify: func(t *testing.T, result *statelessSwapResult) {
+				result.requireInvalidSwap(t, "swap version must be 2")
+			},
+		},
 		{
 			name: "source isn't usdc",
 			setup: func(t *testing.T, env *testEnv, req *statelessSwapRequest) {
@@ -4614,6 +4629,7 @@ func TestStatefulSwap_Coinbase_TransactionVersionV1(t *testing.T) {
 						FundingSource:    transactionpb.FundingSource_FUNDING_SOURCE_SUBMIT_INTENT,
 						FundingId:        testutil.NewRandomAccount(t).PublicKey().ToBase58(),
 						DestinationOwner: testutil.NewRandomAccount(t).ToProto(),
+						SwapVersion:      requiredCoinbaseSwapVersion,
 					},
 				},
 			},
@@ -4663,9 +4679,10 @@ func TestStatelessSwap_TransactionVersionV1Accepted(t *testing.T) {
 	initiate := &transactionpb.StatelessSwapRequest_Initiate{
 		Kind: &transactionpb.StatelessSwapRequest_Initiate_Stablecoin{
 			Stablecoin: &transactionpb.StatelessSwapRequest_Initiate_CoinbaseStableSwapperClientParameters{
-				FromMint:   common.CoreMintAccount.ToProto(),
-				ToMint:     common.CoreMintAccount.ToProto(),
-				SwapAmount: common.CoreMintQuarksPerUnit,
+				FromMint:    common.CoreMintAccount.ToProto(),
+				ToMint:      common.CoreMintAccount.ToProto(),
+				SwapAmount:  common.CoreMintQuarksPerUnit,
+				SwapVersion: requiredCoinbaseSwapVersion,
 			},
 		},
 		Owner:              owner.ToProto(),
@@ -4722,79 +4739,76 @@ func TestCoinbaseStableSwapperSwapHandler_TransactionVersions(t *testing.T) {
 	const swapAmount, feeAmount = 5_000_000, 500_000
 
 	for _, transactionVersion := range []solana.MessageVersion{solana.MessageVersion0, solana.MessageVersion1} {
-		for _, coinbaseSwapVersion := range []transaction_util.CoinbaseSwapVersion{transaction_util.CoinbaseSwapV1, transaction_util.CoinbaseSwapV2} {
-			t.Run("txn "+transactionVersion.String()+" swap "+coinbaseSwapVersion.String(), func(t *testing.T) {
-				h := NewCoinbaseStableSwapperSwapHandler(
-					env.data,
-					owner,
-					swapAuthority,
-					destinationOwner,
-					fromMint,
-					toMint,
-					swapAmount,
-					feeAmount,
-					selectedNonce,
-					transactionVersion,
-					coinbaseSwapVersion,
-				)
+		t.Run("txn "+transactionVersion.String(), func(t *testing.T) {
+			h := NewCoinbaseStableSwapperSwapHandler(
+				env.data,
+				owner,
+				swapAuthority,
+				destinationOwner,
+				fromMint,
+				toMint,
+				swapAmount,
+				feeAmount,
+				selectedNonce,
+				transactionVersion,
+			)
 
-				txn, err := makeStatefulSwapTransaction(env.ctx, h)
+			txn, err := makeStatefulSwapTransaction(env.ctx, h)
+			require.NoError(t, err)
+			txn.SetBlockhash(selectedNonce.Blockhash)
+
+			serverParameters := h.GetServerParameters().GetStablecoin()
+			require.NotNil(t, serverParameters)
+
+			assert.Equal(t, transactionVersion, txn.Message.Version)
+			assert.Equal(t, common.GetSubsidizer().PublicKey().ToBytes(), serverParameters.Payer.Value)
+			assert.Equal(t, selectedNonce.Account.PublicKey().ToBytes(), serverParameters.Nonce.Value)
+			assert.Equal(t, blockhash[:], serverParameters.Blockhash.Value)
+			assert.Equal(t, common.CoreMintFeesAccount.PublicKey().ToBytes(), serverParameters.FeeDestination.Value)
+
+			switch transactionVersion {
+			case solana.MessageVersion0:
+				assert.Equal(t, "coinbase_stable_swapper_v0", serverParameters.MemoValue)
+				assert.Equal(t, transaction_util.ToProtoAlts([]solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}), serverParameters.Alts)
+				assert.EqualValues(t, 125_000, serverParameters.ComputeUnitLimit)
+				assert.EqualValues(t, 10_000, serverParameters.ComputeUnitPrice)
+				assert.Nil(t, serverParameters.TransactionConfig)
+				assert.Nil(t, h.GetTransactionConfig())
+			case solana.MessageVersion1:
+				assert.Equal(t, "coinbase_stable_swapper_v1", serverParameters.MemoValue)
+				assert.Empty(t, serverParameters.Alts)
+				assert.Zero(t, serverParameters.ComputeUnitLimit)
+				assert.Zero(t, serverParameters.ComputeUnitPrice)
+
+				require.NotNil(t, serverParameters.TransactionConfig)
+				assert.EqualValues(t, 125_000, serverParameters.TransactionConfig.ComputeUnitLimit)
+				assert.EqualValues(t, transaction_util.CoinbaseSwapLoadedAccountsDataSizeLimit, serverParameters.TransactionConfig.LoadedAccountsDataSizeLimit)
+				assert.EqualValues(t, 1_250, serverParameters.TransactionConfig.PriorityFeeLamports)
+				assert.Zero(t, serverParameters.TransactionConfig.HeapSize)
+
+				assert.Empty(t, txn.Message.AddressTableLookups)
+				for _, account := range txn.Message.Accounts {
+					assert.NotEqual(t, compute_budget.ProgramKey, account)
+				}
+				assert.Len(t, txn.Message.Instructions, 7)
+
+				marshalled, err := txn.Marshal()
 				require.NoError(t, err)
-				txn.SetBlockhash(selectedNonce.Blockhash)
+				assert.LessOrEqual(t, len(marshalled), solana.MaxV1TransactionSize)
+			}
 
-				serverParameters := h.GetServerParameters().GetStablecoin()
-				require.NotNil(t, serverParameters)
-
-				assert.Equal(t, transactionVersion, txn.Message.Version)
-				assert.Equal(t, common.GetSubsidizer().PublicKey().ToBytes(), serverParameters.Payer.Value)
-				assert.Equal(t, selectedNonce.Account.PublicKey().ToBytes(), serverParameters.Nonce.Value)
-				assert.Equal(t, blockhash[:], serverParameters.Blockhash.Value)
-				assert.Equal(t, common.CoreMintFeesAccount.PublicKey().ToBytes(), serverParameters.FeeDestination.Value)
-
-				switch transactionVersion {
-				case solana.MessageVersion0:
-					assert.Equal(t, "coinbase_stable_swapper_v0", serverParameters.MemoValue)
-					assert.Equal(t, transaction_util.ToProtoAlts([]solana.AddressLookupTable{transaction_util.GetAltForCoreMint()}), serverParameters.Alts)
-					assert.EqualValues(t, 125_000, serverParameters.ComputeUnitLimit)
-					assert.EqualValues(t, 10_000, serverParameters.ComputeUnitPrice)
-					assert.Nil(t, serverParameters.TransactionConfig)
-					assert.Nil(t, h.GetTransactionConfig())
-				case solana.MessageVersion1:
-					assert.Equal(t, "coinbase_stable_swapper_v1", serverParameters.MemoValue)
-					assert.Empty(t, serverParameters.Alts)
-					assert.Zero(t, serverParameters.ComputeUnitLimit)
-					assert.Zero(t, serverParameters.ComputeUnitPrice)
-
-					require.NotNil(t, serverParameters.TransactionConfig)
-					assert.EqualValues(t, 125_000, serverParameters.TransactionConfig.ComputeUnitLimit)
-					assert.EqualValues(t, transaction_util.CoinbaseSwapLoadedAccountsDataSizeLimit, serverParameters.TransactionConfig.LoadedAccountsDataSizeLimit)
-					assert.EqualValues(t, 1_250, serverParameters.TransactionConfig.PriorityFeeLamports)
-					assert.Zero(t, serverParameters.TransactionConfig.HeapSize)
-
-					assert.Empty(t, txn.Message.AddressTableLookups)
-					for _, account := range txn.Message.Accounts {
-						assert.NotEqual(t, compute_budget.ProgramKey, account)
-					}
-					assert.Len(t, txn.Message.Instructions, 7)
-
-					marshalled, err := txn.Marshal()
-					require.NoError(t, err)
-					assert.LessOrEqual(t, len(marshalled), solana.MaxV1TransactionSize)
+			// The owner and swap authority are the client signers
+			var clientSigners int
+			for i := range int(txn.Message.Header.NumSignatures) {
+				account := txn.Message.Accounts[i]
+				if bytes.Equal(account, owner.PublicKey().ToBytes()) || bytes.Equal(account, swapAuthority.PublicKey().ToBytes()) {
+					clientSigners++
 				}
+			}
+			assert.Equal(t, 2, clientSigners)
 
-				// The owner and swap authority are the client signers
-				var clientSigners int
-				for i := range int(txn.Message.Header.NumSignatures) {
-					account := txn.Message.Accounts[i]
-					if bytes.Equal(account, owner.PublicKey().ToBytes()) || bytes.Equal(account, swapAuthority.PublicKey().ToBytes()) {
-						clientSigners++
-					}
-				}
-				assert.Equal(t, 2, clientSigners)
-
-				requireCoinbaseStatefulClientRebuildMatches(t, env, txn, serverParameters, owner, swapAuthority, destinationOwner, fromMint, toMint, swapAmount, feeAmount, coinbaseSwapVersion)
-			})
-		}
+			requireCoinbaseStatefulClientRebuildMatches(t, env, txn, serverParameters, owner, swapAuthority, destinationOwner, fromMint, toMint, swapAmount, feeAmount)
+		})
 	}
 }
 
@@ -4809,7 +4823,6 @@ func requireCoinbaseStatefulClientRebuildMatches(
 	params *transactionpb.StatefulSwapResponse_ServerParameters_CoinbaseStableSwapperServerParameter,
 	owner, swapAuthority, destinationOwner, fromMint, toMint *common.Account,
 	swapAmount, feeAmount uint64,
-	coinbaseSwapVersion transaction_util.CoinbaseSwapVersion,
 ) {
 	payer := params.Payer.Value
 
@@ -4827,8 +4840,7 @@ func requireCoinbaseStatefulClientRebuildMatches(
 	require.NoError(t, err)
 	require.Equal(t, []byte(coinbaseAccounts.FeeRecipient), params.PoolFeeRecipient.Value)
 
-	coinbaseSwapIxn, err := transaction_util.MakeCoinbaseSwapInstruction(
-		coinbaseSwapVersion,
+	coinbaseSwapIxn := transaction_util.MakeCoinbaseSwapInstruction(
 		coinbaseAccounts,
 		swapAuthority.PublicKey().ToBytes(),
 		fromMint.PublicKey().ToBytes(),
@@ -4838,7 +4850,6 @@ func requireCoinbaseStatefulClientRebuildMatches(
 		swapAmount,
 		swapAmount,
 	)
-	require.NoError(t, err)
 
 	ixns := []solana.Instruction{system.AdvanceNonce(params.Nonce.Value, payer)}
 	if params.TransactionConfig == nil {
@@ -5157,14 +5168,6 @@ func TestReserveSwapHandlers_TransactionVersions(t *testing.T) {
 			assert.LessOrEqual(t, len(marshalled), solana.MaxV1TransactionSize)
 		})
 	}
-}
-
-func TestSelectCoinbaseSwapVersion(t *testing.T) {
-	// Unset (older clients) and 1 both use the legacy swap instruction
-	assert.Equal(t, transaction_util.CoinbaseSwapV1, selectCoinbaseSwapVersion(0))
-	assert.Equal(t, transaction_util.CoinbaseSwapV1, selectCoinbaseSwapVersion(1))
-
-	assert.Equal(t, transaction_util.CoinbaseSwapV2, selectCoinbaseSwapVersion(2))
 }
 
 func TestSelectSwapTransactionVersion(t *testing.T) {
