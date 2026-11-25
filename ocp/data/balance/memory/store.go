@@ -206,7 +206,10 @@ func (s *store) ApplyDeltas(_ context.Context, deltas ...*balance.Delta) error {
 		}
 	}
 
-	merged := balance.MergeDeltas(deltas)
+	merged, err := balance.MergeDeltas(deltas)
+	if err != nil {
+		return err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/code-payments/ocp-server/grpc/client"
 	"github.com/code-payments/ocp-server/ocp/common"
 	currency_util "github.com/code-payments/ocp-server/ocp/currency"
+	"github.com/code-payments/ocp-server/ocp/data/intent"
 	"github.com/code-payments/ocp-server/ocp/rpc"
 )
 
@@ -84,4 +86,45 @@ func (s *transactionServer) GetLimits(ctx context.Context, req *transactionpb.Ge
 		SendLimitsByCurrency: sendLimits,
 		UsdTransacted:        consumedUsdForPayments,
 	}, nil
+}
+
+// validateIntentQuarks bounds every client amount on a new intent to the most
+// its mint allows. Totals are checked while summing, so they can't overflow.
+func validateIntentQuarks(mint *common.Account, intentRecord *intent.Record) error {
+	var quantity uint64
+	var parts []uint64
+	switch intentRecord.IntentType {
+	case intent.OpenAccounts:
+		return nil
+	case intent.SendPublicPayment:
+		quantity = intentRecord.SendPublicPaymentMetadata.Quantity
+	case intent.ReceivePaymentsPublicly:
+		quantity = intentRecord.ReceivePaymentsPubliclyMetadata.Quantity
+	case intent.PublicDistribution:
+		quantity = intentRecord.PublicDistributionMetadata.Quantity
+		for _, distribution := range intentRecord.PublicDistributionMetadata.Distributions {
+			parts = append(parts, distribution.Quantity)
+		}
+	case intent.SendPublicMultiPayment:
+		quantity = intentRecord.SendPublicMultiPaymentMetadata.Quantity
+		for _, payment := range intentRecord.SendPublicMultiPaymentMetadata.Payments {
+			parts = append(parts, payment.Quantity)
+		}
+	default:
+		return errors.New("unsupported intent type")
+	}
+
+	maxQuarks := currency_util.GetMaxQuarks(mint)
+
+	var total uint64
+	for _, part := range parts {
+		if part > maxQuarks || total+part > maxQuarks {
+			return NewIntentValidationErrorf("quantity exceeds max of %d quarks", maxQuarks)
+		}
+		total += part
+	}
+	if quantity > maxQuarks {
+		return NewIntentValidationErrorf("quantity exceeds max of %d quarks", maxQuarks)
+	}
+	return nil
 }

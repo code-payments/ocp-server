@@ -1,6 +1,11 @@
 package currency
 
-import currency_lib "github.com/code-payments/ocp-server/currency"
+import (
+	currency_lib "github.com/code-payments/ocp-server/currency"
+	"github.com/code-payments/ocp-server/ocp/common"
+	"github.com/code-payments/ocp-server/ocp/config"
+	"github.com/code-payments/ocp-server/solana/currencycreator"
+)
 
 type SendLimit struct {
 	PerTransaction float64
@@ -10,7 +15,20 @@ const (
 	MaxDailyUsdLimit = 5_000.00
 
 	SendLimitMultiplier = 20
+
+	// The most quarks a client may move in a single intent or action
+	MaxCoreMintQuarks          = 1_000_000_000 * config.CoreMintQuarksPerUnit
+	MaxLaunchpadCurrencyQuarks = currencycreator.DefaultMintMaxQuarkSupply
 )
+
+// GetMaxQuarks returns the most quarks of a mint a client may move in a single
+// intent or action. Launchpad currencies are bounded by their max supply.
+func GetMaxQuarks(mint *common.Account) uint64 {
+	if common.IsCoreMint(mint) {
+		return MaxCoreMintQuarks
+	}
+	return MaxLaunchpadCurrencyQuarks
+}
 
 var SendLimits = applySendLimitMultiplier(baseSendLimits, SendLimitMultiplier)
 

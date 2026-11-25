@@ -4035,6 +4035,45 @@ func runPaymentValidationTestCases(t *testing.T, testCases []paymentValidationTe
 func TestSubmitIntent_SendPublicPayment_Direct_Validation(t *testing.T) {
 	runPaymentValidationTestCases(t, []paymentValidationTestCase{
 		{
+			name: "quarks exceed core mint max",
+			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
+				return f.env.directPaymentRequest(t, f.sender, f.receiverVault(t), common.CoreMintAccount, currency_util.MaxCoreMintQuarks+1)
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("quantity exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
+		{
+			// Wraps to -1 as an int64, which would otherwise credit the sender
+			// and debit the receiver
+			name: "quarks wrap int64",
+			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
+				return f.env.directPaymentRequest(t, f.sender, f.receiverVault(t), common.CoreMintAccount, math.MaxUint64)
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("quantity exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
+		{
+			name: "action amount exceeds core mint max",
+			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
+				req := f.env.directPaymentRequest(t, f.sender, f.receiverVault(t), common.CoreMintAccount, common.ToCoreMintQuarks(1))
+				req.actions[0] = f.env.transferAction(t, 0, f.sender, f.receiverVault(t), common.CoreMintAccount, currency_util.MaxCoreMintQuarks+1)
+				return req
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("amount exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
+		{
+			name: "quarks exceed launchpad currency max",
+			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
+				mint := f.env.newLaunchpadMint(t)
+				f.env.openAccount(t, f.sender, f.sender, mint, commonpb.AccountType_PRIMARY, 0)
+				f.env.openAccount(t, f.receiver, f.receiver, mint, commonpb.AccountType_PRIMARY, 0)
+				return f.env.directPaymentRequest(t, f.sender, f.env.getVault(t, f.receiver, mint), mint, currency_util.MaxLaunchpadCurrencyQuarks+1)
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("quantity exceeds max of %d quarks", uint64(currency_util.MaxLaunchpadCurrencyQuarks)),
+		},
+		{
 			name: "server exchange data",
 			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
 				req := f.env.directPaymentRequest(t, f.sender, f.receiverVault(t), common.CoreMintAccount, common.ToCoreMintQuarks(1))
@@ -4567,6 +4606,17 @@ func TestSubmitIntent_SendPublicPayment_Withdrawal_Validation(t *testing.T) {
 	quarks := common.ToCoreMintQuarks(10)
 
 	runPaymentValidationTestCases(t, []paymentValidationTestCase{
+		{
+			name: "fee amount wraps int64",
+			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
+				destination := toAta(t, f.env.newAccount(t), common.CoreMintAccount)
+				req := f.env.withdrawalRequest(t, f.sender, destination, nil, common.CoreMintAccount, quarks, withdrawalFeeQuarks)
+				req.actions[1] = f.env.feePaymentAction(t, 1, f.sender, common.CoreMintAccount, math.MaxUint64)
+				return req
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("amount exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
 		{
 			name: "too many actions",
 			build: func(t *testing.T, f *paymentFixture) *submitIntentRequest {
@@ -5891,6 +5941,40 @@ func TestSubmitIntent_SendPublicMultiPayment_Validation(t *testing.T) {
 		expectedCode   transactionpb.SubmitIntentResponse_Error_Code
 		expectedReason string
 	}{
+		{
+			name: "payment quarks exceed max",
+			build: func(t *testing.T, f *fixture) *submitIntentRequest {
+				return newRequest(t, f,
+					testMultiPayment{destination: vault(t, f, f.receiver1), quarks: common.ToCoreMintQuarks(10)},
+					testMultiPayment{destination: vault(t, f, f.receiver2), quarks: currency_util.MaxCoreMintQuarks + 1},
+				)
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("quantity exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
+		{
+			name: "payment quarks total exceeds max",
+			build: func(t *testing.T, f *fixture) *submitIntentRequest {
+				return newRequest(t, f,
+					testMultiPayment{destination: vault(t, f, f.receiver1), quarks: currency_util.MaxCoreMintQuarks},
+					testMultiPayment{destination: vault(t, f, f.receiver2), quarks: 1},
+				)
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("quantity exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
+		{
+			// The summed intent quantity wraps to 0
+			name: "payment quarks total wraps uint64",
+			build: func(t *testing.T, f *fixture) *submitIntentRequest {
+				return newRequest(t, f,
+					testMultiPayment{destination: vault(t, f, f.receiver1), quarks: 1 << 63},
+					testMultiPayment{destination: vault(t, f, f.receiver2), quarks: 1 << 63},
+				)
+			},
+			expectedCode:   transactionpb.SubmitIntentResponse_Error_INVALID_INTENT,
+			expectedReason: fmt.Sprintf("quantity exceeds max of %d quarks", currency_util.MaxCoreMintQuarks),
+		},
 		{
 			name: "server exchange data",
 			build: func(t *testing.T, f *fixture) *submitIntentRequest {

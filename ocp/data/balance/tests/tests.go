@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -253,6 +254,19 @@ func testApplyDeltas(t *testing.T, s balance.Store) {
 		// Invalid deltas are rejected
 		assert.Error(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit}))
 		assert.Error(t, s.ApplyDeltas(ctx, &balance.Delta{Kind: balance.DeltaCredit, Quarks: 1}))
+
+		// Amounts too large to store as a signed balance are rejected, alone or
+		// once merged, rather than wrapping and inverting the delta
+		for _, kind := range []balance.DeltaKind{balance.DeltaCredit, balance.DeltaDebit, balance.DeltaDrain} {
+			assert.Equal(t, balance.ErrDeltaQuarksOverflow, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: kind, Quarks: math.MaxUint64}))
+			assert.Equal(t, balance.ErrDeltaQuarksOverflow, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: kind, Quarks: balance.MaxDeltaQuarks + 1}))
+		}
+		assert.Equal(t, balance.ErrDeltaQuarksOverflow, s.ApplyDeltas(
+			ctx,
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: balance.MaxDeltaQuarks},
+			&balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 1},
+		))
+		assertBalance(t, s, "token_account_1", 0, 0, true)
 
 		require.NoError(t, s.ApplyDeltas(ctx, &balance.Delta{TokenAccount: "token_account_1", Kind: balance.DeltaCredit, Quarks: 100, UsdCostBasis: 50}))
 		assertBalance(t, s, "token_account_1", 100, 50, true)
