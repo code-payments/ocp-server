@@ -279,6 +279,12 @@ func (s *transactionServer) SubmitIntent(streamer transactionpb.Transaction_Subm
 		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
 	}
 
+	err = validateIntentQuarks(mintAccount, intentRecord)
+	if err != nil {
+		log.With(zap.Error(err)).Warn("new intent failed quark validation")
+		return handleSubmitIntentError(ctx, streamer, intentRecord, err)
+	}
+
 	// Store any optional app-level metadata provided alongside the intent
 	if appMetadata := submitActionsReq.Metadata.GetAppMetadata(); appMetadata != nil {
 		intentRecord.AppMetadata = appMetadata.Value

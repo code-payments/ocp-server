@@ -118,7 +118,11 @@ func (s *store) ApplyDeltas(ctx context.Context, deltas ...*balance.Delta) error
 		}
 	}
 
-	return dbApplyDeltas(ctx, s.db, balance.MergeDeltas(deltas))
+	merged, err := balance.MergeDeltas(deltas)
+	if err != nil {
+		return err
+	}
+	return dbApplyDeltas(ctx, s.db, merged)
 }
 
 func fromModels(models []*model) []*balance.Record {

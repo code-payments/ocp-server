@@ -9,6 +9,7 @@ import (
 
 	"github.com/code-payments/ocp-server/ocp/balance"
 	"github.com/code-payments/ocp-server/ocp/common"
+	currency_util "github.com/code-payments/ocp-server/ocp/currency"
 	ocp_data "github.com/code-payments/ocp-server/ocp/data"
 	"github.com/code-payments/ocp-server/ocp/data/account"
 	"github.com/code-payments/ocp-server/ocp/data/timelock"
@@ -120,6 +121,9 @@ func LocalSimulation(ctx context.Context, data ocp_data.Provider, actions []*tra
 			}
 
 			amount := typedAction.NoPrivacyTransfer.Amount
+			if err := validateActionQuarks(action, mint, amount); err != nil {
+				return nil, err
+			}
 
 			simulations = append(
 				simulations,
@@ -162,6 +166,9 @@ func LocalSimulation(ctx context.Context, data ocp_data.Provider, actions []*tra
 			}
 
 			amount := typedAction.FeePayment.Amount
+			if err := validateActionQuarks(action, mint, amount); err != nil {
+				return nil, err
+			}
 
 			simulations = append(
 				simulations,
@@ -201,6 +208,9 @@ func LocalSimulation(ctx context.Context, data ocp_data.Provider, actions []*tra
 			}
 
 			amount := typedAction.NoPrivacyWithdraw.Amount
+			if err := validateActionQuarks(action, mint, amount); err != nil {
+				return nil, err
+			}
 
 			if source.PublicKey().ToBase58() == destination.PublicKey().ToBase58() {
 				return nil, NewActionValidationError(action, "source and destination accounts must be different")
@@ -376,6 +386,13 @@ func LocalSimulation(ctx context.Context, data ocp_data.Provider, actions []*tra
 	}
 
 	return result, nil
+}
+
+func validateActionQuarks(action *transactionpb.Action, mint *common.Account, quarks uint64) error {
+	if maxQuarks := currency_util.GetMaxQuarks(mint); quarks > maxQuarks {
+		return NewActionValidationErrorf(action, "amount exceeds max of %d quarks", maxQuarks)
+	}
+	return nil
 }
 
 func (s TokenAccountSimulation) EnforceBalances(ctx context.Context, data ocp_data.Provider, currentBalance uint64) error {

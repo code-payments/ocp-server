@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeDeltas(t *testing.T) {
@@ -25,7 +26,8 @@ func TestMergeDeltas(t *testing.T) {
 		original[i] = *delta
 	}
 
-	merged := MergeDeltas(input)
+	merged, err := MergeDeltas(input)
+	require.NoError(t, err)
 
 	assert.Equal(t, []*Delta{
 		{TokenAccount: "a", Kind: DeltaCredit, Quarks: 4, UsdCostBasis: 40},
@@ -43,5 +45,14 @@ func TestMergeDeltas(t *testing.T) {
 		assert.Equal(t, original[i], *delta)
 	}
 
-	assert.Empty(t, MergeDeltas(nil))
+	merged, err = MergeDeltas(nil)
+	require.NoError(t, err)
+	assert.Empty(t, merged)
+
+	// Combined amounts can't exceed what a delta can carry
+	_, err = MergeDeltas([]*Delta{
+		{TokenAccount: "a", Kind: DeltaCredit, Quarks: MaxDeltaQuarks},
+		{TokenAccount: "a", Kind: DeltaCredit, Quarks: 1},
+	})
+	assert.Equal(t, ErrDeltaQuarksOverflow, err)
 }

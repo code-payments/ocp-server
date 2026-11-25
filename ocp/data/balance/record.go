@@ -12,6 +12,13 @@ import (
 // USD cost basis is exactly its quark balance.
 const UsdQuarksPerUnit = 1_000_000
 
+// MaxDeltaQuarks is the most quarks a delta can carry. Balances are stored as
+// signed 64-bit integers, so anything larger would wrap to a negative amount
+// and invert the delta.
+const MaxDeltaQuarks = math.MaxInt64
+
+var ErrDeltaQuarksOverflow = errors.New("delta quarks exceed max")
+
 // UsdCostBasisFromFloat converts a USD value into UsdQuarksPerUnit, rounding
 // to the nearest unit. This is the single conversion point, so every caller
 // rounds identically.
@@ -155,6 +162,9 @@ func (d *Delta) Validate() error {
 		if d.Quarks == 0 && d.UsdCostBasis == 0 {
 			return errors.New("delta is a no-op")
 		}
+		if d.Quarks > MaxDeltaQuarks {
+			return ErrDeltaQuarksOverflow
+		}
 	case DeltaAdjustUsdCostBasis:
 		if d.Quarks != 0 {
 			return errors.New("cost basis adjustment cannot move quarks")
@@ -189,7 +199,7 @@ func SortDeltas(deltas []*Delta) {
 // monotonic in the amount, but it touches the row once. Drains and closes are
 // never merged, since an account can only legitimately be drained or closed
 // once.
-func MergeDeltas(deltas []*Delta) []*Delta {
+func MergeDeltas(deltas []*Delta) ([]*Delta, error) {
 	sorted := make([]*Delta, len(deltas))
 	copy(sorted, deltas)
 	SortDeltas(sorted)
@@ -199,6 +209,9 @@ func MergeDeltas(deltas []*Delta) []*Delta {
 		if len(merged) > 0 {
 			last := merged[len(merged)-1]
 			if last.TokenAccount == delta.TokenAccount && last.Kind == delta.Kind && (delta.Kind == DeltaCredit || delta.Kind == DeltaDebit || delta.Kind == DeltaAdjustUsdCostBasis) {
+				if last.Quarks > MaxDeltaQuarks || delta.Quarks > MaxDeltaQuarks-last.Quarks {
+					return nil, ErrDeltaQuarksOverflow
+				}
 				last.Quarks += delta.Quarks
 				last.UsdCostBasis += delta.UsdCostBasis
 				continue
@@ -207,7 +220,7 @@ func MergeDeltas(deltas []*Delta) []*Delta {
 		cloned := *delta
 		merged = append(merged, &cloned)
 	}
-	return merged
+	return merged, nil
 }
 
 func (k DeltaKind) String() string {
